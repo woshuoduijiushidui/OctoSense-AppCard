@@ -9,12 +9,12 @@
   },
   "id": "pantry-steward",
   "integrity": {
-    "bundle_blake3": "dc84e64118f807df78330248827d80e98394dd70c1cb1eda67034a4f3e7cfa98"
+    "bundle_blake3": "2e3a4e858a35e5e57f090736c346d2aa2b1649c94ea9332aa3ab2e96b5cbe2a7"
   },
   "name": "冰箱管家",
   "schema": 1,
   "storage": {
     "max_bytes": 16777216
   },
-  "version": "0.4.1"
+  "version": "0.6.1"
 }

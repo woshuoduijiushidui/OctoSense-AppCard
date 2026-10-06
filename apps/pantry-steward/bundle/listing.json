@@ -8,11 +8,11 @@
   "icon": "assets/icon.svg",
   "platforms": ["windows"],
   "publisher": {
-    "name": "待作者确认",
+    "name": "leoniaodo,zix,power胖丸,Roooy",
     "support": "https://github.com/woshuoduijiushidui/OcSense-AppCard/issues",
     "privacy_policy_url": "https://github.com/woshuoduijiushidui/OcSense-AppCard/blob/main/apps/pantry-steward/PRIVACY.md"
   },
-  "release_notes": "0.4.1：迁移到未修改的官方 OctoSense；适配官方 model.budget 返回值；移除自定义语音服务依赖和 microphone 权限，保留暂不可用提示；使用独立本机测试目录。源应用包未签名，测试镜像使用本机测试签名，不代表正式发布。",
+  "release_notes": "0.6.1：新增选择并确认7、21、30天周期方案、今日及周期余额校验、用餐累计和周期存档。保留原桌面布局、默认手动生成、删除菜谱及官方宿主AI。旧库存和历史菜谱保留；继续规划前需确认具体周期。成分未知的食材需补包装标签，数值仅为原型估算。语音识别暂不可用。源应用包未签名，尚未正式发布。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }
