@@ -1,5 +1,83 @@
 # Migration validation
 
+## Stage locking and future-stage editing, 2026-10-10 — unreleased 0.6.2 working tree
+
+Implementation for Issue #10. A confirmed plan can be edited only in front of
+its started date.
+
+- `bundle/main.splash`: `stage_locked` treats a stage as locked from the day its
+  start date arrives (`floor(started / 86400) <= health_day()`), which also
+  covers a user who has fallen behind on logging. `stage_lock_hint` explains the
+  reason; the Archive-tab row for a started stage shows the reason and offers no
+  edit controls, while an unstarted stage gets 上移 / 下移 / 改目标 / 移除.
+  `stage_move`, `stage_remove` and `stage_replace` refuse any locked target, and
+  `stage_replace` snapshots another candidate (same or different cycle) over a
+  future stage, so 替换 and 改目标 share one safe path. `relayout_stages`
+  re-anchors the not-yet-started suffix end-to-start from the fixed locked
+  prefix; `future_stage_names` names the affected future goals in the notice.
+  `plan_done_meals` / `plan_planned_meals` / `plan_progress_percent` show plan
+  progress, whose denominator changes with an edit while the confirmed numerator
+  does not. Later stages' nutrient targets are deliberately left as their own
+  snapshots (docs/adr/0001); an edit moves their date ranges and the plan
+  totals, not their targets. `migrate_state` now fills only the missing
+  `intake`/`consumed_*` keys of a legacy stage, so an existing aggregate is
+  never zeroed by the migration.
+- Storage schema stays 1; no new stored field. Only `started`, `name`, `days`,
+  `goal` and the four target fields of an unstarted stage can change, so a
+  locked stage's `consumed_*` and `intake` are byte-identical across edits.
+- `tools/qa_release.py` now confirms a 7+15+30-day plan and then exercises:
+  the calendar lock reason, reorder of only the future suffix, retargeting a
+  future stage to a 1-day candidate, one real confirmed meal on the started
+  stage, and a later future-stage removal that leaves that meal intact while
+  the plan totals fall from 52 to 22 days. `tools/test_release.py` guards the
+  new symbols. Bilingual READMEs and `CYCLE-PLANS.md` describe the flow.
+
+### Native run, 2026-10-10 — unreleased 0.6.2 working tree
+
+- Restamped the editable bundle with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 1ef42dcfadb48fda8ad0f4621b98a902db1f4f0b1e0ea7196018a55c72f0e185`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts).
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-issue10`:
+  `tools/qa_release.py --port 18528 --profile .local-state/qa-issue10` —
+  **21/21 checks passed**, then `--restart` preserved the exact synthetic state.
+  New checks: the started stage locks by calendar with a readable reason;
+  reorder touches only the not-yet-started stages and names the moved future
+  goals; retargeting a future stage snapshots the new candidate while the
+  locked stage stays byte-identical; a confirmed meal records on the started
+  stage and survives a later edit to a future stage; the plan totals recalculate
+  (52 -> 22 days) with the confirmed count unchanged.
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures: `docs/qa/issue-10-stage-lock.png` (three stages, the current
+  one locked with its calendar reason, the next editable) and
+  `docs/qa/issue-10-future-edited.png` (progress 1/44 after a future-stage
+  removal). These are hidden Card-runtime captures of synthetic data.
+- The bundle had only 8,639 bytes under the 8 MiB package guard once the new
+  code was added, so the five bundled PNGs (`assets/sunlit-pantry-bg.png` and
+  the four `screenshots/*.png`) were recompressed losslessly with Pillow
+  (`optimize=True`). Pixels are identical (verified by decoding before/after);
+  bundle total is now 7,831,339 bytes.
+
+### Still unverified
+
+- A two-axis review (Standards + Spec) of the commit found no blocker. Acting on
+  it: the migration now preserves existing aggregates, the retarget picker uses
+  its own `stage_swap_cycle` instead of the compose page's
+  `cycle_view`/`program_selected`, and the target-copy duplication was folded
+  into `copy_stage_targets`. `GLOSSARY.md` says the meal count is 3 while the
+  shipped default is 2; that wording predates this change and is a tracker
+  document, so it was not edited under the Parent-Issue comment rule.
+- Not run: the full `tools/smoke.py` regression and its `--legacy` fixture; on
+  the standalone `card-host` the AI-provider check (`宿主服务可用`) fails because
+  that host intentionally has no model service, so that check needs the full
+  desktop host. `tools/launch.py --check` against a full host workspace, live
+  provider calls, and non-Windows platforms remain unverified. Signing and
+  submission remain human checkpoints. No tag, release, new Issue or submission
+  was performed.
+
 ## Composed plans with ordered stages, 2026-10-10 — unreleased 0.6.2 working tree
 
 Implementation for Issue #9. Candidates and confirmed stages are now separate
