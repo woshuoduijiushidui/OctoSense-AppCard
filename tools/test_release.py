@@ -63,6 +63,16 @@ class ReleaseMetadataTests(unittest.TestCase):
         for key in ('"balance"', '"protein"', '"fiber"', '"trim"'):
             self.assertIn(key, script)
 
+    def test_composed_plan_separates_candidates_from_stages(self):
+        # Offline guard only: qa_release.py composes and confirms for real.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        self.assertIn("stages: [] stage_next: 1 plan_history: []", script)
+        self.assertIn("fn make_stage(candidate, started){", script)
+        for marker in ("fn draft_add(", "fn draft_move(", "fn draft_remove(",
+                       "fn draft_replace(", "fn draft_total_days(){", "fn stage_range(",
+                       "fn confirm_health_plan(){", "plan_draft.len() >= 12"):
+            self.assertIn(marker, script)
+
     def test_byte_protection_and_license_files(self):
         attributes = (APP / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("bundle/** -text", attributes.splitlines())

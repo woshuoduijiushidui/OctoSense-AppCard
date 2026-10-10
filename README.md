@@ -12,7 +12,7 @@ Only Windows is claimed: the current pinned tools passed source admission and a 
 
 ## What it does
 
-Confirm a dietary profile and a 1/3/7/15/21/30-day cycle with three comparable candidates each (the 1-day cycle is the short trial); regenerate one cycle's candidates without touching a confirmed plan. Then preview inventory batches; generate a local-rule or official model.complete candidate; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Daily/cycle values are prototype estimates. Archive a cycle without deleting stock.
+Confirm a dietary profile and 1/3/7/15/21/30-day cycles with three comparable candidates each (the 1-day cycle is the short trial); regenerate one cycle's candidates without touching a confirmed plan. Confirm a single candidate as a one-stage plan, or add candidates of different cycles in order (repeats allowed, e.g. 7+7) and reorder, remove or replace stages before confirming; the compose page shows the summed total days and each stage's date range and targets, up to 12 stages. Then preview inventory batches; generate a local-rule or official model.complete candidate; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Each confirmed stage snapshots its candidate's targets, so later edits to a candidate do not change it. Daily/cycle values are prototype estimates. Archive a plan without deleting stock.
 
 Generation is manual by default. Optional automatic generation must be enabled in Settings; acceptance and consumption still require confirmation. Deleting a plan does not restore inventory or erase meal records. See [cycle details](CYCLE-PLANS.md).
 
@@ -51,7 +51,7 @@ Live AI requires a compatible OctoSense host serving official model methods, con
 
 ## AI, privacy and limitations
 
-- storage saves only this app's inventory, profile, plans, history and backups.
+- storage saves only this app's inventory, profile, plans, menu history and backups.
 - model sends goals, profile, inventory/composition and cycle budgets through the official host to the person's configured model provider. Credentials stay with the host. No ai.env or key input.
 - Configure the host's own AI providers panel. model.budget success is not provider readiness. On failure, manually select local rules. Already-sent calls may incur charges despite stopping the wait.
 - No direct network hosts, microphone grant or independent app-agent tools. Voice is unavailable; no recording, OCR, photos or execution after the host closes.

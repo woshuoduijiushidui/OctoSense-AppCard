@@ -1,5 +1,79 @@
 # Migration validation
 
+## Composed plans with ordered stages, 2026-10-10 — unreleased 0.6.2 working tree
+
+Implementation for Issue #9. Candidates and confirmed stages are now separate
+records, and a plan is an ordered list of stage snapshots.
+
+- `bundle/main.splash`: `state.programs` holds unconfirmed candidates only;
+  `state.stages` holds the confirmed plan's snapshots in order, and
+  `state.plan_history` holds archived plans. `make_stage` copies a candidate's
+  targets at confirmation; the compose page shows total days and each stage's
+  date range and targets, with add / move / remove / replace and a hard cap of
+  12 stages. The current stage is the first stage whose date range still covers
+  today, so a multi-stage plan advances on its own dates. The GPU renderer is
+  unchanged.
+- Storage schema stays 1. `migrate_state` splits a previously active program
+  into a one-stage plan and turns legacy `program_history` entries into plan
+  history without dropping `consumed_kcal` or `intake`. A re-serialization after
+  the split prevents the fallback defaults from overwriting the split result.
+- `tools/qa_release.py` gained compose, cap, and ordered-stage assertions;
+  `tools/smoke.py` follows the new `确认计划 · 去录冰箱  →` label, its
+  `stages` schema, and a small `scroll` helper; `tools/test_release.py` guards the
+  new symbols. Bilingual READMEs and `CYCLE-PLANS.md` describe the flow. The
+  version stays 0.6.2 because it is set at release, not per feature PR.
+
+### Native run, 2026-10-10 — unreleased 0.6.2 working tree
+
+- Restamped the editable bundle with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 54f917fcbe012ddd7195b7d35c9aef57cdc5a692d3f1392dda31558a251a2d0d`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected unsigned
+  warning and unchanged grants (model, storage, 16 MiB, no agent, no hosts).
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-*`:
+  `tools/qa_release.py` — **14/14 checks passed**: first-run onboarding; six
+  cycles x three candidates without auto-activation; cycle switching;
+  per-cycle regeneration; reorder, remove and replace in the draft; the 12-stage
+  cap; clearing the draft leaves candidates unconfirmed; the compose page sums
+  cycles (7+15 = 22 days); confirmation writes two ordered stages whose start
+  dates meet end-to-start; inventory preview does not commit; explicit commit
+  persists; manual default does not generate. A restart then preserved the exact
+  synthetic state.
+- Migration checks with real old-schema fixtures (copies of the Issue #8
+  synthetic profile): the previously active 7-day program opened as a
+  one-stage plan with its 11550 kcal target, 17 candidates stayed unconfirmed,
+  and `stage_next` continued its id space. A fixture with a legacy
+  `program_history` entry migrated it into `plan_history` with its 3210 kcal
+  preserved. Tab 3 rendered the plan stages and plan history; `选择下一份计划…`
+  archived the 2-stage plan (`2 个阶段 · 22 天`) and returned to candidate
+  selection; the demo profile resolved its stage so menu generation still
+  worked.
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures of this run: `docs/qa/issue-9-compose.png` (a 7+15+21 draft:
+  43 total days, stages 10月10日–10月16日 / 10月17日–10月31日 / 11月1日–11月21日),
+  `docs/qa/issue-9-plan.png` (the confirmed plan's stages) and
+  `docs/qa/issue-9-history.png` (the archived 3-stage plan under 计划历史).
+  These are hidden Card-runtime captures of synthetic data, not phone images.
+
+An independent two-axis review (standards + spec) of the feature commit found
+no blocker. Acting on it: `draft_move` now clears the armed replace target so a
+reorder cannot make 替换 hit the wrong stage; the replace prompt is shown inline
+and points to the candidates above; the archive/clear sequence is one
+`archive_plan` helper; and `tools/smoke.py`'s `--legacy` assertions now compare
+the migrated field set (`foods`, `plans`, active/revision/meal fields) instead of
+requiring the pre-migration `programs` shape.
+
+### Still unverified
+
+- Not run: the full `tools/smoke.py` regression and its `--legacy` fixture. On
+  the standalone `card-host` the AI-provider check (`宿主服务可用`) fails because
+  that host intentionally has no model service; that check needs the full
+  desktop host. `tools/launch.py --check` against a full host workspace, live
+  provider calls, and non-Windows platforms are also unverified. Signing and
+  submission remain human checkpoints. No tag, release, new Issue or submission
+  was performed.
+
 ## Six cycle candidates and per-cycle regeneration, 2026-10-10 — unreleased 0.6.2 working tree
 
 Implementation for Issue #8: cycle lengths 1/3/7/15/21/30 days, three

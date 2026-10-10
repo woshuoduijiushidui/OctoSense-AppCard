@@ -3,7 +3,7 @@ let state = {schema: 1 foods: [] plans: [] active: 0 next_id: 1 revision: 0
     offset: 0 demo: false paused: false reminders: true snooze: 0 risk_key: ""
     handled: 0 baseline: 0 cycle_start: time_now() log: [] model_enabled: true auto_generate: false
     profile: {done: false scene: "" sex: "" age: "" height: "" weight: "" avoid: "" diet: "" special: "" activity: "轻活动" basics_done: false plan_approved: false}
-    programs: [] program_active: 0 program_next: 1 program_history: [] cycle_seed: [0 0 0 0 0 0]
+    programs: [] stages: [] stage_next: 1 plan_history: [] program_next: 1 cycle_seed: [0 0 0 0 0 0]
     health: {start: 0 day: 0 meals_per_day: 2 meals_week: 0 meals_today: 0
         protein_week: 0 fiber_week: 0 protein_goal: 0 fiber_goal: 0 calcium_goal: 0 iron_goal: 0}
     daily_target: 2000 consumed_kcal: 0 meal_count: 0 last_meal: "" last_goal: ""}
@@ -59,6 +59,10 @@ let profile_diet = ""
 let profile_special = ""
 let profile_activity = "轻活动"
 let program_selected = 0
+// Pre-confirmation composition lives in memory only; confirmation snapshots it
+// into state.stages.
+let plan_draft = []
+let draft_swap = -1
 let cycle_view = 7
 let cycle_days = [1 3 7 15 21 30]
 let extra_kcal_text = "0"
@@ -167,14 +171,34 @@ fn program_by_id(id){
     for p in state.programs { if p.id == id { return p } }
     nil
 }
-fn active_program(){ program_by_id(state.program_active) }
+// Candidates (state.programs) are unconfirmed offers. A confirmed stage
+// (state.stages) is a snapshot: it copies the candidate's targets and owns its
+// own progress, per docs/adr/0001.
+fn make_stage(candidate, started){
+    let s = {id: state.stage_next name: candidate.name days: candidate.days
+        goal: candidate.goal daily_kcal: candidate.daily_kcal kcal_goal: candidate.kcal_goal
+        protein_goal: candidate.protein_goal fiber_goal: candidate.fiber_goal
+        vitamin_c_goal: candidate.vitamin_c_goal started: started
+        consumed_kcal: 0 consumed_protein: 0 consumed_fiber: 0 consumed_vitamin_c: 0 intake: []}
+    state.stage_next = state.stage_next + 1
+    s
+}
+// The current stage is the first one whose date range still covers today, so a
+// multi-stage plan advances on its own dates.
+fn current_stage(){
+    if state.stages.len() == 0 { return nil }
+    let today = health_day()
+    let current = state.stages[state.stages.len() - 1]
+    for s in state.stages {
+        if today < floor(s.started / 86400) + s.days { current = s break }
+    }
+    current
+}
 fn program_option(days, key, name, plan_goal, trait, difference, kcal_day, protein_day, fiber_day, vitamin_day){
     let p = {id: state.program_next name: name days: days variant: key
         goal: plan_goal trait: trait difference: difference daily_kcal: kcal_day
         kcal_goal: kcal_day * days protein_goal: protein_day * days
-        fiber_goal: fiber_day * days vitamin_c_goal: vitamin_day * days
-        consumed_kcal: 0 consumed_protein: 0 consumed_fiber: 0 consumed_vitamin_c: 0
-        started: 0 intake: []}
+        fiber_goal: fiber_day * days vitamin_c_goal: vitamin_day * days}
     state.program_next = state.program_next + 1
     p
 }
@@ -369,11 +393,11 @@ fn regenerate_cycle(){
     let index = cycle_index(cycle_view)
     if index < 0 { return }
     let before = state.to_json()
-    // Only this cycle's unconfirmed candidates are replaced. A started/active
-    // record is a confirmed snapshot and is never removed or rewritten.
+    // Candidates are unconfirmed only; confirmed stages live in state.stages and
+    // are never rewritten here.
     let kept = []
     for p in state.programs {
-        if p.days != cycle_view || p.started > 0 || p.id == state.program_active { kept.push(p) }
+        if p.days != cycle_view { kept.push(p) }
     }
     state.programs = kept
     state.cycle_seed[index] = state.cycle_seed[index] + 1
@@ -386,33 +410,132 @@ fn regenerate_cycle(){
         if fallback == 0 && state.programs.len() > 0 { fallback = state.programs[0].id }
         program_selected = fallback
     }
+    // The draft may reference candidates that were just replaced.
+    let remaining = []
+    for id in plan_draft { if program_by_id(id) != nil { remaining.push(id) } }
+    plan_draft = remaining
+    draft_swap = -1
     record("重新生成 " + cycle_view + " 天周期候选；已确认计划与其它周期不变")
     if commit(before) { message = cycle_view + " 天候选已重新生成；已确认的计划与其它周期不受影响。" }
     redraw()
 }
 fn select_program(id){ program_selected = id message = "已选择周期候选；确认后才开始执行。" redraw() }
+fn draft_add(id){
+    let candidate = program_by_id(id)
+    if candidate == nil { return }
+    if plan_draft.len() >= 12 { message = "单个计划最多 12 个阶段；请先移除或调整已有阶段。" redraw() return }
+    plan_draft.push(id)
+    message = "已加入第 " + plan_draft.len() + " 阶段：" + candidate.name + "。确认前可调整顺序、替换或移除。"
+    redraw()
+}
+fn draft_remove(index){
+    if index < 0 || index >= plan_draft.len() { return }
+    let gone = program_by_id(plan_draft[index])
+    plan_draft.remove(index)
+    draft_swap = -1
+    if gone != nil { message = "已移除阶段：" + gone.name + "。" }
+    redraw()
+}
+fn draft_move(index, delta){
+    let target = index + delta
+    if index < 0 || index >= plan_draft.len() || target < 0 || target >= plan_draft.len() { return }
+    let held = plan_draft[index]
+    plan_draft[index] = plan_draft[target]
+    plan_draft[target] = held
+    draft_swap = -1
+    message = "已调整阶段顺序。"
+    redraw()
+}
+fn draft_replace(index, id){
+    if index < 0 || index >= plan_draft.len() || program_by_id(id) == nil { return }
+    plan_draft[index] = id
+    draft_swap = -1
+    message = "已替换第 " + (index + 1) + " 阶段。"
+    redraw()
+}
+fn draft_total_days(){
+    let total = 0
+    for id in plan_draft { let c = program_by_id(id) if c != nil { total = total + c.days } }
+    total
+}
+// Start day number of the draft entry at index, counting from today.
+fn plan_start_day(index){
+    let cursor = floor(now() / 86400)
+    for i in plan_draft.len() {
+        if i >= index { return cursor }
+        let c = program_by_id(plan_draft[i])
+        if c != nil { cursor = cursor + c.days }
+    }
+    cursor
+}
+// Civil date from a day number (Howard Hinnant's algorithm), UTC like the rest of
+// the app's day arithmetic.
+fn month_day(day){
+    let z = day + 719468
+    let era = floor(z / 146097)
+    let doe = z - era * 146097
+    let yoe = floor((doe - floor(doe / 1460) + floor(doe / 36524) - floor(doe / 146096)) / 365)
+    let doy = doe - (365 * yoe + floor(yoe / 4) - floor(yoe / 100))
+    let mp = floor((5 * doy + 2) / 153)
+    let d = doy - floor((153 * mp + 2) / 5) + 1
+    let m = mp + 3 - 12 * floor(mp / 10)
+    "" + m + "月" + d + "日"
+}
+fn stage_range(index, days){
+    let start = plan_start_day(index)
+    month_day(start) + " – " + month_day(start + days - 1)
+}
+fn plan_total_days(){
+    let total = 0
+    for s in state.stages { total = total + s.days }
+    total
+}
+fn plan_stage_index(stage){
+    let i = 0
+    for s in state.stages { i = i + 1 if s.id == stage.id { return i } }
+    1
+}
 fn confirm_health_plan(){
-    let chosen = program_by_id(program_selected)
-    if chosen == nil { message = "请先选择一份周期方案。" redraw() return }
-    if chosen.kcal_goal <= 0 {
-        message = "当前档案不能自动推算安全的数值目标，请由专业人员确认后再使用数值追踪。"
-        redraw() return
+    let entries = []
+    for id in plan_draft { let c = program_by_id(id) if c != nil { entries.push(c) } }
+    if entries.len() == 0 {
+        let chosen = program_by_id(program_selected)
+        if chosen == nil { message = "请先选择或组合一份周期方案。" redraw() return }
+        entries.push(chosen)
+    }
+    for c in entries {
+        if c.kcal_goal <= 0 {
+            message = "当前档案不能自动推算安全的数值目标，请由专业人员确认后再使用数值追踪。"
+            redraw() return
+        }
     }
     let before = state.to_json()
-    chosen.started = now()
-    state.program_active = chosen.id
+    // Each stage snapshots its candidate's targets and starts where the previous
+    // stage ended, so the ranges meet end-to-start.
+    let cursor = floor(now() / 86400) * 86400
+    let names = ""
+    for c in entries {
+        state.stages.push(make_stage(c, cursor))
+        cursor = cursor + c.days * 86400
+        if names != "" { names = names + " + " }
+        names = names + c.name + "（" + c.days + " 天）"
+    }
     state.profile.plan_approved = true
     state.health.start = now()
     state.health.day = floor(now() / 86400)
     state.health.meals_week = 0 state.health.meals_today = 0
     state.health.protein_week = 0 state.health.fiber_week = 0
     onboarding_step = 3
-    state.daily_target = chosen.daily_kcal
+    let first = current_stage()
+    if first != nil {
+        state.daily_target = first.daily_kcal
+        state.health.protein_goal = floor(first.protein_goal * 7 / first.days)
+        state.health.fiber_goal = floor(first.fiber_goal * 7 / first.days)
+    }
     state.consumed_kcal = 0
-    state.health.protein_goal = floor(chosen.protein_goal * 7 / chosen.days)
-    state.health.fiber_goal = floor(chosen.fiber_goal * 7 / chosen.days)
-    record("确认周期方案：" + chosen.name + " · " + chosen.days + " 天 · " + chosen.kcal_goal + " kcal")
-    if commit(before) { message = "已启用「" + chosen.name + "」。现在请录入冰箱里的真实食材。" }
+    plan_draft = [] draft_swap = -1
+    record("确认计划：" + entries.len() + " 个阶段 · " + names)
+    if commit(before) { message = "已启用 " + entries.len() + " 个阶段的计划。现在请录入冰箱里的真实食材。" }
     redraw()
 }
 fn choose_meals_per_day(value){
@@ -421,19 +544,23 @@ fn choose_meals_per_day(value){
     message = "每日执行餐数已选择 " + value + " 餐；确认方案后生效。"
     redraw()
 }
+// Archive the current plan into bounded history and clear the live stages.
+fn archive_plan(){
+    if state.stages.len() > 0 {
+        if state.plan_history.len() >= 12 { state.plan_history.remove(0) }
+        state.plan_history.push(state.stages.to_json().parse_json())
+    }
+    state.stages = []
+}
 fn renew_programs(){
     if pending || ai_busy || plan_removal != nil { message = "请先结束当前确认或方案生成。" redraw() return }
     let before = state.to_json()
-    let old = active_program()
-    if old != nil {
-        if state.program_history.len() >= 12 { state.program_history.remove(0) }
-        state.program_history.push(old.to_json().parse_json())
-    }
-    state.program_active = 0 state.profile.plan_approved = false
+    archive_plan() state.profile.plan_approved = false
     state.profile.done = false state.active = 0 state.revision = state.revision + 1
+    plan_draft = [] draft_swap = -1
     make_programs() onboarding_step = 2 cycle_view = 7 tab = 0
-    record("开始选择下一周期；旧周期已存档，库存保持不变")
-    if commit(before) { message = "新周期候选已生成。请选定后继续；旧库存未删除。" }
+    record("开始选择下一份计划；上一份计划已存档，库存保持不变")
+    if commit(before) { message = "新周期候选已生成。请单选或组合后继续；旧库存未删除。" }
     redraw()
 }
 fn program_day_index(p){
@@ -520,7 +647,7 @@ fn clear_nutrition_draft(){
     show_nutrition_input = false
 }
 fn numeric_budget_ok(uses){
-    let program = active_program()
+    let program = current_stage()
     if program == nil || program.kcal_goal <= 0 { return false }
     let estimate = meal_nutrients(uses)
     estimate.complete && estimate.kcal > 0 && estimate.kcal <= program_remaining_daily(program)
@@ -553,17 +680,21 @@ fn valid_state(value){
         if value.health.meals_per_day < 1 || value.health.meals_per_day > 4 || value.health.meals_week < 0 || value.health.meals_today < 0 { return false }
         if value.health.protein_goal < 0 || value.health.fiber_goal < 0 || value.health.calcium_goal < 0 || value.health.iron_goal < 0 { return false }
         if value.health.protein_week < 0 || value.health.fiber_week < 0 { return false }
-        if value.programs.len() > 20 || value.program_history.len() > 12 || value.program_next < 1 { return false }
+        if value.programs.len() > 20 || value.plan_history.len() > 12 || value.program_next < 1 || value.stage_next < 1 { return false }
+        if value.stages.len() > 12 { return false }
         if value.cycle_seed.len() != 6 { return false }
         for seed in value.cycle_seed { if !(seed >= 0) || seed > 1000 { return false } }
         for program in value.programs {
-            if program.days < 1 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 || program.consumed_kcal < 0 || program.intake.len() > 150 { return false }
+            if program.days < 1 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 { return false }
             if program.protein_goal < 0 || program.fiber_goal < 0 || program.vitamin_c_goal < 0 { return false }
         }
-        if value.program_active > 0 {
-            let found_program = false
-            for program in value.programs { if program.id == value.program_active && program.started > 0 { found_program = true } }
-            if !found_program { return false }
+        for stage in value.stages {
+            if stage.days < 1 || stage.days > 30 || !(stage.started > 0) || stage.kcal_goal < 0 || stage.daily_kcal < 0 || stage.consumed_kcal < 0 || stage.intake.len() > 150 { return false }
+            if stage.protein_goal < 0 || stage.fiber_goal < 0 || stage.vitamin_c_goal < 0 || stage.consumed_protein < 0 || stage.consumed_fiber < 0 || stage.consumed_vitamin_c < 0 { return false }
+        }
+        for old in value.plan_history {
+            if old.len() > 12 { return false }
+            for stage in old { if stage.days < 1 || stage.days > 30 || stage.kcal_goal < 0 || stage.consumed_kcal < 0 { return false } }
         }
         for f in value.foods {
             if f.name.len() == 0 || f.name.len() > 40 || !(f.id > 0) || !(f.grams >= 0) || f.grams > 100000 || !(f.expires > 0) { return false }
@@ -596,12 +727,11 @@ fn migrate_state(value){
     if profile_json.search("special") < 0 { value.profile.special = "" }
     if profile_json.search("activity") < 0 { value.profile.activity = "轻活动" }
     if json.search("programs") < 0 {
-        value.programs = [] value.program_active = 0 value.program_next = 1 value.program_history = []
+        value.programs = [] value.program_active = 0 value.program_next = 1 value.cycle_seed = [0 0 0 0 0 0]
         // A previously approved generic scene has no numeric cycle. Keep the inventory,
         // but ask the user to review and activate one concrete program before planning.
         value.profile.plan_approved = false
     }
-    if json.search("program_history") < 0 { value.program_history = [] }
     if json.search("program_next") < 0 { value.program_next = 1 }
     if json.search("program_active") < 0 { value.program_active = 0 }
     if json.search("cycle_seed") < 0 { value.cycle_seed = [0 0 0 0 0 0] }
@@ -616,6 +746,36 @@ fn migrate_state(value){
         }
         value.programs = confirmed
     }
+    // Issue #9 split candidates from confirmed stages. A previously active
+    // program becomes a one-stage plan; archived programs become plan history.
+    if json.search("stages") < 0 {
+        let confirmed = []
+        let candidates = []
+        for p in value.programs {
+            if p.started > 0 || p.id == value.program_active { confirmed.push(p) } else { candidates.push(p) }
+        }
+        value.programs = candidates
+        value.stages = confirmed
+        value.stage_next = 1
+        if value.program_next > value.stage_next { value.stage_next = value.program_next }
+        value.plan_history = []
+        if json.search("program_history") >= 0 {
+            for old in value.program_history {
+                // Older archives may predate the intake/consumed fields.
+                if old.to_json().search("intake") < 0 {
+                    old.consumed_kcal = 0 old.consumed_protein = 0 old.consumed_fiber = 0 old.consumed_vitamin_c = 0
+                    old.intake = []
+                }
+                value.plan_history.push([old])
+            }
+        }
+    }
+    // Re-serialize after the split so the fallbacks below only fill genuinely
+    // missing fields instead of overwriting what the split just wrote.
+    let migrated_json = value.to_json()
+    if migrated_json.search("stage_next") < 0 { value.stage_next = 1 }
+    if migrated_json.search("stages") < 0 { value.stages = [] }
+    if migrated_json.search("plan_history") < 0 { value.plan_history = [] }
     if json.search("health") < 0 {
         value.health = {start: 0 day: 0 meals_per_day: 2 meals_week: 0 meals_today: 0
             protein_week: 0 fiber_week: 0 protein_goal: 0 fiber_goal: 0 calcium_goal: 0 iron_goal: 0}
@@ -644,12 +804,12 @@ fn migrate_state(value){
 }
 fn ensure_extended_state(){
     if state.profile.basics_done && state.programs.len() == 0 { make_programs() }
-    if state.profile.done && state.program_active > 0 && state.profile.plan_approved { onboarding_step = 4 }
+    if state.profile.done && state.stages.len() > 0 && state.profile.plan_approved { onboarding_step = 4 }
     else {
         onboarding_step = 0
         if state.profile.scene != "" { onboarding_step = 1 }
         if state.profile.basics_done { onboarding_step = 2 }
-        if state.profile.plan_approved && state.program_active > 0 { onboarding_step = 3 }
+        if state.profile.plan_approved && state.stages.len() > 0 { onboarding_step = 3 }
     }
     if state.profile.sex != "" { profile_sex = state.profile.sex }
     profile_age = state.profile.age
@@ -690,8 +850,9 @@ fn save_profile(){
     state.profile.activity = profile_activity
     state.profile.basics_done = true
     state.profile.plan_approved = false
-    state.program_active = 0
+    archive_plan()
     state.active = 0 state.revision = state.revision + 1
+    plan_draft = [] draft_swap = -1
     make_programs()
     // An explicit reference plan is created before the first inventory entry.
     // These are demo estimates for healthy adults, not an assessment of disease.
@@ -723,12 +884,8 @@ fn finish_onboarding(){
 }
 fn restart_profile(){
     let before = state.to_json()
-    let old = active_program()
-    if old != nil {
-        if state.program_history.len() >= 12 { state.program_history.remove(0) }
-        state.program_history.push(old.to_json().parse_json())
-    }
-    state.program_active = 0 state.programs = [] program_selected = 0
+    archive_plan() state.programs = [] program_selected = 0
+    plan_draft = [] draft_swap = -1
     state.profile.done = false
     state.profile.basics_done = false
     state.profile.plan_approved = false
@@ -753,10 +910,10 @@ fn meal_kcal(p){
     estimate.kcal
 }
 fn remaining_budget(){
-    program_remaining_daily(active_program())
+    program_remaining_daily(current_stage())
 }
 fn nutrition_percent(){
-    let p = active_program()
+    let p = current_stage()
     if p == nil || p.kcal_goal <= 0 { return 0 }
     min(100, floor(p.consumed_kcal * 100 / p.kcal_goal))
 }
@@ -991,7 +1148,7 @@ fn validate(p){
 }
 fn rule_plan(reason){
     if state.paused { message = "管家已暂停，请在设置里恢复。" return }
-    let program = active_program()
+    let program = current_stage()
     if program == nil || program_remaining_daily(program) <= 0 {
         message = "本周期未启用、已结束，或今天热量额度已用完。请查看周期数据盘。" return
     }
@@ -1256,7 +1413,7 @@ fn save_ai_result(output, reason, requested_goal){
 fn online_plan(reason){
     if ai_busy { message = "正在生成，请稍候。库存若变化，旧结果会自动作废。" return }
     if goal.len() > 1500 { message = "目标太长，请缩短至约 500 字以内。" return }
-    let program = active_program()
+    let program = current_stage()
     if program == nil || program_remaining_daily(program) <= 0 { message = "没有有效的周期方案或今日额度不足。" return }
     let inventory = []
     for f in state.foods {
@@ -1311,7 +1468,7 @@ fn apply_model_reply(envelope){
         if envelope.token != ai_sequence || !ai_busy { return }
         let r = envelope.reply
         ai_busy = false ai_sequence = ai_sequence + 1
-        let current = active_program()
+        let current = current_stage()
         if (!state.auto_generate && automatic_reason(ai_snapshot.reason)) || plan_removal != nil || current == nil || current.id != ai_snapshot.program_id || current.consumed_kcal != ai_snapshot.consumed_kcal || state.revision != ai_snapshot.revision || state.offset != ai_snapshot.offset || goal != ai_snapshot.goal || state.paused || !use_ai || pending {
             ai_error = "等待期间库存、目标或运行状态变化，已丢弃旧结果。请重新生成。"
             message = ai_error redraw() return
@@ -1328,7 +1485,7 @@ fn plan(reason){
     if storage_blocked { message = "库存文件异常，已停止生成和写入。请先备份修复。" return }
     if state.paused { message = "管家已暂停，请在设置里恢复。" return }
     if pending || plan_removal != nil { message = "请先完成或取消当前确认。" return }
-    if active_program() == nil || program_remaining_daily(active_program()) <= 0 { message = "请先确认有效周期方案，或查看今日额度与周期进度。" return }
+    if current_stage() == nil || program_remaining_daily(current_stage()) <= 0 { message = "请先确认有效周期方案，或查看今日额度与周期进度。" return }
     if use_ai && ai_phase == 0 { message = "正在读取 AI 配置，请稍候。" return }
     if use_ai && ai_phase == 3 { message = ai_error return }
     if use_ai && ai_phase == 1 { online_plan(reason) return }
@@ -1378,7 +1535,7 @@ fn confirm_consume(){
     if !validate(revised) { message = "用量需为正整数，不能超出库存；请修改或取消。" ui.notice.set_text(message) return }
     let estimate = meal_nutrients(revised.uses)
     let extra = extra_kcal_text.trim().to_f64()
-    let program = active_program()
+    let program = current_stage()
     if !estimate.complete || estimate.kcal <= 0 || !(extra >= 0) || extra > 2000 || extra != floor(extra) {
         message = "营养参考缺失，或额外热量无效；未扣库存。请核对整餐与用油。"
         ui.notice.set_text(message) return
@@ -1548,11 +1705,11 @@ fn install_demo(){
         active: 5 next_id: 6 revision: 1 offset: 0 demo: true paused: false reminders: true snooze: 0 risk_key: ""
         handled: 0 baseline: 3 cycle_start: today log: [] model_enabled: use_ai auto_generate: state.auto_generate
         profile: {done: true scene: "日常健康" sex: "女性" age: "28" height: "165" weight: "55" avoid: "" diet: "清淡家常" special: "" activity: "轻活动" basics_done: true plan_approved: true}
-        programs: [{id: 1 name: "7天均衡起步 · 演示" days: 7 daily_kcal: 2000 kcal_goal: 14000
-            protein_goal: 308 fiber_goal: 196 vitamin_c_goal: 525 started: today
+        programs: [] stages: [{id: 1 name: "7天均衡起步 · 演示" days: 7 daily_kcal: 2000 kcal_goal: 14000
+            goal: "演示计划" protein_goal: 308 fiber_goal: 196 vitamin_c_goal: 525 started: today
             consumed_kcal: 680 consumed_protein: 0 consumed_fiber: 0 consumed_vitamin_c: 0
             intake: [{at: today day: floor(today / 86400) title: "演示前一餐" kcal: 680 protein: 0 fiber: 0 vitamin_c: 0 extra_kcal: 0}]}]
-        program_active: 1 program_next: 2 program_history: [] cycle_seed: [0 0 0 0 0 0]
+        stage_next: 2 plan_history: [] program_next: 1 cycle_seed: [0 0 0 0 0 0]
         health: {start: today day: floor(today / 86400) meals_per_day: 2 meals_week: 1 meals_today: 1
             protein_week: 0 fiber_week: 0 protein_goal: 308 fiber_goal: 175 calcium_goal: 7000 iron_goal: 126}
         daily_target: 2000 consumed_kcal: 680 meal_count: 1 last_meal: "番茄豆腐汤" last_goal: "清淡一点"}
@@ -1684,7 +1841,7 @@ View{width: Fill height: Fill flow: Overlay
                         if onboarding_step == 2 {
                             View{width: Fill height: Fit flow: Down spacing: 8
                                 Heading{text: "选择具体周期方案" draw_text.text_style.font_size: 29}
-                                Copy{text: "方向只是偏好。每个周期给出 3 份按档案推算的候选；选定一份并确认后才开始执行。" draw_text.color: muted}
+                                Copy{text: "方向只是偏好。每个周期给出 3 份按档案推算的候选；可直接确认单选，也可按顺序组合成多阶段计划。" draw_text.color: muted}
                             }
                             View{width: Fill height: Fit flow: Right spacing: 7
                                 for d in cycle_days {
@@ -1696,7 +1853,10 @@ View{width: Fill height: Fill flow: Overlay
                                         draw_text +: {color: cycle_tc color_hover: ink color_down: ink color_focus: cycle_tc text_style.font_size: 13}}
                                 }
                             }
-                            Hint{text: "1 天周期供短周期体验；换周期只切换比较对象，确认前不会开始执行。"}
+                            let draft_hint = "1 天周期供短周期体验；换周期只切换比较对象，确认前不会开始执行。"
+                            if plan_draft.len() > 0 { draft_hint = "计划草稿 " + plan_draft.len() + " / 12 阶段 · 总天数 " + draft_total_days() + " 天；可在下方调整顺序、替换或移除。" }
+                            if plan_draft.len() >= 12 { draft_hint = "计划草稿已达 12 阶段上限；请先移除或用其它阶段替换，无法再加入。" }
+                            Hint{text: draft_hint}
                             let candidates = cycle_candidates(cycle_view)
                             for p in candidates {
                                 Frost{padding: 20 spacing: 11 draw_bg.color: #ffffffc2
@@ -1712,7 +1872,49 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     if p.kcal_goal == 0 { Hint{text: "该档案需要专业人员确认摄入目标，当前不自动填入数值。"} }
                                     Hint{text: "主要差异 · " + p.difference}
-                                    Soft{text: "选择这份周期方案" on_click: || select_program(p.id)}
+                                    let candidate_id = p.id
+                                    if draft_swap >= 0 {
+                                        Soft{text: "用这份替换第 " + (draft_swap + 1) + " 阶段" on_click: || draft_replace(draft_swap, candidate_id)}
+                                    }
+                                    if draft_swap < 0 {
+                                        View{width: Fill height: Fit flow: Right spacing: 8
+                                            Soft{text: "选择这份周期方案" on_click: || select_program(candidate_id)}
+                                            let add_text = "＋ 加入计划"
+                                            if plan_draft.len() >= 12 { add_text = "已达 12 阶段上限" }
+                                            Soft{text: add_text enabled: plan_draft.len() < 12 on_click: || draft_add(candidate_id)}
+                                        }
+                                    }
+                                }
+                            }
+                            if plan_draft.len() > 0 {
+                                Frost{padding: 18 spacing: 10 draw_bg.color: #xeef3e8
+                                    View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: .5}
+                                        Copy{text: "计划草稿 · " + plan_draft.len() + " / 12 阶段" draw_text.text_style: theme.font_bold{font_size: 18}}
+                                        Hint{text: "总天数 " + draft_total_days() + " 天"}
+                                    }
+                                    Hint{text: "各阶段按日期衔接；确认前可上移、下移、移除，或用其它候选替换。"}
+                                    if draft_swap >= 0 { Copy{text: "正在替换第 " + (draft_swap + 1) + " 阶段：请在上方候选中点选。" draw_text.text_style: theme.font_bold{font_size: 15}} }
+                                    for i in plan_draft.len() {
+                                        let c = program_by_id(plan_draft[i])
+                                        if c != nil {
+                                            Tint{draw_bg.color: #xffffffb0
+                                                View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                    View{width: Fill height: Fit flow: Down spacing: 3
+                                                        Copy{text: "第 " + (i + 1) + " 阶段 · " + c.name draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                        Hint{text: c.days + " 天 · " + stage_range(i, c.days) + " · " + c.daily_kcal + " kcal/天 · 蛋白质 " + floor(c.protein_goal / c.days) + " g/天"}
+                                                    }
+                                                    Quiet{text: "上移" enabled: i > 0 on_click: || draft_move(i, -1)}
+                                                    Quiet{text: "下移" enabled: i + 1 < plan_draft.len() on_click: || draft_move(i, 1)}
+                                                    Quiet{text: "替换" on_click: || { draft_swap = i message = "请在上方候选里点选要替换到第 " + (i + 1) + " 阶段的方案。" redraw() }}
+                                                    Quiet{text: "移除" on_click: || draft_remove(i)}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                        Hint{text: "总天数由各阶段周期相加得出，不单独设定。"}
+                                        Quiet{text: "清空草稿" on_click: || { plan_draft = [] draft_swap = -1 message = "已清空计划草稿。" redraw() }}
+                                    }
                                 }
                             }
                             Frost{padding: 18 spacing: 10 draw_bg.color: #eef3e8
@@ -1723,7 +1925,8 @@ View{width: Fill height: Fill flow: Overlay
                                     Soft{text: "重新生成本周期候选" on_click: || regenerate_cycle()}
                                     Soft{text: "返回修改基础资料" on_click: || { onboarding_step = 1 redraw() }}
                                 }
-                                Action{text: "确认选中方案 · 去录冰箱  →" on_click: || confirm_health_plan()}
+                                Hint{text: "未加入计划草稿时，确认会只用当前选中的那一份方案，得到单阶段计划。"}
+                                Action{text: "确认计划 · 去录冰箱  →" on_click: || confirm_health_plan()}
                             }
                         }
                         if onboarding_step == 3 {
@@ -2108,16 +2311,39 @@ View{width: Fill height: Fill flow: Overlay
                                 }
                                 if tab == 3 {
                                     Frost{padding: 20 spacing: 10
-                                        let program = active_program()
-                                        Heading{text: "当前周期方案"}
+                                        let program = current_stage()
+                                        Heading{text: "当前计划 · 当前阶段"}
                                         Copy{text: program.name + " · 第 " + program_day_index(program) + " / " + program.days + " 天"}
-                                        Hint{text: "周期热量已记录 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
-                                        Hint{text: "周期剩余 " + program_remaining_total(program) + " kcal · 今日已记录 " + program_today_kcal(program) + " kcal"}
+                                        Hint{text: "计划共 " + state.stages.len() + " 个阶段 · 总天数 " + plan_total_days() + " 天 · 当前为第 " + plan_stage_index(program) + " 阶段"}
+                                        Hint{text: "阶段热量已记录 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
+                                        Hint{text: "阶段剩余 " + program_remaining_total(program) + " kcal · 今日已记录 " + program_today_kcal(program) + " kcal"}
                                         Hint{text: "蛋白质 " + program.consumed_protein + " / " + program.protein_goal + " g"}
                                         Hint{text: "膳食纤维 " + program.consumed_fiber + " / " + program.fiber_goal + " g"}
                                         Hint{text: "维生素 C " + program.consumed_vitamin_c + " / " + program.vitamin_c_goal + " mg"}
                                         Hint{text: "这里只累计你确认吃完的餐食，数值是示例估算，不等于全天真实摄入或医疗建议。"}
-                                        Soft{text: "选择下一周期方案…" on_click: || renew_programs()}
+                                        Soft{text: "选择下一份计划…" on_click: || renew_programs()}
+                                    }
+                                    if state.stages.len() > 0 {
+                                        Frost{padding: 18 spacing: 8
+                                            Copy{text: "计划阶段" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                            for i in state.stages.len() {
+                                                let s = state.stages[i]
+                                                let marker = "第 " + (i + 1) + " 阶段"
+                                                if s.id == current_stage().id { marker = marker + " · 当前" }
+                                                Hint{text: marker + " · " + s.name + " · " + s.days + " 天 · " + month_day(floor(s.started / 86400)) + " 起 · " + s.consumed_kcal + " / " + s.kcal_goal + " kcal"}
+                                            }
+                                        }
+                                    }
+                                    if state.plan_history.len() > 0 {
+                                        Frost{padding: 18 spacing: 8
+                                            Copy{text: "计划历史" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                            for old in state.plan_history {
+                                                let days = 0
+                                                let names = ""
+                                                for s in old { days = days + s.days if names != "" { names = names + " + " } names = names + s.name }
+                                                Hint{text: old.len() + " 个阶段 · " + days + " 天 · " + names}
+                                            }
+                                        }
                                     }
                                                                         View{width: Fill height: Fit flow: Down spacing: 4
                                         Heading{text: "长期饮食档案" draw_text.text_style.font_size: 30}
@@ -2129,7 +2355,7 @@ View{width: Fill height: Fill flow: Overlay
                                             View{width: Fill height: Fit flow: Right spacing: 14 align: Align{y: .5}
                                                 View{width: 100 height: 100 flow: Overlay align: Align{x: .5 y: .5}
                                                     ProgressRing{width: 100 height: 100 draw_bg.progress: nutrition_percent() / 100}
-                                                    Label{text: "" + program_today_kcal(active_program()) padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 20}}}
+                                                    Label{text: "" + program_today_kcal(current_stage()) padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 20}}}
                                                 }
                                                 View{width: Fill height: Fit flow: Down spacing: 5
                                                     Copy{text: "/ " + state.daily_target + " kcal" draw_text.text_style: theme.font_bold{font_size: 17}}
@@ -2173,7 +2399,7 @@ View{width: Fill height: Fill flow: Overlay
                                             Hint{text: state.profile.scene + " · " + state.profile.diet}
                                             if state.profile.avoid != "" { Hint{text: "忌口 · " + state.profile.avoid} }
                                             Soft{text: "重新设置用户画像" on_click: || restart_profile()}
-                                            Soft{text: "选择下一周期方案…" on_click: || renew_programs()}
+                                            Soft{text: "选择下一份计划…" on_click: || renew_programs()}
                                             Divider{}
                                             Copy{text: "运行与提醒" draw_text.text_style: theme.font_bold{font_size: 18}}
                                             View{width: Fill height: Fit flow: Right spacing: 8
