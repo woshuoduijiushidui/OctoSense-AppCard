@@ -20,3 +20,20 @@ shell to provide this app with additional privileges.
 - Restamp after bundle changes. Keep real screenshots and bilingual READMEs
   honest. Record what was tested and what remains unverified in VALIDATION.md.
 - Formal identity, privacy, signing and submission are human checkpoints.
+- Before changing text another person wrote on the tracker (an issue body, a spec), post the
+  intended change and reasoning as a comment on the Parent Issue first. After the change lands,
+  add a follow-up comment referencing the commit.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues on `woshuoduijiushidui/OctoSense-AppCard`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The default five triage roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
