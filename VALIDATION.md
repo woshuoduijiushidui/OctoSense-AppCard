@@ -1,5 +1,94 @@
 # Migration validation
 
+## Overview page: long-term plan and progress, 2026-10-10 — unreleased 0.6.2 working tree
+
+Implementation for Issue #11. A dedicated Overview tab shows the long-term plan
+and its progress.
+
+- `bundle/main.splash`: the nav gains `◈  总览` between 首页 and 冰箱 (the later
+tabs and their `navigate` calls were renumbered). `meals_per_day()` fixes the
+daily meal count at 3 (早/中/晚); `stage_done_meals`, `stage_planned_meals`
+(`days × 3`) and `stage_progress_percent` compute a stage's progress, and
+`plan_done_meals` / `plan_planned_meals` / `plan_progress_percent` roll the
+per-stage counts up, so a future stage with no confirmed meal cannot move the
+confirmed numerator. `stage_today_intake` lists the meals confirmed today. The
+Overview shows the plan (stages, total days, plan progress, per-stage progress),
+the current stage's kcal and protein target against actuals, and today's
+per-meal progress with its meals. Only `confirm_consume` appends to a stage's
+`intake`, so generating or accepting a menu never changes progress.
+`ensure_extended_state` now refreshes `state.daily_target` from `current_stage`,
+so a date-driven stage switch shows the new stage's target; when the calendar has
+passed every stage, the Overview says the plan has ended and offers "选择下一份
+计划…" instead of showing a stale stage. `meals_per_day()` is the single source of
+truth for progress; the persisted `meals_per_day` field keeps its historical
+default and is no longer read for progress, so an old value cannot change the
+formula, and the unused `choose_meals_per_day` setter whose text promised a
+configurable meal count was deleted.
+- Storage schema stays 1; no new stored field.
+- `tools/qa_release.py` now exercises the Overview against a real host and adds
+  `--stage-switch` and `--plan-ended` modes with generated fixtures whose clock
+  offset has passed the first stage or the whole plan; `tools/test_release.py`
+  guards the new symbols. Bilingual READMEs and `CYCLE-PLANS.md` describe the
+  page and the progress rule.
+
+### Native run, 2026-10-10 — unreleased 0.6.2 working tree
+
+- Restamped the editable bundle with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 34666994381141739f4918c1ab8bbed31627a6c5fe16b13a377fa21b197107b7`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts). The manifest version stayed 0.6.2.
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-issue11`:
+  `tools/qa_release.py --port 18571 --profile .local-state/qa-issue11` —
+  **28/28 checks passed**, including the Overview tab, plan progress
+  `1 / 66` (= 1 of (7+15)×3), per-stage `1 / 21` and `0 / 45`, per-meal `1 / 3`,
+  the current stage's kcal/protein target against actuals, no progress change
+  after generating and accepting a menu, and progress rising to `2 / 66` and
+  `2 / 3` only after a confirmed meal. `--restart` then preserved the exact
+  synthetic state.
+- Stage switch: the main run wrote a fixture profile
+  `.local-state/qa-issue11-stage` whose synthetic clock offset had passed the
+  7-day first stage. A second hidden host at port 18572 plus
+  `tools/qa_release.py --stage-switch` — **2/2 checks passed**: the 15-day stage
+  became current and its kcal/protein target replaced the first stage's, and a
+  restart preserved the fixture unchanged.
+- Ended plan: a third fixture `.local-state/qa-issue11-ended` passed every stage.
+  A hidden host at port 18573 plus `tools/qa_release.py --plan-ended` — **2/2
+  checks passed**: the Overview says the plan has ended and marks no stage as
+  current, and the 档案 tab shows the same ended summary instead of a stale
+  "当前阶段".
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures: `docs/qa/issue-11-overview.png` (1/66, stage 1 current),
+  `docs/qa/issue-11-progress.png` (2/66, today 2/3) and
+  `docs/qa/issue-11-stage-switch.png` (the 15-day stage current). These are
+  hidden Card-runtime captures of synthetic data at 1200x800.
+- Bundle total is 7,839,683 bytes, under the 8 MiB package guard.
+- An independent two-axis review (Standards + Spec) of the commit found no
+  blocker. Acting on it: `stage_progress_percent` / `plan_progress_percent` reuse
+  the existing `goal_percent`; the stored `meals_per_day` defaults were left
+  untouched; `choose_meals_per_day` was deleted; the dead `program == nil`
+  Overview branch was removed; and the ended-plan state was added and covered by
+  a native check, with `program_expired()` shared so the 档案 tab agrees.
+  The reviewers read "计划进度为各阶段之和" as rolling the per-stage meal counts
+  into one plan progress (1/66), which is what the implementation does and what
+  the acceptance criterion calls 汇总.
+
+### Still unverified
+
+- The full `tools/smoke.py` regression was not run: on the standalone
+  `card-host` the AI-provider status check (`宿主服务可用`) fails because that host
+  intentionally has no model service. It needs the full desktop host.
+- A stage switch was verified by advancing the synthetic clock offset, not by
+  waiting real days. `tools/launch.py --check` against a full host workspace,
+  live provider calls, non-Windows platforms, signing and submission remain
+  unverified human checkpoints.
+- The four `bundle/screenshots/*.png` release assets were not re-captured, so
+  they still show the old five-item navigation; regenerate them with the full
+  desktop host at the release checkpoint. No tag, release, new Issue or
+  submission was performed.
+
 ## Stage locking and future-stage editing, 2026-10-10 — unreleased 0.6.2 working tree
 
 Implementation for Issue #10. A confirmed plan can be edited only in front of

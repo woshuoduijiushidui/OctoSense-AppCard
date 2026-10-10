@@ -83,6 +83,18 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertIn(marker, script)
         self.assertIn("按日历锁定，不是故障", script)
 
+    def test_overview_long_term_plan_and_progress(self):
+        # Offline guard only: qa_release.py exercises the page against a real host.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn meals_per_day(){", "fn stage_done_meals(",
+                       "fn stage_planned_meals(", "fn stage_progress_percent(",
+                       "fn stage_today_intake(", "fn program_expired(){",
+                       "fn plan_planned_meals(){"):
+            self.assertIn(marker, script)
+        self.assertIn('"◈  总览"', script)
+        self.assertIn("每餐进度 ", script)
+        self.assertIn("计划进度 ", script)
+
     def test_byte_protection_and_license_files(self):
         attributes = (APP / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("bundle/** -text", attributes.splitlines())
