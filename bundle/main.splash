@@ -63,6 +63,9 @@ let program_selected = 0
 // into state.stages.
 let plan_draft = []
 let draft_swap = -1
+// Index of the confirmed future stage whose goal is being re-picked in tab 3.
+let stage_edit = -1
+let stage_swap_cycle = 7
 let cycle_view = 7
 let cycle_days = [1 3 7 15 21 30]
 let extra_kcal_text = "0"
@@ -174,12 +177,16 @@ fn program_by_id(id){
 // Candidates (state.programs) are unconfirmed offers. A confirmed stage
 // (state.stages) is a snapshot: it copies the candidate's targets and owns its
 // own progress, per docs/adr/0001.
+fn copy_stage_targets(stage, candidate){
+    stage.name = candidate.name stage.days = candidate.days stage.goal = candidate.goal
+    stage.daily_kcal = candidate.daily_kcal stage.kcal_goal = candidate.kcal_goal
+    stage.protein_goal = candidate.protein_goal stage.fiber_goal = candidate.fiber_goal
+    stage.vitamin_c_goal = candidate.vitamin_c_goal
+}
 fn make_stage(candidate, started){
-    let s = {id: state.stage_next name: candidate.name days: candidate.days
-        goal: candidate.goal daily_kcal: candidate.daily_kcal kcal_goal: candidate.kcal_goal
-        protein_goal: candidate.protein_goal fiber_goal: candidate.fiber_goal
-        vitamin_c_goal: candidate.vitamin_c_goal started: started
+    let s = {id: state.stage_next started: started
         consumed_kcal: 0 consumed_protein: 0 consumed_fiber: 0 consumed_vitamin_c: 0 intake: []}
+    copy_stage_targets(s, candidate)
     state.stage_next = state.stage_next + 1
     s
 }
@@ -481,14 +488,108 @@ fn month_day(day){
     let m = mp + 3 - 12 * floor(mp / 10)
     "" + m + "月" + d + "日"
 }
-fn stage_range(index, days){
-    let start = plan_start_day(index)
-    month_day(start) + " – " + month_day(start + days - 1)
-}
+fn stage_span_at(start, days){ month_day(start) + " – " + month_day(start + days - 1) }
+fn stage_range(index, days){ stage_span_at(plan_start_day(index), days) }
 fn plan_total_days(){
     let total = 0
     for s in state.stages { total = total + s.days }
     total
+}
+// Issue #10: a stage locks on the day its start date arrives. Editing only the
+// not-yet-started suffix is what keeps confirmed progress and intake records
+// safe, including when the user has fallen behind and never logged that day.
+fn stage_locked(stage){ floor(stage.started / 86400) <= health_day() }
+fn stage_span(stage){ stage_span_at(floor(stage.started / 86400), stage.days) }
+fn stage_lock_hint(stage){
+    if !stage_locked(stage) { return "尚未开始 · 替换、移除或改目标不受限；与相邻未开始阶段之间可调整顺序。" }
+    if stage.intake.len() == 0 { return "阶段起始日期已到但还没有确认用餐记录；按日历锁定，不是故障。" }
+    "已开始并已记录用餐，锁定以保留已完成进度。"
+}
+// Re-anchor every start date end-to-start from the plan's first day. Locked
+// stages lead the list and keep their dates, so only the future suffix moves.
+fn relayout_stages(){
+    if state.stages.len() == 0 { return }
+    let cursor = state.stages[0].started
+    for s in state.stages { s.started = cursor cursor = cursor + s.days * 86400 }
+}
+fn future_stage_names(start_index){
+    let names = ""
+    for i in state.stages.len() {
+        if i >= start_index {
+            let s = state.stages[i]
+            if names != "" { names = names + "、" }
+            names = names + "第 " + (i + 1) + " 阶段 " + s.name + "（" + stage_span(s) + "）"
+        }
+    }
+    names
+}
+fn stage_move(index, delta){
+    let target = index + delta
+    if index < 0 || index >= state.stages.len() || target < 0 || target >= state.stages.len() { return }
+    if stage_locked(state.stages[index]) || stage_locked(state.stages[target]) {
+        message = "已开始的阶段按起止日期锁定，不能调整顺序；只有尚未开始的阶段可以移动。"
+        redraw() return
+    }
+    let before = state.to_json()
+    let held = state.stages[index]
+    state.stages[index] = state.stages[target]
+    state.stages[target] = held
+    relayout_stages()
+    stage_edit = -1
+    let impact = future_stage_names(min(index, target))
+    record("调整未开始阶段顺序；已开始阶段与已确认记录不变")
+    if commit(before) { message = "已调整顺序。受影响的未来目标：" + impact + "。已开始的阶段与已确认用餐记录不变。" }
+    redraw()
+}
+fn stage_remove(index){
+    if index < 0 || index >= state.stages.len() { return }
+    if stage_locked(state.stages[index]) {
+        message = "该阶段已开始，按起止日期锁定，不能移除。" + stage_lock_hint(state.stages[index])
+        redraw() return
+    }
+    if state.stages.len() <= 1 { message = "计划至少保留一个阶段。" redraw() return }
+    let before = state.to_json()
+    state.stages.remove(index)
+    relayout_stages()
+    stage_edit = -1
+    let impact = future_stage_names(index)
+    record("移除未开始的未来阶段；已确认记录保留")
+    if commit(before) { message = "已移除该未来阶段。受影响的未来目标：" + impact + "。已获得的进度与确认记录不变。" }
+    redraw()
+}
+// Retarget a future stage by snapshotting another candidate over it. Same op
+// covers both "替换" (a different cycle) and "改目标" (a different emphasis).
+fn stage_replace(index, candidate_id){
+    if index < 0 || index >= state.stages.len() { return }
+    let stage = state.stages[index]
+    if stage_locked(stage) {
+        message = "该阶段已开始，按起止日期锁定，不能改目标。" + stage_lock_hint(stage)
+        redraw() return
+    }
+    let candidate = program_by_id(candidate_id)
+    if candidate == nil { return }
+    if candidate.kcal_goal <= 0 { message = "该候选没有可用的数值目标，不能设为阶段目标。" redraw() return }
+    let before = state.to_json()
+    copy_stage_targets(stage, candidate)
+    relayout_stages()
+    stage_edit = -1
+    let impact = future_stage_names(index)
+    record("修改未开始阶段的目标：" + stage.name + "；已确认记录保留")
+    if commit(before) { message = "已更新第 " + (index + 1) + " 阶段目标。受影响的未来目标：" + impact + "。已获得的进度与确认记录不变。" }
+    redraw()
+}
+// Plan progress = confirmed meals over planned meals; only the denominator
+// changes when a future stage is edited, never the confirmed numerator.
+fn plan_done_meals(){
+    let done = 0
+    for s in state.stages { done = done + s.intake.len() }
+    done
+}
+fn plan_planned_meals(){ plan_total_days() * state.health.meals_per_day }
+fn plan_progress_percent(){
+    let planned = plan_planned_meals()
+    if planned <= 0 { return 0 }
+    min(100, floor(plan_done_meals() * 100 / planned))
 }
 fn plan_stage_index(stage){
     let i = 0
@@ -533,7 +634,7 @@ fn confirm_health_plan(){
         state.health.fiber_goal = floor(first.fiber_goal * 7 / first.days)
     }
     state.consumed_kcal = 0
-    plan_draft = [] draft_swap = -1
+    plan_draft = [] draft_swap = -1 stage_edit = -1
     record("确认计划：" + entries.len() + " 个阶段 · " + names)
     if commit(before) { message = "已启用 " + entries.len() + " 个阶段的计划。现在请录入冰箱里的真实食材。" }
     redraw()
@@ -557,7 +658,7 @@ fn renew_programs(){
     let before = state.to_json()
     archive_plan() state.profile.plan_approved = false
     state.profile.done = false state.active = 0 state.revision = state.revision + 1
-    plan_draft = [] draft_swap = -1
+    plan_draft = [] draft_swap = -1 stage_edit = -1
     make_programs() onboarding_step = 2 cycle_view = 7 tab = 0
     record("开始选择下一份计划；上一份计划已存档，库存保持不变")
     if commit(before) { message = "新周期候选已生成。请单选或组合后继续；旧库存未删除。" }
@@ -776,6 +877,17 @@ fn migrate_state(value){
     if migrated_json.search("stage_next") < 0 { value.stage_next = 1 }
     if migrated_json.search("stages") < 0 { value.stages = [] }
     if migrated_json.search("plan_history") < 0 { value.plan_history = [] }
+    // Confirmed stages must carry their own intake ledger and counters; a state
+    // from before per-stage tracking gets the missing keys only, so existing
+    // aggregates are never zeroed by the migration.
+    for stage in value.stages {
+        let stage_json = stage.to_json()
+        if stage_json.search("intake") < 0 { stage.intake = [] }
+        if stage_json.search("consumed_kcal") < 0 { stage.consumed_kcal = 0 }
+        if stage_json.search("consumed_protein") < 0 { stage.consumed_protein = 0 }
+        if stage_json.search("consumed_fiber") < 0 { stage.consumed_fiber = 0 }
+        if stage_json.search("consumed_vitamin_c") < 0 { stage.consumed_vitamin_c = 0 }
+    }
     if json.search("health") < 0 {
         value.health = {start: 0 day: 0 meals_per_day: 2 meals_week: 0 meals_today: 0
             protein_week: 0 fiber_week: 0 protein_goal: 0 fiber_goal: 0 calcium_goal: 0 iron_goal: 0}
@@ -2325,12 +2437,54 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     if state.stages.len() > 0 {
                                         Frost{padding: 18 spacing: 8
-                                            Copy{text: "计划阶段" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                            Copy{text: "计划阶段 · 未开始的阶段可调整" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                            Hint{text: "计划进度 " + plan_progress_percent() + "% · 已确认 " + plan_done_meals() + " / " + plan_planned_meals() + " 餐（总天数 " + plan_total_days() + " 天）"}
                                             for i in state.stages.len() {
                                                 let s = state.stages[i]
                                                 let marker = "第 " + (i + 1) + " 阶段"
                                                 if s.id == current_stage().id { marker = marker + " · 当前" }
-                                                Hint{text: marker + " · " + s.name + " · " + s.days + " 天 · " + month_day(floor(s.started / 86400)) + " 起 · " + s.consumed_kcal + " / " + s.kcal_goal + " kcal"}
+                                                Tint{draw_bg.color: #xffffffb0
+                                                    View{width: Fill height: Fit flow: Down spacing: 3
+                                                        Copy{text: marker + " · " + s.name draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                        Hint{text: s.days + " 天 · " + stage_span(s) + " · " + s.daily_kcal + " kcal/天 · 蛋白质 " + floor(s.protein_goal / s.days) + " g/天 · " + s.consumed_kcal + " / " + s.kcal_goal + " kcal"}
+                                                        Hint{text: stage_lock_hint(s)}
+                                                        if !stage_locked(s) {
+                                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                Quiet{text: "上移" enabled: i > 0 && !stage_locked(state.stages[i - 1]) on_click: || stage_move(i, -1)}
+                                                                Quiet{text: "下移" enabled: i + 1 < state.stages.len() && !stage_locked(state.stages[i + 1]) on_click: || stage_move(i, 1)}
+                                                                Quiet{text: "改目标" on_click: || { stage_edit = i stage_swap_cycle = s.days message = "请选择要替换到第 " + (i + 1) + " 阶段的候选目标。" redraw() }}
+                                                                Quiet{text: "移除" on_click: || stage_remove(i)}
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if stage_edit >= 0 && stage_edit < state.stages.len() {
+                                                View{width: Fill height: Fit flow: Down spacing: 8
+                                                    Copy{text: "为第 " + (stage_edit + 1) + " 阶段改目标" draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                    View{width: Fill height: Fit flow: Right spacing: 7
+                                                        for d in cycle_days {
+                                                            let pick_bg = #x00000000
+                                                            let pick_tc = muted
+                                                            if stage_swap_cycle == d { pick_bg = #xe9e3d8 pick_tc = ink }
+                                                            Pill{width: 88 height: 42 margin: 0 padding: 8 text: "" + d + " 天" on_click: || { stage_swap_cycle = d redraw() }
+                                                                draw_bg +: {color: pick_bg color_hover: #eee9e2 color_down: #ddd6cb color_focus: pick_bg border_radius: 14 border_size: 0}
+                                                                draw_text +: {color: pick_tc color_hover: ink color_down: ink color_focus: pick_tc text_style.font_size: 13}}
+                                                        }
+                                                    }
+                                                    for c in cycle_candidates(stage_swap_cycle) {
+                                                        Tint{draw_bg.color: #xffffffb0
+                                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                View{width: Fill height: Fit flow: Down spacing: 3
+                                                                    Copy{text: c.name draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                                    Hint{text: c.days + " 天 · " + c.daily_kcal + " kcal/天 · 蛋白质 " + floor(c.protein_goal / c.days) + " g/天"}
+                                                                }
+                                                                Soft{text: "改为这份目标" on_click: || stage_replace(stage_edit, c.id)}
+                                                            }
+                                                        }
+                                                    }
+                                                    Quiet{text: "取消改目标" on_click: || { stage_edit = -1 message = "已取消修改目标。" redraw() }}
+                                                }
                                             }
                                         }
                                     }

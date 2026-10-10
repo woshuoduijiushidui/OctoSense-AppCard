@@ -73,6 +73,16 @@ class ReleaseMetadataTests(unittest.TestCase):
                        "fn confirm_health_plan(){", "plan_draft.len() >= 12"):
             self.assertIn(marker, script)
 
+    def test_future_stage_editing_locks_started_stages(self):
+        # Offline guard only: qa_release.py performs the edits against a real host.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        self.assertIn("fn stage_locked(", script)
+        for marker in ("fn stage_lock_hint(", "fn relayout_stages(", "fn stage_move(",
+                       "fn stage_remove(", "fn stage_replace(", "fn plan_done_meals(){",
+                       "fn plan_planned_meals(){", "fn plan_progress_percent(){"):
+            self.assertIn(marker, script)
+        self.assertIn("按日历锁定，不是故障", script)
+
     def test_byte_protection_and_license_files(self):
         attributes = (APP / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("bundle/** -text", attributes.splitlines())
