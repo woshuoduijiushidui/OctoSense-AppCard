@@ -1,0 +1,122 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "feasible",
+    "reason",
+    "meals"
+  ],
+  "properties": {
+    "feasible": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400
+    },
+    "meals": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "title",
+          "uses",
+          "steps"
+        ],
+        "properties": {
+          "slot": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "title": {
+            "type": "string",
+            "enum": [
+              "清蒸",
+              "水煮",
+              "炖煮",
+              "干煎",
+              "烘烤",
+              "拌制",
+              "拼盘"
+            ]
+          },
+          "uses": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "food_id",
+                "grams"
+              ],
+              "properties": {
+                "food_id": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "grams": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100000
+                }
+              }
+            }
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "food_ids",
+                "minutes"
+              ],
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "清洗",
+                    "切块",
+                    "切片",
+                    "充分蒸熟",
+                    "充分煮熟",
+                    "炖至熟透",
+                    "干煎至熟",
+                    "烤至熟透",
+                    "混合",
+                    "装盘"
+                  ]
+                },
+                "food_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 6,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "minutes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 120
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

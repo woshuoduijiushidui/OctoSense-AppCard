@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-11",
+  "bundle_blake3": "3bc9c37849d862466a75de20c890d24201df544bfbd904703857d06412cbe573",
+  "bundle_bytes": 8379395,
+  "native_actual_feedback": [
+    "unknown stock has inline label fields",
+    "missing reference names the offending food",
+    "missing reference makes no writes",
+    "failed confirmation preserves scroll position",
+    "extra calories has a separate actionable error",
+    "complete labels and blank optional calories confirm",
+    "confirmed stock uses actual grams",
+    "nutrition snapshot stores entered reference",
+    "stock reference is not silently edited",
+    "recommendation snapshot is preserved",
+    "successful confirmation updates progress once",
+    "cancelled label draft never alters history or stock"
+  ],
+  "shared_day_flow_checks": 30,
+  "automated_checks": 18,
+  "real_inventory_used": false,
+  "live_provider_verified": false
+}
