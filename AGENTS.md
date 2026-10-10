@@ -17,8 +17,11 @@ shell to provide this app with additional privileges.
   explicit human approval first; never use these as the production identity.
 - Official CLI build copies stay under target and use the host's pinned
   .sources. Never modify cached upstream sources or clone duplicate frameworks.
-- Restamp after bundle changes. Keep real screenshots and bilingual READMEs
-  honest. Record what was tested and what remains unverified in VALIDATION.md.
+- Restamp after bundle changes: run the pinned `hub stamp bundle` so the
+  manifest digest matches, but keep the manifest version unchanged — the version
+  is set at the release checkpoint, not by a feature PR. Keep real screenshots
+  and bilingual READMEs honest. Record what was tested and what remains
+  unverified in VALIDATION.md.
 - Formal identity, privacy, signing and submission are human checkpoints.
 - Before changing text another person wrote on the tracker (an issue body, a spec), post the
   intended change and reasoning as a comment on the Parent Issue first. After the change lands,
