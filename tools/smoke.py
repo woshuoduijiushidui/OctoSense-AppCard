@@ -42,6 +42,11 @@ class UI:
             self.get("m", k="scroll", x=left + cw * 0.6, y=top + ch * 0.6, dy=240, wait=1)
         raise AssertionError(f"cannot reach {text or name}")
 
+    def scroll(self, dy):
+        card = next(w for w in self.get("snap")["s"] if w.get("i") == "card" and w["ty"] == "Splash")
+        left, top, cw, ch = card["r"]
+        self.get("m", k="scroll", x=left + cw * 0.6, y=top + ch * 0.6, dy=dy, wait=1)
+
     def fill(self, text, index=0, name=None):
         inputs = [w for w in self.snap() if w["ty"] == "TextInput" and w["r"][2] > 0]
         field = next(w for w in inputs if w.get("i") == name) if name else inputs[index]
@@ -119,7 +124,7 @@ def exercise(ui):
              sorted({p["days"] for p in programs}) == [1, 3, 7, 15, 21, 30]
              and all(sum(1 for p in programs if p["days"] == days) == 3 for days in (1, 3, 7, 15, 21, 30))
              and len({(p["days"], p["variant"]) for p in programs}) == 18
-             and ui.state()["program_active"] == 0)
+             and ui.state()["stages"] == [])
     ui.check("每份候选都有目标、特点、差异与指标",
              all(p["goal"] and p["trait"] and p["difference"] and p["kcal_goal"] > 0 for p in programs))
     on_cycle_before = {p["id"] for p in programs if p["days"] != 7}
@@ -133,7 +138,7 @@ def exercise(ui):
              len([p for p in after if p["days"] == 7]) == 3
              and {(p["id"], p["variant"]) for p in after if p["days"] == 7} != seven_before
              and {p["id"] for p in after if p["days"] != 7} == on_cycle_before
-             and ui.state()["program_active"] == 0)
+             and ui.state()["stages"] == [])
     # Regression for #13 review: replay the original defect by leaving the cycle
     # page on 15 days, then edit the profile. Saving rebuilds the candidates, and
     # the shown page and selected marker must come back in sync on 7 days.
@@ -145,7 +150,7 @@ def exercise(ui):
     ui.click("下一步 · 选择周期方案  →")
     ui.check("编辑档案后选中项与展示周期一致",
              "候选方案 · 7 天 · 日常健康" in ui.text() and "✓ 当前选中 · 7 天" in ui.text())
-    ui.click("确认选中方案 · 去录冰箱  →")
+    ui.click("确认计划 · 去录冰箱  →")
     for entry in ("拍照识别", "导入小票"):
         ui.click(entry)
         ui.check(entry + " 官方宿主回退手动录入",
