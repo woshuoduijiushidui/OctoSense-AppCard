@@ -42,6 +42,11 @@ class UI:
             self.get("m", k="scroll", x=left + cw * 0.6, y=top + ch * 0.6, dy=240, wait=1)
         raise AssertionError(f"cannot reach {text or name}")
 
+    def scroll(self, dy):
+        card = next(w for w in self.get("snap")["s"] if w.get("i") == "card" and w["ty"] == "Splash")
+        left, top, cw, ch = card["r"]
+        self.get("m", k="scroll", x=left + cw * 0.6, y=top + ch * 0.6, dy=dy, wait=1)
+
     def fill(self, text, index=0, name=None):
         inputs = [w for w in self.snap() if w["ty"] == "TextInput" and w["r"][2] > 0]
         field = next(w for w in inputs if w.get("i") == name) if name else inputs[index]
@@ -52,7 +57,7 @@ class UI:
         self.get("t", t=text, wait=1)
 
     def state_path(self):
-        files = list((self.profile / "apps/pantry-steward").rglob("pantry.json"))
+        files = list(self.profile.rglob("pantry.json"))
         assert len(files) == 1, files
         return files[0]
 
@@ -92,7 +97,7 @@ def exercise(ui):
                  sorted({p["days"] for p in programs}) == [1, 3, 7, 15, 21, 30]
                  and all(sum(1 for p in programs if p["days"] == days) == 3 for days in (1, 3, 7, 15, 21, 30))
                  and len({(p["days"], p["variant"]) for p in programs}) == 18
-                 and ui.state()["program_active"] == 0)
+                 and ui.state()["stages"] == [])
         ui.check("每份候选都有目标、特点、差异与指标",
                  all(p["goal"] and p["trait"] and p["difference"] and p["kcal_goal"] > 0 for p in programs))
         on_cycle_before = {p["id"] for p in programs if p["days"] != 7}
@@ -106,7 +111,7 @@ def exercise(ui):
                  len([p for p in after if p["days"] == 7]) == 3
                  and {(p["id"], p["variant"]) for p in after if p["days"] == 7} != seven_before
                  and {p["id"] for p in after if p["days"] != 7} == on_cycle_before
-                 and ui.state()["program_active"] == 0)
+                 and ui.state()["stages"] == [])
         # Regression for #13 review: editing the profile from the cycle page must
         # not leave the selected candidate off the cycle the page shows.
         ui.click("返回修改基础资料")
@@ -114,7 +119,7 @@ def exercise(ui):
             ui.fill(text, index)
         ui.click("下一步 · 选择周期方案  →")
         ui.check("编辑档案后选中项与展示周期一致", "✓ 当前选中 · 7 天" in ui.text())
-        ui.click("确认选中方案 · 去录冰箱  →")
+        ui.click("确认计划 · 去录冰箱  →")
     else:
         for index, text in enumerate(("30", "170", "65", "清淡", "无")):
             ui.fill(text, index)
@@ -276,9 +281,13 @@ def legacy_checks(ui):
     ui.click("开启自动生成（可选）")
     ui.click("关闭自动生成")
     after = ui.state()
-    ui.check("旧数据迁移保留库存方案和用餐数据", after["auto_generate"] is False and all(after[key] == value for key, value in before.items() if key != "log"))
+    kept = ("foods", "plans", "active", "next_id", "revision", "meal_count", "last_meal", "last_goal", "handled", "baseline")
+    ui.check("旧数据迁移保留库存方案和用餐数据",
+             after["auto_generate"] is False and "stages" in after and all(after[key] == before[key] for key in kept))
     ui.click("恢复演示前数据")
-    ui.check("恢复旧备份也默认手动且保留数据", ui.state() == dict(before, auto_generate=False))
+    restored = ui.state()
+    ui.check("恢复旧备份也默认手动且保留数据",
+             restored["auto_generate"] is False and all(restored[key] == before[key] for key in kept))
     ui.click("开启自动生成（可选）")
     ui.click("✦  方案")
     ui.click("我吃完了 · 核对实际用量")
