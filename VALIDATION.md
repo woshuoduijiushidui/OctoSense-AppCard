@@ -1,5 +1,58 @@
 # Migration validation
 
+## Six cycle candidates and per-cycle regeneration, 2026-10-10 — unreleased 0.6.2 working tree
+
+Implementation for Issue #8: cycle lengths 1/3/7/15/21/30 days, three
+profile-derived candidates per cycle, and a `重新生成本周期候选` action that
+replaces only the selected cycle's unconfirmed candidates.
+
+- `bundle/main.splash`: per-cycle totals come from the profile (age, sex, height,
+  weight, activity, health direction). Three emphasis templates (baseline /
+  higher protein / higher fibre, plus lower-energy `控卡` or a bulking `加餐`)
+  are shown, rotated by a small per-cycle seed so regeneration yields a
+  different but still-safe line-up. A profile that is not numeric-ready (missing
+  height/weight, or a base estimate below 1350 kcal = the 1200 kcal floor plus
+  the 150 kcal 控卡 step) gets no numbers and a stated reason; 控卡 targets are
+  floored at 1200 kcal. A started/active program is a confirmed snapshot and is never
+  removed or rewritten by regeneration; `program_history` is untouched.
+- Storage schema stays 1. A six-integer `cycle_seed` field is added and migrated;
+  old unconfirmed 7/21/30 candidates are rebuilt from the profile while a
+  confirmed program is kept.
+- `tools/smoke.py` and `tools/qa_release.py` now expect six cycles × three
+  candidates and additionally exercise cycle switching and regeneration.
+- Bilingual READMEs, `CYCLE-PLANS.md` and the `bundle/listing.json` description were
+  updated; the version stays 0.6.2 because it is set at release, not per feature PR.
+
+### Native run, 2026-10-10 — unreleased 0.6.2 working tree
+
+- Restamped the editable bundle with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 7bf19d8ea2647bd19054b677a5c35376a24c69168b5b3896e56041893a4ea3e4`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no hosts).
+- Ran the hidden official `card-host.exe` (same pinned revision) standalone at
+  1200x800 with task-owned `--app-data .local-state/qa-issue8`:
+  `tools/qa_release.py --port 18533 --profile .local-state/qa-issue8` — **8/8
+  checks passed**: first-run onboarding; six cycles × three candidates without
+  auto-activation; cycle switching shows that cycle's candidates; regeneration
+  replaces only the viewed cycle (other cycles' ids and `program_active`
+  unchanged); explicit cycle activation; inventory preview not committed;
+  explicit commit persists; manual default does not generate. No real inventory,
+  keys or provider calls were used.
+- Real captures of the run: `docs/qa/issue-8-six-cycles.png` (7-day candidates)
+  and `docs/qa/issue-8-regenerated.png` (after regeneration the second candidate
+  changes from 高蛋白 to 高纤). The four distributed `bundle/screenshots/*` still
+  show the previous 7/21/30 page and were not replaced.
+
+### Still unverified
+
+- Not run: the full `tools/smoke.py` 45-check regression, its `--legacy` fixture
+  (which must include `cycle_seed` before its exact-equality restore check passes),
+  `tools/launch.py --check` against a full host workspace, live-provider calls,
+  and non-Windows platforms. Signing and submission remain human checkpoints.
+  The version stays 0.6.2: it is set at release, so this feature branch does not bump
+  it. No tag, release, new Issue or submission was performed.
+
 ## Original-artwork confirmation, 2026-10-08 — current 0.6.2 candidate
 
 The author confirmed sunlit-pantry-bg.png is their own original artwork.

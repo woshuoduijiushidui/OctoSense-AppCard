@@ -87,7 +87,26 @@ def exercise(ui):
         for index, text in enumerate(("30", "170", "65", "", "清淡", "无")):
             ui.fill(text, index)
         ui.click("下一步 · 选择周期方案  →")
-        ui.check("周期候选为7/21/30天且未自动启用", [p["days"] for p in ui.state()["programs"]] == [7, 21, 30] and ui.state()["program_active"] == 0)
+        programs = ui.state()["programs"]
+        ui.check("六周期各3份候选且未自动启用",
+                 sorted({p["days"] for p in programs}) == [1, 3, 7, 15, 21, 30]
+                 and all(sum(1 for p in programs if p["days"] == days) == 3 for days in (1, 3, 7, 15, 21, 30))
+                 and len({(p["days"], p["variant"]) for p in programs}) == 18
+                 and ui.state()["program_active"] == 0)
+        ui.check("每份候选都有目标、特点、差异与指标",
+                 all(p["goal"] and p["trait"] and p["difference"] and p["kcal_goal"] > 0 for p in programs))
+        on_cycle_before = {p["id"] for p in programs if p["days"] != 7}
+        seven_before = {(p["id"], p["variant"]) for p in programs if p["days"] == 7}
+        ui.click("15 天")
+        ui.check("切换周期只展示该周期候选", "候选方案 · 15 天 · 日常健康" in ui.text())
+        ui.click("7 天")
+        ui.click("重新生成本周期候选")
+        after = ui.state()["programs"]
+        ui.check("重新生成只替换当前周期候选",
+                 len([p for p in after if p["days"] == 7]) == 3
+                 and {(p["id"], p["variant"]) for p in after if p["days"] == 7} != seven_before
+                 and {p["id"] for p in after if p["days"] != 7} == on_cycle_before
+                 and ui.state()["program_active"] == 0)
         ui.click("确认选中方案 · 去录冰箱  →")
     else:
         for index, text in enumerate(("30", "170", "65", "清淡", "无")):

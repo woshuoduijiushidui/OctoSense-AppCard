@@ -37,7 +37,23 @@ else:
     for index, text in enumerate(("30", "170", "65", "", "清淡", "")):
         ui.fill(text, index)
     ui.click("下一步 · 选择周期方案  →")
-    ui.check("7/21/30-day candidates require confirmation", [p["days"] for p in ui.state()["programs"]] == [7, 21, 30] and ui.state()["program_active"] == 0)
+    programs = ui.state()["programs"]
+    ui.check("six cycles with three candidates require confirmation",
+             sorted({p["days"] for p in programs}) == [1, 3, 7, 15, 21, 30]
+             and len(programs) == 18 and ui.state()["program_active"] == 0)
+    ui.click("15 天")
+    ui.check("switching cycles shows that cycle's candidates", "候选方案 · 15 天 · 日常健康" in ui.text())
+    ui.click("7 天")
+    ui.shot("03-six-cycles.png")
+    ui.click("重新生成本周期候选")
+    after = ui.state()["programs"]
+    ui.check("regeneration replaces only the viewed cycle",
+             len([p for p in after if p["days"] == 7]) == 3
+             and {(p["id"], p["variant"]) for p in after if p["days"] == 7}
+                 != {(p["id"], p["variant"]) for p in programs if p["days"] == 7}
+             and {p["id"] for p in after if p["days"] != 7} == {p["id"] for p in programs if p["days"] != 7}
+             and ui.state()["program_active"] == 0)
+    ui.shot("04-regenerated.png")
     ui.click("确认选中方案 · 去录冰箱  →")
     ui.check("explicit cycle is active", ui.state()["program_active"] != 0)
     ui.fill("菠菜", name="food_name")

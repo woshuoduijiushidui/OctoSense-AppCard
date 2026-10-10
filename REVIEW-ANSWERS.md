@@ -1,6 +1,6 @@
 # Review answers — 0.6.2 editable candidate, not an approval
 
-The script is unchanged from 0.6.1. Generate a fresh packet after stamping,
+This candidate adds the six cycle lengths with three candidates each. Generate a fresh packet after stamping,
 outside bundle/. These answers do not claim a release, paid provider test
 or Hub approval.
 
