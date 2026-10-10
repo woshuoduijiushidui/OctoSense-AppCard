@@ -54,6 +54,15 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn("__HUB_REVISION__", workflow)
         self.assertNotIn("hub stamp", workflow)
 
+    def test_six_cycle_candidates_and_regeneration_exist(self):
+        # Offline guard only: the native smoke test exercises the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        self.assertIn("let cycle_days = [1 3 7 15 21 30]", script)
+        self.assertIn("fn make_cycle_candidates", script)
+        self.assertIn("fn regenerate_cycle", script)
+        for key in ('"balance"', '"protein"', '"fiber"', '"trim"'):
+            self.assertIn(key, script)
+
     def test_byte_protection_and_license_files(self):
         attributes = (APP / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("bundle/** -text", attributes.splitlines())

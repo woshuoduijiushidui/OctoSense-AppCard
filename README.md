@@ -6,13 +6,13 @@ Turn confirmed pantry inventory into a meal you can review and execute.
 
 ## Version and evidence
 
-This checkout is the editable **0.6.2 candidate**, correcting publication metadata and the standalone launcher. The application script is unchanged from 0.6.1. [Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) requests review of **0.6.1**, not this candidate. Neither is claimed as admitted.
+This checkout is the editable **0.6.2 candidate**. The working tree also carries the Issue #8 six-cycle candidates; the release version is set by the release checkpoint, not by each feature branch. [Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) requests review of **0.6.1**, not this candidate. Neither is claimed as admitted.
 
 Only Windows is claimed: the current pinned tools passed source admission and a limited native smoke test. Full 0.6.2 live-provider regression, new-computer installation, full functional regression and sealed-release installation remain unverified. See [VALIDATION.md](VALIDATION.md).
 
 ## What it does
 
-Confirm a dietary profile and a 7/21/30-day cycle; preview inventory batches; generate a local-rule or official model.complete candidate; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Daily/cycle values are prototype estimates. Archive a cycle without deleting stock.
+Confirm a dietary profile and a 1/3/7/15/21/30-day cycle with three comparable candidates each (the 1-day cycle is the short trial); regenerate one cycle's candidates without touching a confirmed plan. Then preview inventory batches; generate a local-rule or official model.complete candidate; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Daily/cycle values are prototype estimates. Archive a cycle without deleting stock.
 
 Generation is manual by default. Optional automatic generation must be enabled in Settings; acceptance and consumption still require confirmation. Deleting a plan does not restore inventory or erase meal records. See [cycle details](CYCLE-PLANS.md).
 
