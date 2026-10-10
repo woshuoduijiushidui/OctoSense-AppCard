@@ -27,7 +27,7 @@ replaces only the selected cycle's unconfirmed candidates.
 
 - Restamped the editable bundle with the pinned official App Hub
   `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
-  `bundle_blake3 = 7bf19d8ea2647bd19054b677a5c35376a24c69168b5b3896e56041893a4ea3e4`.
+  `bundle_blake3 = 4102012b82809f27ebb522afd764bafa8ad6b69a118fefd1314ec6fa06d86940`.
   `hub check bundle --allow-unsigned` then **PASSED** with only the expected
   unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no hosts).
 - Ran the hidden official `card-host.exe` (same pinned revision) standalone at
@@ -43,6 +43,17 @@ replaces only the selected cycle's unconfirmed candidates.
   and `docs/qa/issue-8-regenerated.png` (after regeneration the second candidate
   changes from 高蛋白 to 高纤). The four distributed `bundle/screenshots/*` still
   show the previous 7/21/30 page and were not replaced.
+
+### Review fix, #13
+
+- `make_programs()` resets `cycle_view`, so re-saving the profile from the cycle
+  page cannot leave the selected candidate off the shown cycle.
+- Migration detects pre-0.6.3 candidates from the candidate record itself, not a
+  whole-file text search that user diet/food text can trigger.
+- Regressions: `tools/smoke.py` adds the profile re-save path to `exercise`, and
+  `--seed-legacy-candidates` / `--legacy-candidates` for a legacy candidate list
+  whose user text contains `difference`. Both paths were also verified live in
+  the hidden official host.
 
 ### Still unverified
 

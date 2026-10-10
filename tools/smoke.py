@@ -107,6 +107,13 @@ def exercise(ui):
                  and {(p["id"], p["variant"]) for p in after if p["days"] == 7} != seven_before
                  and {p["id"] for p in after if p["days"] != 7} == on_cycle_before
                  and ui.state()["program_active"] == 0)
+        # Regression for #13 review: editing the profile from the cycle page must
+        # not leave the selected candidate off the cycle the page shows.
+        ui.click("返回修改基础资料")
+        for index, text in enumerate(("30", "170", "65", "", "清淡", "无")):
+            ui.fill(text, index)
+        ui.click("下一步 · 选择周期方案  →")
+        ui.check("编辑档案后选中项与展示周期一致", "✓ 当前选中 · 7 天" in ui.text())
         ui.click("确认选中方案 · 去录冰箱  →")
     else:
         for index, text in enumerate(("30", "170", "65", "清淡", "无")):
@@ -304,15 +311,69 @@ def legacy_checks(ui):
     (ui.profile / "checks.json").write_text(json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
 
 
+def legacy_candidate_checks(ui):
+    text = ui.text()
+    ui.check("含字段名文本的旧档案仍重建六周期候选",
+             "选择具体周期方案" in text and "候选方案 · 7 天 · 日常健康" in text)
+    ui.click("重新生成本周期候选")
+    programs = ui.state()["programs"]
+    ui.check("迁移后的候选是六周期且用户文本保留",
+             sorted({p["days"] for p in programs}) == [1, 3, 7, 15, 21, 30]
+             and len(programs) == 18 and ui.state()["program_active"] == 0
+             and "difference" in ui.state()["profile"]["diet"])
+
+
+def seed_legacy_candidates(profile):
+    """Pre-0.6.3 state: old 7/21/30 candidates, and user text that contains a
+    field-name word so a whole-file migration search would misfire."""
+    target = profile / "apps" / "pantry-steward"
+    target.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    old = lambda ident, days: {
+        "id": ident, "name": str(days) + "天均衡起步", "days": days,
+        "daily_kcal": 1650, "kcal_goal": 1650 * days, "protein_goal": 52 * days,
+        "fiber_goal": 23 * days, "vitamin_c_goal": 75 * days,
+        "consumed_kcal": 0, "consumed_protein": 0, "consumed_fiber": 0,
+        "consumed_vitamin_c": 0, "started": 0, "intake": [],
+    }
+    state = {
+        "schema": 1, "foods": [], "plans": [], "active": 0, "next_id": 9,
+        "revision": 0, "offset": 0, "demo": False, "paused": False,
+        "reminders": True, "snooze": 0, "risk_key": "", "handled": 0,
+        "baseline": 0, "cycle_start": now, "log": [], "model_enabled": True,
+        "profile": {"done": False, "scene": "日常健康", "sex": "女性", "age": "30",
+                    "height": "170", "weight": "65", "avoid": "",
+                    "diet": "difference 清淡", "special": "", "activity": "轻活动",
+                    "basics_done": True, "plan_approved": False},
+        "programs": [old(1, 7), old(2, 21), old(3, 30)],
+        "program_active": 0, "program_next": 4, "program_history": [],
+        "health": {"start": 0, "day": 0, "meals_per_day": 2, "meals_week": 0,
+                   "meals_today": 0, "protein_week": 0, "fiber_week": 0,
+                   "protein_goal": 0, "fiber_goal": 0, "calcium_goal": 0, "iron_goal": 0},
+        "daily_target": 2000, "consumed_kcal": 0, "meal_count": 0,
+        "last_meal": "", "last_goal": "",
+    }
+    (target / "pantry.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18442)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--restart", action="store_true")
     parser.add_argument("--legacy", action="store_true", help="独立 profile 需预置合成旧数据与 before-demo.json")
+    parser.add_argument("--seed-legacy-candidates", action="store_true",
+                        help="启动前写入含字段名文本的旧候选数据")
+    parser.add_argument("--legacy-candidates", action="store_true",
+                        help="检查旧候选迁移为六周期")
     args = parser.parse_args()
+    if args.seed_legacy_candidates:
+        seed_legacy_candidates(args.profile.resolve())
+        return
     ui = UI(args.port, args.profile.resolve())
-    if args.legacy:
+    if args.legacy_candidates:
+        legacy_candidate_checks(ui)
+    elif args.legacy:
         legacy_checks(ui)
     elif args.restart:
         expected = json.loads((ui.profile / "expected-state.json").read_text(encoding="utf-8"))
