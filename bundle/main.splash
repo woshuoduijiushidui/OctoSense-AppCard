@@ -201,6 +201,12 @@ fn current_stage(){
     }
     current
 }
+// A plan is over once the calendar has passed the last stage's end date; the
+// page must not keep calling that stage "current".
+fn program_expired(){
+    let stage = current_stage()
+    stage != nil && program_day_index(stage) > stage.days
+}
 fn program_option(days, key, name, plan_goal, trait, difference, kcal_day, protein_day, fiber_day, vitamin_day){
     let p = {id: state.program_next name: name days: days variant: key
         goal: plan_goal trait: trait difference: difference daily_kcal: kcal_day
@@ -578,18 +584,34 @@ fn stage_replace(index, candidate_id){
     if commit(before) { message = "已更新第 " + (index + 1) + " 阶段目标。受影响的未来目标：" + impact + "。已获得的进度与确认记录不变。" }
     redraw()
 }
-// Plan progress = confirmed meals over planned meals; only the denominator
-// changes when a future stage is edited, never the confirmed numerator.
+// 每日餐次固定为 3（早、中、晚）；进度口径见 GLOSSARY「进度」。
+fn meals_per_day(){ 3 }
+fn stage_done_meals(stage){ stage.intake.len() }
+fn stage_planned_meals(stage){ stage.days * meals_per_day() }
+fn stage_progress_percent(stage){
+    goal_percent(stage_done_meals(stage), stage_planned_meals(stage))
+}
+fn stage_today_intake(stage){
+    let today = health_day()
+    let out = []
+    if stage == nil { return out }
+    for meal in stage.intake { if meal.day == today { out.push(meal) } }
+    out
+}
+// Plan progress rolls up the per-stage meals. A future stage has no confirmed
+// meals yet, so editing it never changes the confirmed numerator.
 fn plan_done_meals(){
     let done = 0
-    for s in state.stages { done = done + s.intake.len() }
+    for s in state.stages { done = done + stage_done_meals(s) }
     done
 }
-fn plan_planned_meals(){ plan_total_days() * state.health.meals_per_day }
+fn plan_planned_meals(){
+    let planned = 0
+    for s in state.stages { planned = planned + stage_planned_meals(s) }
+    planned
+}
 fn plan_progress_percent(){
-    let planned = plan_planned_meals()
-    if planned <= 0 { return 0 }
-    min(100, floor(plan_done_meals() * 100 / planned))
+    goal_percent(plan_done_meals(), plan_planned_meals())
 }
 fn plan_stage_index(stage){
     let i = 0
@@ -639,12 +661,6 @@ fn confirm_health_plan(){
     if commit(before) { message = "已启用 " + entries.len() + " 个阶段的计划。现在请录入冰箱里的真实食材。" }
     redraw()
 }
-fn choose_meals_per_day(value){
-    if value < 1 || value > 4 { return }
-    state.health.meals_per_day = value
-    message = "每日执行餐数已选择 " + value + " 餐；确认方案后生效。"
-    redraw()
-}
 // Archive the current plan into bounded history and clear the live stages.
 fn archive_plan(){
     if state.stages.len() > 0 {
@@ -687,12 +703,10 @@ fn health_week_meals(){ if state.health.start <= 0 || now() - state.health.start
 fn health_week_protein(){ if health_week_meals() == 0 { return 0 } state.health.protein_week }
 fn health_week_fiber(){ if health_week_meals() == 0 { return 0 } state.health.fiber_week }
 fn health_daily_percent(){
-    if state.health.meals_per_day <= 0 { return 0 }
-    min(100, floor(health_today_meals() * 100 / state.health.meals_per_day))
+    min(100, floor(health_today_meals() * 100 / meals_per_day()))
 }
 fn health_week_percent(){
-    if state.health.meals_per_day <= 0 { return 0 }
-    min(100, floor(health_week_meals() * 100 / (state.health.meals_per_day * 7)))
+    min(100, floor(health_week_meals() * 100 / (meals_per_day() * 7)))
 }
 fn nutrient_reference(name, food_id){
     // Per-100-g demonstration references, not a comprehensive food database.
@@ -932,6 +946,10 @@ fn ensure_extended_state(){
     profile_special = state.profile.special
     profile_activity = state.profile.activity
     if program_selected == 0 { program_selected = default_program_id() }
+    // The displayed daily target follows the stage whose dates cover today, so a
+    // calendar-driven stage switch shows the new stage's target.
+    let live_stage = current_stage()
+    if live_stage != nil { state.daily_target = live_stage.daily_kcal }
 }
 fn choose_scene(name){
     ensure_extended_state()
@@ -1010,7 +1028,7 @@ fn set_goal(text){ goal = text message = "已切换本餐偏好：" + text redra
 fn generate_alternative(){
     if ai_busy { message = "当前方案还在生成，请稍候。" redraw() return }
     plan("用户请求备选")
-    tab = 2
+    tab = 3
     redraw()
 }
 fn coming_soon(){ message = "第三方买菜平台的一键下单入口已预留，本次比赛版不执行外部购买。" redraw() }
@@ -1609,7 +1627,7 @@ fn generate(){
     if voice_phase != 0 { message = "请先结束语音输入并确认识别文字。" redraw() return }
     goal = ui.request.text().trim()
     if goal == "" { goal = "优先吃掉快过期的食材" }
-    plan("用户请求") tab = 2 details = false redraw()
+    plan("用户请求") tab = 3 details = false redraw()
 }
 fn accept(){
     let p = choose_plan()
@@ -1771,9 +1789,9 @@ fn check_risk(){
     }
     let next_before = state.next_id
     plan("临期提醒：" + names)
-    if ai_busy { if tab != 1 { tab = 2 } redraw() return }
+    if ai_busy { if tab != 2 { tab = 3 } redraw() return }
     if state.next_id == next_before { redraw() return }
-    if tab != 1 { tab = 2 }
+    if tab != 2 { tab = 3 }
     message = names + "快到期了，已准备新候选；原方案保留到你接受。"
     if invalid_active { message = "正式菜单已失效，已准备新候选。请检查后接受。" }
     redraw()
@@ -2111,8 +2129,8 @@ View{width: Fill height: Fill flow: Overlay
                             }
                             View{width: Fill height: 8}
                             navigation := View{width: Fill height: Fit flow: Down spacing: 8 on_render: || {
-                                let labels = ["⌂  首页" "▣  冰箱" "✦  方案" "◔  档案" "⚙  设置"]
-                                for i in 5 {
+                                let labels = ["⌂  首页" "◈  总览" "▣  冰箱" "✦  方案" "◔  档案" "⚙  设置"]
+                                for i in 6 {
                                     let bg = #x00000000
                                     let tc = muted
                                     if tab == i { bg = #xe9e3d8 tc = ink }
@@ -2134,7 +2152,7 @@ View{width: Fill height: Fill flow: Overlay
                                         agent_status := Hint{text: "本地规则 · 正在启动"}
                                     }
                                 }
-                                Quiet{text: "+  更新冰箱" on_click: || navigate(1)}
+                                Quiet{text: "+  更新冰箱" on_click: || navigate(2)}
                             }
                             content := View{width: Fill height: Fill on_render: || { ScrollYView{width: Fill height: Fill flow: Down spacing: 16 padding: Inset{right: 5}
                                 if ai_busy {
@@ -2149,7 +2167,7 @@ View{width: Fill height: Fill flow: Overlay
                                         Copy{text: "这次还没生成新方案" draw_text.text_style: theme.font_bold{font_size: 16}}
                                         Hint{text: ai_error}
                                         if ai_phase == 1 { Soft{text: "重新生成" on_click: || retry_ai()} }
-                                        if ai_phase == 3 || ai_phase == 4 { Soft{text: "查看 AI 设置" on_click: || navigate(4)} }
+                                        if ai_phase == 3 || ai_phase == 4 { Soft{text: "查看 AI 设置" on_click: || navigate(5)} }
                                     }
                                 }
                                 if tab == 0 {
@@ -2225,9 +2243,78 @@ View{width: Fill height: Fill flow: Overlay
                                             Hint{text: "Agent 会在库存、时间或你的反馈变化后继续重排，而不是每次从零回答。"}
                                         }
                                     }
-                                    if p != nil { Quiet{text: "查看当前方案与做法  ›" on_click: || { for i in state.plans.len() { if state.plans[i].id == state.active { selected = i } } tab = 2 details = false redraw() }} }
+                                    if p != nil { Quiet{text: "查看当前方案与做法  ›" on_click: || { for i in state.plans.len() { if state.plans[i].id == state.active { selected = i } } tab = 3 details = false redraw() }} }
                                 }
                                 if tab == 1 {
+                                    View{width: Fill height: Fit flow: Down spacing: 4
+                                        Heading{text: "总览" draw_text.text_style.font_size: 30}
+                                        Hint{text: "长期计划、当前阶段和今天的进度，只按确认吃完的餐食累计。"}
+                                    }
+                                    let program = current_stage()
+                                    // The dashboard only renders at onboarding_step 4, which needs
+                                    // a confirmed plan, so current_stage() is non-nil here.
+                                    if program != nil {
+                                        let plan_ended = program_expired()
+                                        Frost{padding: 20 spacing: 10
+                                            View{width: Fill height: Fit flow: Right spacing: 14 align: Align{y: .5}
+                                                View{width: Fill height: Fit flow: Down spacing: 4
+                                                    Copy{text: "长期计划" draw_text.text_style: theme.font_bold{font_size: 19}}
+                                                    Hint{text: state.stages.len() + " 个阶段 · 总天数 " + plan_total_days() + " 天 · 每日 " + meals_per_day() + " 餐"}
+                                                }
+                                                View{width: 88 height: 88 flow: Overlay align: Align{x: .5 y: .5}
+                                                    ProgressRing{width: 88 height: 88 draw_bg.progress: plan_progress_percent() / 100}
+                                                    Label{text: "" + plan_progress_percent() + "%" padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 15}}}
+                                                }
+                                            }
+                                            Hint{text: "计划进度 " + plan_progress_percent() + "% · 已确认 " + plan_done_meals() + " / " + plan_planned_meals() + " 餐"}
+                                            for i in state.stages.len() {
+                                                let s = state.stages[i]
+                                                let marker = "第 " + (i + 1) + " 阶段 · " + s.name
+                                                if s.id == program.id && !plan_ended { marker = marker + " · 当前" }
+                                                Tint{draw_bg.color: #xffffffb0
+                                                    View{width: Fill height: Fit flow: Down spacing: 3
+                                                        Copy{text: marker draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                        Hint{text: s.days + " 天 · " + stage_span(s) + " · " + s.daily_kcal + " kcal/天"}
+                                                        Hint{text: "进度 " + stage_progress_percent(s) + "%（已确认 " + stage_done_meals(s) + " / " + stage_planned_meals(s) + " 餐）"}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if plan_ended {
+                                            Frost{padding: 20 spacing: 10
+                                                Copy{text: "这一份计划已结束" draw_text.text_style: theme.font_bold{font_size: 19}}
+                                                Hint{text: "所有阶段的起止日期都已过去；已确认的进度与用餐记录保留。"}
+                                                Soft{text: "选择下一份计划…" on_click: || renew_programs()}
+                                            }
+                                        }
+                                        if !plan_ended {
+                                            View{width: Fill height: Fit flow: Right spacing: 16
+                                            Frost{width: Fill height: Fit padding: 20 spacing: 10
+                                                Copy{text: "当前阶段 · " + program.name draw_text.text_style: theme.font_bold{font_size: 19}}
+                                                Hint{text: "第 " + program_day_index(program) + " / " + program.days + " 天 · 阶段进度 " + stage_progress_percent(program) + "%"}
+                                                Divider{}
+                                                Copy{text: "目标与实际对比" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                Hint{text: "热量 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
+                                                Hint{text: "蛋白质 " + program.consumed_protein + " / " + program.protein_goal + " g"}
+                                                Hint{text: "阶段剩余 " + program_remaining_total(program) + " kcal · 今日已记录 " + program_today_kcal(program) + " / " + program.daily_kcal + " kcal"}
+                                            }
+                                            Frost{width: 330 height: Fit padding: 20 spacing: 10 draw_bg.color: #xf5f1ebd9
+                                                Copy{text: "今天 · 每餐进度" draw_text.text_style: theme.font_bold{font_size: 19}}
+                                                Hint{text: "每餐进度 · 已确认 " + stage_today_intake(program).len() + " / " + meals_per_day() + " 餐"}
+                                                Divider{}
+                                                if stage_today_intake(program).len() == 0 { Hint{text: "今天还没有确认用餐；生成菜单不会增加进度。"} }
+                                                for meal in stage_today_intake(program) {
+                                                    View{width: Fill height: Fit flow: Right spacing: 8
+                                                        Copy{text: meal.title}
+                                                        Hint{text: meal.kcal + " kcal"}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        }
+                                    }
+                                }
+                                if tab == 2 {
                                     View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
                                         View{width: Fill height: Fit flow: Down spacing: 4
                                             Heading{text: "冰箱食材" draw_text.text_style.font_size: 30}
@@ -2300,7 +2387,7 @@ View{width: Fill height: Fill flow: Overlay
                                         }
                                     }
                                 }
-                                if tab == 2 {
+                                if tab == 3 {
                                     View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
                                         View{width: Fill height: Fit flow: Down spacing: 4
                                             Heading{text: "AI 生成食谱方案" draw_text.text_style.font_size: 30}
@@ -2421,14 +2508,25 @@ View{width: Fill height: Fill flow: Overlay
                                         }
                                     }
                                 }
-                                if tab == 3 {
+                                if tab == 4 {
+                                    let program = current_stage()
+                                    let expired = program_expired()
+                                    let stage_header = "当前计划 · 当前阶段"
+                                    let stage_days = "第 " + program_day_index(program) + " / " + program.days + " 天"
+                                    let stage_state = "当前为第 " + plan_stage_index(program) + " 阶段"
+                                    let stage_remain = "阶段剩余 " + program_remaining_total(program) + " kcal · 今日已记录 " + program_today_kcal(program) + " kcal"
+                                    if expired {
+                                        stage_header = "当前计划 · 已结束"
+                                        stage_days = "所有阶段已结束"
+                                        stage_state = "计划已结束，已确认的进度与用餐记录保留"
+                                        stage_remain = "选择下一份计划后重新开始累计。"
+                                    }
                                     Frost{padding: 20 spacing: 10
-                                        let program = current_stage()
-                                        Heading{text: "当前计划 · 当前阶段"}
-                                        Copy{text: program.name + " · 第 " + program_day_index(program) + " / " + program.days + " 天"}
-                                        Hint{text: "计划共 " + state.stages.len() + " 个阶段 · 总天数 " + plan_total_days() + " 天 · 当前为第 " + plan_stage_index(program) + " 阶段"}
+                                        Heading{text: stage_header}
+                                        Copy{text: program.name + " · " + stage_days}
+                                        Hint{text: "计划共 " + state.stages.len() + " 个阶段 · 总天数 " + plan_total_days() + " 天 · " + stage_state}
                                         Hint{text: "阶段热量已记录 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
-                                        Hint{text: "阶段剩余 " + program_remaining_total(program) + " kcal · 今日已记录 " + program_today_kcal(program) + " kcal"}
+                                        Hint{text: stage_remain}
                                         Hint{text: "蛋白质 " + program.consumed_protein + " / " + program.protein_goal + " g"}
                                         Hint{text: "膳食纤维 " + program.consumed_fiber + " / " + program.fiber_goal + " g"}
                                         Hint{text: "维生素 C " + program.consumed_vitamin_c + " / " + program.vitamin_c_goal + " mg"}
@@ -2442,7 +2540,7 @@ View{width: Fill height: Fill flow: Overlay
                                             for i in state.stages.len() {
                                                 let s = state.stages[i]
                                                 let marker = "第 " + (i + 1) + " 阶段"
-                                                if s.id == current_stage().id { marker = marker + " · 当前" }
+                                                if s.id == current_stage().id && !expired { marker = marker + " · 当前" }
                                                 Tint{draw_bg.color: #xffffffb0
                                                     View{width: Fill height: Fit flow: Down spacing: 3
                                                         Copy{text: marker + " · " + s.name draw_text.text_style: theme.font_bold{font_size: 15}}
@@ -2542,7 +2640,7 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     Action{width: 260 text: "去安排下一餐  →" on_click: || navigate(0)}
                                 }
-                                if tab == 4 {
+                                if tab == 5 {
                                     View{width: Fill height: Fit flow: Down spacing: 4
                                         Heading{text: "管家设置" draw_text.text_style.font_size: 30}
                                         Hint{text: "管理用户画像、Agent 运行方式与比赛演示。"}
@@ -2622,7 +2720,7 @@ View{width: Fill height: Fill flow: Overlay
                             actions := View{width: Fill height: Fit flow: Down spacing: 8 on_render: || {
                                 View{width: Fill height: 0}
                                 let p = choose_plan()
-                                if tab == 2 && p != nil {
+                                if tab == 3 && p != nil {
                                     if pending {
                                         confirm_consumption := Action{text: "确认吃完 · 扣减库存并写入档案" on_click: || confirm_consume()}
                                         Soft{text: "取消" on_click: || cancel_consume()}
