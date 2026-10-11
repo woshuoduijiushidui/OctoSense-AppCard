@@ -13,8 +13,10 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_version_permissions_and_digest_shape(self):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["id"], "pantry-steward")
-        self.assertEqual(manifest["version"], "0.6.2")
-        self.assertEqual(set(manifest["capabilities"]), {"storage", "model"})
+        self.assertEqual(manifest["version"], "0.8.0")
+        self.assertEqual(set(manifest["capabilities"]), {"storage", "model", "camera", "files"})
+        self.assertEqual(manifest["requires"], ["host-api-v1"])
+        self.assertEqual(manifest["host_api"]["optional"], {"camera.permission.request": 1})
         self.assertRegex(manifest["integrity"]["bundle_blake3"], r"^[0-9a-f]{64}$")
 
     def test_listing_links_assets_and_platform(self):
@@ -22,7 +24,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(listing["publisher"]["support"], REPOSITORY + "/issues")
         self.assertEqual(listing["publisher"]["privacy_policy_url"], REPOSITORY + "/blob/main/PRIVACY.md")
         self.assertEqual(listing["platforms"], ["windows"])
-        self.assertTrue(listing["release_notes"].startswith("0.6.2"))
+        self.assertTrue(listing["release_notes"].startswith("0.8.0"))
         for name in listing["screenshots"] + [listing["icon"]]:
             path = (BUNDLE / name).resolve()
             self.assertTrue(path.is_relative_to(BUNDLE.resolve()))

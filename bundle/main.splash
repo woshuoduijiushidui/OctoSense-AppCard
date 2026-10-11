@@ -1,8 +1,9 @@
 // Independent Octoscript application. All pantry behaviour lives here.
-let state = {schema: 1 foods: [] plans: [] active: 0 next_id: 1 revision: 0
+let state = {schema: 2 foods: [] plans: [] active: 0 next_id: 1 revision: 0
+    profile_revision: 1 next_operation_id: 1 inventory_events: []
     offset: 0 demo: false paused: false reminders: true snooze: 0 risk_key: ""
     handled: 0 baseline: 0 cycle_start: time_now() log: [] model_enabled: true auto_generate: false
-    profile: {done: false scene: "" sex: "" age: "" height: "" weight: "" avoid: "" diet: "" special: "" activity: "轻活动" basics_done: false plan_approved: false}
+    profile: {done: false scene: "" sex: "" age: "" height: "" weight: "" allergies: "" avoidances: "" preferences: "" special: "" activity: "轻活动" basics_done: false plan_approved: false}
     programs: [] program_active: 0 program_next: 1 program_history: []
     health: {start: 0 day: 0 meals_per_day: 2 meals_week: 0 meals_today: 0
         protein_week: 0 fiber_week: 0 protein_goal: 0 fiber_goal: 0 calcium_goal: 0 iron_goal: 0}
@@ -11,14 +12,29 @@ let tab = 0
 let message = "先记库存，再安排今晚菜单。"
 let draft_name = ""
 let draft_grams = ""
+let draft_unit = "g"
 let draft_days = ""
+let draft_date = ""
+let draft_package_size = ""
+let draft_package_unit = ""
+let draft_average = ""
 let draft_kcal = ""
 let draft_protein = ""
 let draft_fiber = ""
 let draft_vitamin_c = ""
 let show_nutrition_input = false
 let goal = "优先吃掉快过期的食材"
-let preview = nil
+let intake_draft = nil
+let vision_phase = 0 // 0 unknown, 1 supported, 2 unavailable
+let vision_sequence = 0
+let vision_reply = nil
+let recognition_sequence = 0
+let recognition_phase = "" // choose, camera, import, model
+let recognition_mode = ""
+let recognition_image = ""
+let recognition_deadline = 0
+let recognition_reply = nil
+let expanded_name = ""
 let selected = -1
 let details = false
 let pending = false
@@ -28,7 +44,7 @@ let booted = false
 let storage_blocked = false
 let editing_id = 0
 let removal = nil
-// AI receives inventory data, never a credential or a filesystem path.
+// Credentials stay in the host; image calls send only an app-local path.
 let use_ai = true
 let ai_phase = 0 // 0 checking, 1 configured, 2 no config, 3 error, 4 unsupported host
 let ai_busy = false
@@ -50,12 +66,14 @@ let voice_sequence = 0
 let voice_deadline = 0
 let voice_reply = nil
 let onboarding_step = 0
+let profile_edit_backup = nil
 let profile_sex = "不透露"
 let profile_age = ""
 let profile_height = ""
 let profile_weight = ""
-let profile_avoid = ""
-let profile_diet = ""
+let profile_allergies = ""
+let profile_avoidances = ""
+let profile_preferences = ""
 let profile_special = ""
 let profile_activity = "轻活动"
 let program_selected = 0
@@ -103,6 +121,12 @@ let Soft = Pill{width: Fill height: 48 margin: 0 padding: 9
 let Quiet = Pill{height: 42 margin: 0 padding: Inset{left: 13 right: 13}
     draw_bg +: {border_radius: 21 color: #xf4f1eced color_hover: #ebe6de color_down: #ddd6cb color_focus: #xf4f1eced border_size: 0}
     draw_text +: {color: ink color_hover: ink color_down: ink color_focus: ink text_style.font_size: 12}}
+let ChosenSoft = Soft{
+    draw_bg +: {color: moss color_hover: #x373632 color_down: #x171714 color_focus: moss}
+    draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff color_focus: #xffffff}}
+let ChosenQuiet = Quiet{
+    draw_bg +: {color: moss color_hover: #x373632 color_down: #x171714 color_focus: moss}
+    draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff color_focus: #xffffff}}
 let Copy = Label{width: Fill padding: 0 draw_text +: {color: ink text_style.font_size: 14 line_spacing: 1.35}}
 let Hint = Label{width: Fill padding: 0 draw_text +: {color: muted text_style.font_size: 12 line_spacing: 1.35}}
 let Heading = Label{width: Fill padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 27} line_spacing: 1.15}}
@@ -144,11 +168,11 @@ let Tint = RoundedView{show_bg: true width: Fill height: Fit flow: Down padding:
 let EmojiGlass = RoundedView{show_bg: true width: 42 height: 42 flow: Overlay align: Align{x: .5 y: .5}
     draw_bg +: {color: #xffffff8f border_radius: 21}}
 // The OctoSense host supplies the window frame; fill its entire content area.
-let GlassCard = GlassPanel{width: Fill height: Fill flow: Down padding: 0 spacing: 0
-    draw_bg +: {corner_radius: 0 blur_level: 3.0 edge_blur_level: .65 lensing_strength: 0.0 lensing_width: 0
-        tint_color: #xf7f1d8 tint_alpha: .22 rim_alpha: 0.0 rim_width: 1.0 inner_shadow_alpha: 0.0
-        shadow_color: #x00000000 shadow_radius: 28 shadow_sigma: 10 shadow_offset: vec2(0, 10)
-        fallback_color: #xeee9d5e8 border_color: #xffffff border_alpha: 0.0 border_width: 1}}
+// Keep the app surface in the normal draw order. GlassPanel hoists its entire
+// child tree above the host's native device-permission sheet, leaving that
+// sheet invisible while it still intercepts clicks.
+let GlassCard = RoundedView{show_bg: true width: Fill height: Fill flow: Down padding: 0 spacing: 0
+    draw_bg +: {color: #xf7f1ebe8 border_radius: 0}}
 let Divider = SolidView{width: Fill height: 1 draw_bg.color: #x75826842}
 let StatusDot = SolidView{width: 10 height: 10 draw_bg +: {color: #xb7a58a border_radius: 5}}
 let ProgressRing = SolidView{width: 84 height: 84 draw_bg +: {
@@ -235,6 +259,14 @@ fn confirm_health_plan(){
     state.health.protein_goal = floor(chosen.protein_goal * 7 / chosen.days)
     state.health.fiber_goal = floor(chosen.fiber_goal * 7 / chosen.days)
     record("确认周期方案：" + chosen.name + " · " + chosen.days + " 天 · " + chosen.kcal_goal + " kcal")
+    if profile_edit_backup != nil {
+        let original = profile_edit_backup
+        state.profile.done = true
+        onboarding_step = 4 tab = 4
+        if commit(original) { message = "用户画像与新周期方案已保存，原有库存不变。" }
+        profile_edit_backup = nil
+        redraw() return
+    }
     if commit(before) { message = "已启用「" + chosen.name + "」。现在请录入冰箱里的真实食材。" }
     redraw()
 }
@@ -253,7 +285,7 @@ fn renew_programs(){
         state.program_history.push(old.to_json().parse_json())
     }
     state.program_active = 0 state.profile.plan_approved = false
-    state.profile.done = false state.active = 0 state.revision = state.revision + 1
+    state.profile.done = false state.active = 0 state.profile_revision = state.profile_revision + 1
     make_programs() onboarding_step = 2 tab = 0
     record("开始选择下一周期；旧周期已存档，库存保持不变")
     if commit(before) { message = "新周期候选已生成。请选定后继续；旧库存未删除。" }
@@ -322,7 +354,7 @@ fn meal_nutrients(uses){
     {complete: complete kcal: floor(kcal) protein: floor(protein * 10) / 10
         fiber: floor(fiber * 10) / 10 vitamin_c: floor(vitamin * 10) / 10}
 }
-fn record_health_meal(uses){
+fn record_health_meal(uses, numeric){
     if state.health.start <= 0 { state.health.start = now() }
     if now() - state.health.start >= 604800 {
         state.health.start = now() state.health.meals_week = 0
@@ -333,7 +365,7 @@ fn record_health_meal(uses){
     state.health.meals_today = state.health.meals_today + 1
     state.health.meals_week = state.health.meals_week + 1
     let estimate = meal_nutrients(uses)
-    if estimate.complete {
+    if numeric && estimate.complete {
         state.health.protein_week = state.health.protein_week + estimate.protein
         state.health.fiber_week = state.health.fiber_week + estimate.fiber
     }
@@ -348,11 +380,19 @@ fn numeric_budget_ok(uses){
     let estimate = meal_nutrients(uses)
     estimate.complete && estimate.kcal > 0 && estimate.kcal <= program_remaining_daily(program)
 }
+fn plan_numeric(p){
+    if p != nil && p.to_json().search("\"numeric\"") >= 0 && p.numeric == false { return false }
+    true
+}
+fn plan_ready(p){
+    if !validate(p) { return false }
+    if plan_numeric(p) { return numeric_budget_ok(p.uses) }
+    let program = active_program()
+    program != nil && program_remaining_daily(program) > 0
+}
 fn now(){ time_now() + state.offset }
 fn available(){
-    let count = 0
-    for food in state.foods { if food.grams > 0 { count = count + 1 } }
-    count
+    state.foods.len()
 }
 fn record(text){
     state.log.push({at: time_now() text: text})
@@ -369,7 +409,7 @@ fn commit(before){
     fs.write("pantry.backup.json", state.to_json())
     true
 }
-fn valid_state(value){
+fn valid_legacy_state(value){
     try {
         if value.schema != 1 || value.foods.len() > 60 || value.plans.len() > 20 { return false }
         if !(value.revision >= 0) || !(value.next_id >= 1) || !(value.offset >= 0) { return false }
@@ -403,7 +443,119 @@ fn valid_state(value){
         true
     } catch { false }
 }
+fn today_day(){ floor(now() / 86400) }
+fn canonical_unit(unit){
+    if unit == "g" || unit == "kg" { return "g" }
+    if unit == "ml" || unit == "L" { return "ml" }
+    if unit == "个" { return "piece" }
+    ""
+}
+fn unit_scale(unit){
+    if unit == "kg" || unit == "L" { return 1000 }
+    if unit == "g" || unit == "ml" || unit == "个" { return 1 }
+    0
+}
+fn package_unit(unit){ unit == "盒" || unit == "袋" || unit == "瓶" }
+fn valid_nutrition(n){
+    n.kcal > 0 && n.kcal <= 900 && n.protein >= 0 && n.protein <= 100 &&
+        n.fiber >= 0 && n.fiber <= 100 && n.vitamin_c >= 0 && n.vitamin_c <= 1000
+}
+fn normalize_batch(input, id){
+    let name = input.name.trim()
+    let quantity = input.quantity
+    let unit = input.unit
+    let size = input.package_size
+    let size_unit = input.package_size_unit
+    let average = input.average_item_grams
+    let day = input.expires_on_day
+    let precision = input.expiry_precision
+    let source = input.source
+    if id < 1 || id != floor(id) || name.len() < 1 || name.len() > 40 || !(quantity > 0) || quantity > 100000 ||
+        !(size >= 0) || !(average >= 0) || average > 100000 || !(day >= 0) || day > 1000000 || day != floor(day) { return nil }
+    if (day == 0 && precision != "unknown") || (day > 0 && precision != "exact" && precision != "estimated") { return nil }
+    if source != "manual" && source != "receipt_image" && source != "food_image" && source != "legacy" { return nil }
+    let target = canonical_unit(unit)
+    let canonical_quantity = 0
+    if target != "" {
+        if size != 0 || size_unit != "" { return nil }
+        if unit == "个" && quantity != floor(quantity) { return nil }
+        canonical_quantity = quantity * unit_scale(unit)
+    } else {
+        if !package_unit(unit) { return nil }
+        if size == 0 {
+            if size_unit != "" { return nil }
+        } else {
+            if size_unit != "g" && size_unit != "ml" && size_unit != "piece" { return nil }
+            if size_unit == "piece" && size != floor(size) { return nil }
+            target = size_unit
+            canonical_quantity = quantity * size
+        }
+    }
+    if canonical_quantity > 100000000 || (average > 0 && target != "piece") { return nil }
+    let batch = {id: id name: name quantity: quantity unit: unit
+        canonical_quantity: canonical_quantity canonical_unit: target
+        package_size: size package_size_unit: size_unit average_item_grams: average
+        expires_on_day: day expiry_precision: precision source: source}
+    if input.to_json().search("\"nutrition\"") >= 0 {
+        if !valid_nutrition(input.nutrition) { return nil }
+        batch.nutrition = input.nutrition
+    }
+    if input.to_json().search("\"source_image_path\"") >= 0 { batch.source_image_path = input.source_image_path }
+    batch
+}
+fn valid_state(value){
+    try {
+        if value.schema != 2 || value.foods.len() > 60 || value.plans.len() > 20 ||
+            !(value.revision >= 0) || value.revision != floor(value.revision) ||
+            !(value.profile_revision >= 1) || value.profile_revision != floor(value.profile_revision) ||
+            !(value.next_operation_id >= 1) || value.next_operation_id != floor(value.next_operation_id) ||
+            !(value.next_id >= 1) || value.next_id != floor(value.next_id) || !(value.offset >= 0) { return false }
+        let profile = value.profile
+        profile.allergies.len() profile.avoidances.len() profile.preferences.len()
+        if value.health.meals_per_day < 1 || value.health.meals_per_day > 4 || value.health.meals_week < 0 || value.health.meals_today < 0 { return false }
+        if value.health.protein_goal < 0 || value.health.fiber_goal < 0 || value.health.calcium_goal < 0 || value.health.iron_goal < 0 { return false }
+        if value.health.protein_week < 0 || value.health.fiber_week < 0 { return false }
+        if value.programs.len() > 3 || value.program_history.len() > 12 || value.program_next < 1 { return false }
+        for program in value.programs {
+            if program.days < 7 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 || program.consumed_kcal < 0 || program.intake.len() > 150 { return false }
+            if program.protein_goal < 0 || program.fiber_goal < 0 || program.vitamin_c_goal < 0 { return false }
+        }
+        if value.program_active > 0 {
+            let found_program = false
+            for program in value.programs { if program.id == value.program_active && program.started > 0 { found_program = true } }
+            if !found_program { return false }
+        }
+        let ids = []
+        for f in value.foods {
+            let normalized = normalize_batch(f, f.id)
+            if normalized == nil || normalized.name != f.name || normalized.canonical_quantity != f.canonical_quantity || normalized.canonical_unit != f.canonical_unit { return false }
+            if f.id >= value.next_id { return false }
+            for seen in ids { if seen == f.id { return false } }
+            ids.push(f.id)
+        }
+        let event_ids = []
+        for event in value.inventory_events {
+            if event.operation_id.len() == 0 || event.batch_ids.len() == 0 ||
+                (event.type != "add" && event.type != "edit" && event.type != "discard" && event.type != "consume") { return false }
+            for seen in event_ids { if seen == event.operation_id { return false } }
+            event_ids.push(event.operation_id)
+            for id in event.batch_ids { if !(id > 0) || id != floor(id) { return false } }
+        }
+        for p in value.plans {
+            if p.uses.len() > 60 || p.title.len() == 0 || !(p.revision >= 0) || !(p.profile_revision >= 1) { return false }
+            for u in p.uses {
+                if !(u.food_id > 0) || !(u.grams >= 0) || (plan_numeric(p) && !(u.grams > 0)) { return false }
+            }
+        }
+        let fields = value.active + value.snooze + value.handled + value.baseline + value.cycle_start + value.log.len()
+        let options = value.demo && value.paused && value.reminders
+        value.risk_key.len()
+        true
+    } catch { false }
+}
 fn migrate_state(value){
+    if value.schema == 2 { return value }
+    if value.schema != 1 { return value }
     // The embedded OctoSense desktop can use an older script runtime where
     // missing-field try/catch is unreliable. Inspect serialized keys first,
     // then add V2 fields explicitly without discarding V1 inventory or plans.
@@ -449,6 +601,42 @@ fn migrate_state(value){
     if json.search("last_goal") < 0 { value.last_goal = "" }
     if json.search("model_enabled") < 0 { value.model_enabled = true }
     if json.search("auto_generate") < 0 { value.auto_generate = false }
+    if !valid_legacy_state(value) { return value }
+    let old_profile = value.profile
+    let avoidances = ""
+    let preferences = ""
+    if old_profile.to_json().search("\"avoid\"") >= 0 { avoidances = old_profile.avoid }
+    if old_profile.to_json().search("\"diet\"") >= 0 { preferences = old_profile.diet }
+    value.profile = {done: old_profile.done scene: old_profile.scene sex: old_profile.sex
+        age: old_profile.age height: old_profile.height weight: old_profile.weight
+        allergies: "" avoidances: avoidances.trim() preferences: preferences.trim()
+        special: old_profile.special activity: old_profile.activity
+        basics_done: old_profile.basics_done plan_approved: old_profile.plan_approved}
+    let converted = []
+    let clock = time_now() + value.offset
+    let day = floor(clock / 86400)
+    for f in value.foods {
+        if f.grams > 0 {
+            let expiry = day + max(0, ceil((f.expires - clock) / 86400))
+            if f.expires < clock { expiry = day - 1 }
+            let batch = {id: f.id name: f.name.trim() quantity: f.grams unit: "g"
+                canonical_quantity: f.grams canonical_unit: "g"
+                package_size: 0 package_size_unit: "" average_item_grams: 0
+                expires_on_day: expiry expiry_precision: "estimated" source: "legacy"}
+            if f.to_json().search("\"nutrition\"") >= 0 {
+                batch.nutrition = {kcal: f.nutrition.kcal protein: f.nutrition.protein
+                    fiber: f.nutrition.fiber vitamin_c: f.nutrition.vitamin_c precision: "estimated"}
+            }
+            converted.push(batch)
+            if f.id >= value.next_id { value.next_id = f.id + 1 }
+        }
+    }
+    value.foods = converted
+    for p in value.plans { p.profile_revision = 1 }
+    value.schema = 2
+    value.profile_revision = 1
+    value.next_operation_id = 1
+    value.inventory_events = []
     value
 }
 fn ensure_extended_state(){
@@ -464,8 +652,9 @@ fn ensure_extended_state(){
     profile_age = state.profile.age
     profile_height = state.profile.height
     profile_weight = state.profile.weight
-    profile_avoid = state.profile.avoid
-    profile_diet = state.profile.diet
+    profile_allergies = state.profile.allergies
+    profile_avoidances = state.profile.avoidances
+    profile_preferences = state.profile.preferences
     profile_special = state.profile.special
     profile_activity = state.profile.activity
     if program_selected == 0 && state.programs.len() > 0 { program_selected = state.programs[0].id }
@@ -474,10 +663,11 @@ fn choose_scene(name){
     ensure_extended_state()
     let before = state.to_json()
     state.profile.scene = name
+    state.profile_revision = state.profile_revision + 1
     // A direction is a preference, never an executable numeric plan.
     onboarding_step = 1
     record("首次建档：选择场景 · " + name)
-    commit(before)
+    if profile_edit_backup == nil { commit(before) }
     message = "再补充一点基础信息，让后续每一餐都沿用同一份用户画像。"
     redraw()
 }
@@ -493,14 +683,15 @@ fn save_profile(){
     state.profile.age = profile_age.trim()
     state.profile.height = profile_height.trim()
     state.profile.weight = profile_weight.trim()
-    state.profile.avoid = profile_avoid.trim()
-    state.profile.diet = profile_diet.trim()
+    state.profile.allergies = profile_allergies.trim()
+    state.profile.avoidances = profile_avoidances.trim()
+    state.profile.preferences = profile_preferences.trim()
     state.profile.special = profile_special.trim()
     state.profile.activity = profile_activity
     state.profile.basics_done = true
     state.profile.plan_approved = false
     state.program_active = 0
-    state.active = 0 state.revision = state.revision + 1
+    state.active = 0 state.profile_revision = state.profile_revision + 1
     make_programs()
     // An explicit reference plan is created before the first inventory entry.
     // These are demo estimates for healthy adults, not an assessment of disease.
@@ -517,7 +708,8 @@ fn save_profile(){
     }
     onboarding_step = 2
     record("首次建档：基础画像已确认")
-    if commit(before) { message = "已生成 3 份具体周期候选。先选定其中一份，再录入冰箱。" }
+    if profile_edit_backup != nil { message = "已生成 3 份周期候选。确认选中的方案后保存画像。" }
+    else { if commit(before) { message = "已生成 3 份具体周期候选。先选定其中一份，再录入冰箱。" } }
     redraw()
 }
 fn finish_onboarding(){
@@ -531,7 +723,11 @@ fn finish_onboarding(){
     redraw()
 }
 fn restart_profile(){
-    let before = state.to_json()
+    if profile_edit_backup != nil { return }
+    if pending || ai_busy || plan_removal != nil || intake_draft != nil || editing_id > 0 || recognition_phase != "" {
+        message = "请先结束当前操作，再修改用户画像。" redraw() return
+    }
+    profile_edit_backup = state.to_json()
     let old = active_program()
     if old != nil {
         if state.program_history.len() >= 12 { state.program_history.remove(0) }
@@ -541,9 +737,19 @@ fn restart_profile(){
     state.profile.done = false
     state.profile.basics_done = false
     state.profile.plan_approved = false
-    state.profile.scene = ""
+    state.profile_revision = state.profile_revision + 1
     onboarding_step = 0
-    if commit(before) { message = "已进入用户画像设置；现有库存不会被删除。" }
+    message = "正在修改用户画像；确认新周期方案前不会保存更改。"
+    redraw()
+}
+fn cancel_profile_edit(){
+    if profile_edit_backup == nil { return }
+    state = profile_edit_backup.parse_json()
+    profile_edit_backup = nil
+    program_selected = state.program_active
+    ensure_extended_state()
+    onboarding_step = 4 tab = 4
+    message = "已取消画像修改，原有档案和库存保持不变。"
     redraw()
 }
 fn set_goal(text){ goal = text message = "已切换本餐偏好：" + text redraw() }
@@ -568,6 +774,15 @@ fn nutrition_percent(){
     let p = active_program()
     if p == nil || p.kcal_goal <= 0 { return 0 }
     min(100, floor(p.consumed_kcal * 100 / p.kcal_goal))
+}
+fn unquantified_meals(){
+    let p = active_program()
+    if p == nil { return 0 }
+    let count = 0
+    for meal in p.intake {
+        if meal.to_json().search("\"nutrition_known\"") >= 0 && meal.nutrition_known == false { count = count + 1 }
+    }
+    count
 }
 fn preference_summary(){
     ensure_extended_state()
@@ -606,7 +821,7 @@ fn render_dashboard(){
 }
 fn redraw(){
     ui.app_body.render()
-    if onboarding_step == 4 { start_timeout(0.01, || render_dashboard()) }
+    if onboarding_step == 4 && recognition_phase == "" { start_timeout(0.01, || render_dashboard()) }
 }
 fn navigate(index){
     if pending { message = "请先确认或取消本次扣减。" redraw() return }
@@ -617,16 +832,21 @@ fn navigate(index){
     reset_pending = false
     redraw()
 }
+fn read_saved_state(path){
+    try {
+        let candidate = migrate_state(fs.read(path).parse_json())
+        if valid_state(candidate) { return candidate }
+    } catch { return nil }
+    nil
+}
 fn load(){
     let restored = false
     if fs.exists("pantry.json") {
-        let saved = fs.read("pantry.json").parse_json()
-        saved = migrate_state(saved)
-        if valid_state(saved) { state = saved restored = true }
+        let saved = read_saved_state("pantry.json")
+        if saved != nil { state = saved restored = true }
         if !restored && fs.exists("pantry.backup.json") {
-            let backup = fs.read("pantry.backup.json").parse_json()
-            backup = migrate_state(backup)
-            if valid_state(backup) {
+            let backup = read_saved_state("pantry.backup.json")
+            if backup != nil {
                 state = backup restored = true
                 message = "已从备份恢复库存。原文件保留，请检查最近一次操作。"
             }
@@ -639,15 +859,190 @@ fn load(){
     booted = true
     redraw()
     read_ai_config()
+    probe_vision()
 }
-fn remaining(food){ ceil((food.expires - now()) / 86400) }
+fn batch_grams(food){
+    if food.canonical_unit == "g" { return food.canonical_quantity }
+    if food.canonical_unit == "piece" && food.average_item_grams > 0 {
+        return food.canonical_quantity * food.average_item_grams
+    }
+    0
+}
+fn restriction_matches(text, name){
+    let terms = [text]
+    for delimiter in ["，" "、" "；" ";" ","] {
+        let next = []
+        for part in terms { for word in part.split(delimiter) { next.push(word) } }
+        terms = next
+    }
+    for raw in terms {
+        let term = raw.trim()
+        if term != "" && (term.search(name) >= 0 || name.search(term) >= 0) { return true }
+    }
+    false
+}
+fn excluded_food(name){
+    restriction_matches(state.profile.allergies, name) || restriction_matches(state.profile.avoidances, name)
+}
+fn plan_eligible(food){
+    (food.expires_on_day == 0 || food.expires_on_day >= today_day()) &&
+        batch_grams(food) > 0 && !excluded_food(food.name)
+}
+fn auto_plan_eligible(food){ plan_eligible(food) }
+fn recipe_eligible(food){
+    (food.expires_on_day == 0 || food.expires_on_day >= today_day()) &&
+        food.canonical_quantity > 0 &&
+        (food.canonical_unit == "g" || food.canonical_unit == "ml" || food.canonical_unit == "piece") &&
+        !excluded_food(food.name)
+}
+fn expiry_order(food){
+    if food.expires_on_day == 0 { return 1000000 }
+    food.expires_on_day
+}
+fn use_quantity(item){
+    if item.to_json().search("\"quantity\"") >= 0 { return item.quantity }
+    item.grams
+}
+fn use_unit(item){
+    if item.to_json().search("\"unit\"") >= 0 { return item.unit }
+    "g"
+}
+fn use_unit_text(item){ if use_unit(item) == "piece" { return "个" } use_unit(item) }
+fn plan_use(food, desired_grams){
+    if !plan_eligible(food) { return nil }
+    let quantity = min(food.canonical_quantity, max(1, floor(desired_grams)))
+    let grams = quantity
+    if food.canonical_unit == "piece" {
+        quantity = min(food.canonical_quantity, max(1, floor(desired_grams / food.average_item_grams)))
+        grams = quantity * food.average_item_grams
+    }
+    {food_id: food.id name: food.name quantity: quantity unit: food.canonical_unit grams: grams}
+}
+fn recipe_use(food, desired_quantity){
+    if !recipe_eligible(food) { return nil }
+    let quantity = min(food.canonical_quantity, max(1, floor(desired_quantity)))
+    if food.canonical_unit == "piece" && quantity != floor(quantity) { return nil }
+    let grams = 0
+    if food.canonical_unit == "g" { grams = quantity }
+    {food_id: food.id name: food.name quantity: quantity unit: food.canonical_unit grams: grams}
+}
+fn revise_plan_use(item, desired_grams){
+    for food in state.foods {
+        if food.id == item.food_id {
+            let revised = plan_use(food, desired_grams)
+            if revised != nil { item.quantity = revised.quantity item.unit = revised.unit item.grams = revised.grams }
+        }
+    }
+}
+fn remaining(food){
+    if food.expires_on_day == 0 { return 0 }
+    food.expires_on_day - today_day()
+}
 fn freshness(food){
-    if food.grams == 0 { return "已用完" }
-    if food.expires < now() { return "已过期 · 待复核" }
+    if food.expires_on_day == 0 { return "保质期未知" }
     let days = remaining(food)
-    if days <= 1 { return "临期 · 今天优先" }
-    if days <= 3 { return "关注 · " + days + " 天" }
-    "新鲜 · " + days + " 天"
+    if days < 0 { return "已过期" }
+    if days <= 3 { return "临期" }
+    "正常"
+}
+fn inventory_failure(before, reason){
+    state = before.parse_json()
+    message = reason
+    false
+}
+fn apply_inventory_operation(operation, before_state){
+    let before = before_state
+    if before == nil { before = state.to_json() }
+    if storage_blocked { return inventory_failure(before, "库存文件异常，已停止写入。") }
+    try {
+        if operation.operation_id.len() == 0 { return inventory_failure(before, "库存操作缺少编号。") }
+        for event in before.parse_json().inventory_events {
+            if event.operation_id == operation.operation_id {
+                state = before.parse_json()
+                return true
+            }
+        }
+        let next = state.to_json().parse_json()
+        let affected = []
+        if operation.type != "add" && operation.type != "edit" && operation.type != "discard" && operation.type != "consume" {
+            return inventory_failure(before, "不支持的库存操作。")
+        }
+        if operation.type == "add" {
+            if operation.batches.len() == 0 || next.foods.len() + operation.batches.len() > 60 {
+                return inventory_failure(before, "入库批次数量无效或已超过 60 批上限。")
+            }
+            for input in operation.batches {
+                let batch = normalize_batch(input, next.next_id)
+                if batch == nil { return inventory_failure(before, "入库食材的数量、单位或到期信息无效。") }
+                next.foods.push(batch)
+                affected.push(batch.id)
+                next.next_id = next.next_id + 1
+            }
+        }
+        if operation.type == "edit" {
+            let index = -1
+            for i in next.foods.len() { if next.foods[i].id == operation.batch_id { index = i } }
+            if index < 0 { return inventory_failure(before, "要编辑的批次已不存在。") }
+            let old = next.foods[index]
+            let input = operation.batch
+            input.source = old.source
+            let batch = normalize_batch(input, old.id)
+            if batch == nil { return inventory_failure(before, "编辑后的数量、单位或到期信息无效。") }
+            if old.to_json().search("\"source_image_path\"") >= 0 && batch.to_json().search("\"source_image_path\"") < 0 {
+                batch.source_image_path = old.source_image_path
+            }
+            next.foods[index] = batch
+            affected.push(batch.id)
+        }
+        if operation.type == "discard" {
+            let kept = []
+            for f in next.foods {
+                if f.id == operation.batch_id { affected.push(f.id) }
+                else { kept.push(f) }
+            }
+            if affected.len() != 1 { return inventory_failure(before, "要移除的批次已不存在。") }
+            next.foods = kept
+        }
+        if operation.type == "consume" {
+            if operation.uses.len() == 0 { return inventory_failure(before, "请先确认实际食用量。") }
+            for u in operation.uses {
+                let index = -1
+                for i in next.foods.len() { if next.foods[i].id == u.food_id { index = i } }
+                if index < 0 { return inventory_failure(before, "食用批次已不存在或用量重复。") }
+                let batch = next.foods[index]
+                if !(u.quantity > 0) || u.quantity > batch.canonical_quantity ||
+                    u.unit != batch.canonical_unit ||
+                    (batch.expires_on_day > 0 && batch.expires_on_day < today_day()) ||
+                    (u.unit == "piece" && u.quantity != floor(u.quantity)) {
+                    return inventory_failure(before, "食用数量、单位或批次有效期无效。")
+                }
+                let was_risk = freshness(batch) == "临期"
+                let left = batch.canonical_quantity - u.quantity
+                affected.push(batch.id)
+                if left == 0 {
+                    next.foods.remove(index)
+                    if was_risk { next.handled = next.handled + 1 }
+                } else {
+                    let factor = unit_scale(batch.unit)
+                    if package_unit(batch.unit) { factor = batch.package_size }
+                    batch.canonical_quantity = left
+                    batch.quantity = left / factor
+                }
+            }
+        }
+        next.revision = next.revision + 1
+        next.next_operation_id = next.next_operation_id + 1
+        next.risk_key = ""
+        next.inventory_events.push({operation_id: operation.operation_id type: operation.type batch_ids: affected})
+        state = next
+        if operation.type == "add" { state.baseline = max(state.baseline, risk_count() + state.handled) }
+        if operation.type == "add" { record("确认入库：" + operation.batches[0].name + " 等 " + operation.batches.len() + " 批") }
+        if operation.type == "edit" { record("确认修改批次 #" + operation.batch_id + "：" + operation.batch.name) }
+        if operation.type == "discard" { record("用户确认移除批次 #" + operation.batch_id + "（不计食用）") }
+        if !valid_state(state) { return inventory_failure(before, "库存操作未通过完整校验。") }
+        if !commit(before) { return false }
+        true
+    } catch { inventory_failure(before, "库存操作数据无效，未写入。") }
 }
 fn food_emoji(name){
     if name.search("菠菜") >= 0 || name.search("青菜") >= 0 || name.search("生菜") >= 0 { return "🥬" }
@@ -664,7 +1059,7 @@ fn food_emoji(name){
 }
 fn risk_count(){
     let count = 0
-    for food in state.foods { if food.grams > 0 && food.expires >= now() && remaining(food) <= 3 { count = count + 1 } }
+    for food in state.foods { if freshness(food) == "临期" { count = count + 1 } }
     count
 }
 fn progress_percent(){
@@ -676,7 +1071,7 @@ fn urgent_names(){
     let text = ""
     let count = 0
     for food in state.foods {
-        if count < 3 && food.grams > 0 && food.expires >= now() && remaining(food) <= 3 {
+        if count < 3 && freshness(food) == "临期" {
             if text != "" { text = text + " · " }
             text = text + food.name
             count = count + 1
@@ -689,87 +1084,413 @@ fn plan_percent(p){
     if p == nil { return 0 }
     let planned = 0
     let stocked = 0
-    for food in state.foods { if food.grams > 0 && food.expires >= now() { stocked = stocked + food.grams } }
+    for food in state.foods { if plan_eligible(food) { stocked = stocked + batch_grams(food) } }
     for u in p.uses { planned = planned + u.grams }
     if stocked <= 0 { return 0 }
     min(100, floor(planned * 100 / stocked))
 }
-fn preview_food(){
-    let name = draft_name.trim()
-    let grams = draft_grams.trim().to_f64()
-    let days = draft_days.trim().to_f64()
-    if name.len() == 0 || name.len() > 40 { message = "食材名称请填写 1–40 个字。" redraw() return }
-    if !(grams >= 1) || grams > 100000 || grams != floor(grams) { message = "数量请填写 1–100000 的整数，单位为克。" redraw() return }
-    if !(days >= 0) || days > 365 || days != floor(days) { message = "剩余天数请填写 0–365 的整数。" redraw() return }
-    if state.foods.len() >= 60 && editing_id == 0 { message = "已达 60 批库存上限，请先处理现有食材。" redraw() return }
-    let id = state.next_id
-    if editing_id > 0 { id = editing_id }
-    // 0 means expires at the end of today's UTC day, not already expired.
-    let expires = now() + days * 86400
-    if days == 0 { expires = (floor(now() / 86400) + 1) * 86400 }
-    preview = {id: id name: name grams: grams expires: expires}
-    let any_nutrient = draft_kcal.trim() != "" || draft_protein.trim() != "" || draft_fiber.trim() != "" || draft_vitamin_c.trim() != ""
-    if any_nutrient {
-        if draft_kcal.trim() == "" || draft_protein.trim() == "" || draft_fiber.trim() == "" || draft_vitamin_c.trim() == "" {
-            preview = nil message = "自填营养参考需提供完整的每 100g 四项数值；也可全留空。" redraw() return
-        }
-        let k = draft_kcal.trim().to_f64()
-        let p = draft_protein.trim().to_f64()
-        let f = draft_fiber.trim().to_f64()
-        let v = draft_vitamin_c.trim().to_f64()
-        if !(k > 0) || k > 900 || !(p >= 0) || p > 100 || !(f >= 0) || f > 100 || !(v >= 0) || v > 1000 {
-            preview = nil message = "营养数值无效，请按包装每 100g 标示核对。" redraw() return
-        }
-        preview.nutrition = {kcal: k protein: p fiber: f vitamin_c: v}
+fn two_digits(value){ if value < 10 { return "0" + value } "" + value }
+fn calendar_day(text){
+    let value = text.trim()
+    let parts = value.split("-")
+    if value.len() != 10 || parts.len() != 3 { return -1 }
+    let year = parts[0].to_f64()
+    let month = parts[1].to_f64()
+    let day = parts[2].to_f64()
+    if !(year >= 1970) || year > 2100 || year != floor(year) ||
+        !(month >= 1) || month > 12 || month != floor(month) ||
+        !(day >= 1) || day != floor(day) || parts[0] != "" + year ||
+        parts[1] != two_digits(month) || parts[2] != two_digits(day) { return -1 }
+    let limit = 31
+    if month == 4 || month == 6 || month == 9 || month == 11 { limit = 30 }
+    if month == 2 {
+        limit = 28
+        if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { limit = 29 }
     }
-    message = "请核对数量和到期时间，确认后才会记入库存。"
+    if day > limit { return -1 }
+    let y = year
+    if month <= 2 { y = y - 1 }
+    let era = floor(y / 400)
+    let yoe = y - era * 400
+    let mp = month + 9
+    if month > 2 { mp = month - 3 }
+    let doy = floor((153 * mp + 2) / 5) + day - 1
+    let doe = yoe * 365 + floor(yoe / 4) - floor(yoe / 100) + doy
+    era * 146097 + doe - 719468
+}
+fn calendar_text(day){
+    let z = day + 719468
+    let era = floor(z / 146097)
+    let doe = z - era * 146097
+    let yoe = floor((doe - floor(doe / 1460) + floor(doe / 36524) - floor(doe / 146096)) / 365)
+    let year = yoe + era * 400
+    let doy = doe - (365 * yoe + floor(yoe / 4) - floor(yoe / 100))
+    let mp = floor((5 * doy + 2) / 153)
+    let number = doy - floor((153 * mp + 2) / 5) + 1
+    let month = mp - 9
+    if mp < 10 { month = mp + 3 }
+    if month <= 2 { year = year + 1 }
+    year + "-" + two_digits(month) + "-" + two_digits(number)
+}
+fn expiry_text(batch){
+    if batch.expires_on_day == 0 { return "保质期未知" }
+    let days = remaining(batch)
+    let text = calendar_text(batch.expires_on_day)
+    if days < 0 { return text + " · 已过期 " + (0 - days) + " 天" }
+    text + " · 剩余 " + days + " 天"
+}
+fn freshness_rank(status){
+    if status == "已过期" { return 4 }
+    if status == "临期" { return 3 }
+    if status == "保质期未知" { return 2 }
+    1
+}
+fn inventory_groups(){
+    let groups = []
+    for food in state.foods {
+        let index = -1
+        for i in groups.len() { if groups[i].name == food.name.trim() { index = i } }
+        if index < 0 {
+            groups.push({name: food.name.trim() batches: [] totals: [] status: "正常"})
+            index = groups.len() - 1
+        }
+        let group = groups[index]
+        group.batches.push(food)
+        let status = freshness(food)
+        if freshness_rank(status) > freshness_rank(group.status) { group.status = status }
+        let unit = food.canonical_unit
+        let amount = food.canonical_quantity
+        if unit == "piece" { unit = "个" }
+        if unit == "" { unit = food.unit amount = food.quantity }
+        let found = false
+        for total in group.totals {
+            if total.unit == unit { total.quantity = total.quantity + amount found = true }
+        }
+        if !found { group.totals.push({quantity: amount unit: unit}) }
+    }
+    groups
+}
+fn batch_ordinal(id){
+    let name = ""
+    for food in state.foods { if food.id == id { name = food.name } }
+    let ordinal = 0
+    for food in state.foods {
+        if food.name == name { ordinal = ordinal + 1 }
+        if food.id == id { return ordinal }
+    }
+    0
+}
+fn group_total_text(group){
+    let text = ""
+    for total in group.totals {
+        if text != "" { text = text + " / " }
+        text = text + total.quantity + total.unit
+    }
+    text
+}
+fn toggle_group(name){
+    if expanded_name == name { expanded_name = "" }
+    else { expanded_name = name }
     redraw()
 }
-fn cancel_preview(){ preview = nil message = "已取消入库，库存没有变化。" redraw() }
-fn add_food(){
-    if preview == nil { return }
-    let before = state.to_json()
-    if editing_id == 0 { state.foods.push(preview) state.next_id = state.next_id + 1 }
-    if editing_id > 0 { for i in state.foods.len() { if state.foods[i].id == editing_id { state.foods[i] = preview } } }
-    state.revision = state.revision + 1
-    state.risk_key = ""
-    state.baseline = max(state.baseline, risk_count() + state.handled)
-    record("确认入库：" + preview.name + " " + preview.grams + "g")
-    if !commit(before) { redraw() return }
-    preview = nil editing_id = 0 draft_name = "" draft_grams = "" draft_days = "" clear_nutrition_draft()
-    message = "已入库。旧方案已重新校验；需要新方案时，请回首页点击生成这一餐。"
+fn draft_batch(row){
+    let days_text = row.remaining_days_text.trim()
+    let date_text = row.printed_expires_on.trim()
+    if days_text != "" && date_text != "" { return nil }
+    let expiry = 0
+    let precision = "unknown"
+    if days_text != "" {
+        let days = days_text.to_f64()
+        if (!(days >= 0) && editing_id == 0) || days < -365 || days > 365 || days != floor(days) { return nil }
+        expiry = today_day() + days
+        precision = "estimated"
+    }
+    if date_text != "" {
+        expiry = calendar_day(date_text)
+        if expiry < 1 { return nil }
+        precision = "exact"
+    }
+    let size = 0
+    if row.package_size_text.trim() != "" { size = row.package_size_text.trim().to_f64() }
+    let average = 0
+    if row.average_item_grams_text.trim() != "" { average = row.average_item_grams_text.trim().to_f64() }
+    let quantity = row.quantity_text.trim().to_f64()
+    if (row.unit == "个" || (package_unit(row.unit) && editing_id == 0)) && quantity != floor(quantity) { return nil }
+    if row.package_size_text.trim() != "" && !(size > 0) { return nil }
+    if row.average_item_grams_text.trim() != "" && !(average > 0) { return nil }
+    let size_unit = row.package_size_unit
+    if !package_unit(row.unit) { size = 0 size_unit = "" }
+    if package_unit(row.unit) && size == 0 && size_unit != "" { return nil }
+    if row.unit != "个" && !(package_unit(row.unit) && size_unit == "piece") { average = 0 }
+    let source = "manual"
+    if intake_draft.mode == "receipt_image" { source = "receipt_image" }
+    if intake_draft.mode == "food_image" { source = "food_image" }
+    let batch = {name: row.name.trim() quantity: quantity unit: row.unit
+        package_size: size package_size_unit: size_unit
+        average_item_grams: average expires_on_day: expiry expiry_precision: precision source: source}
+    let any_nutrient = row.kcal_text.trim() != "" || row.protein_text.trim() != "" ||
+        row.fiber_text.trim() != "" || row.vitamin_c_text.trim() != ""
+    if any_nutrient {
+        if row.kcal_text.trim() == "" || row.protein_text.trim() == "" ||
+            row.fiber_text.trim() == "" || row.vitamin_c_text.trim() == "" { return nil }
+        batch.nutrition = {kcal: row.kcal_text.trim().to_f64() protein: row.protein_text.trim().to_f64()
+            fiber: row.fiber_text.trim().to_f64() vitamin_c: row.vitamin_c_text.trim().to_f64()}
+    }
+    if intake_draft.image_path != "" { batch.source_image_path = intake_draft.image_path }
+    if normalize_batch(batch, 1) == nil { return nil }
+    batch
+}
+fn preview_food(){
+    let row = {row_id: 1 selected: true name: draft_name quantity_text: draft_grams unit: draft_unit
+        package_size_text: draft_package_size package_size_unit: draft_package_unit
+        average_item_grams_text: draft_average remaining_days_text: draft_days printed_expires_on: draft_date
+        kcal_text: draft_kcal protein_text: draft_protein fiber_text: draft_fiber vitamin_c_text: draft_vitamin_c}
+    intake_draft = {draft_id: "manual-" + time_now() mode: "manual" image_path: "" rows: [row] busy: false error: ""}
+    message = "请核对草稿；只有最终确认才会写入库存。"
+    redraw()
+}
+fn cancel_preview(){ intake_draft = nil message = "已取消草稿，库存没有变化。" redraw() }
+fn probe_vision(){
+    vision_sequence = vision_sequence + 1
+    let token = vision_sequence
+    vision_phase = 0
+    try { host.request("model.vision_capability", {}, |r| { vision_reply = {token: token reply: r} }) }
+    catch { vision_phase = 2 }
+}
+fn begin_recognition(mode){
+    if vision_phase != 1 {
+        message = "当前宿主暂不支持图片识别，请使用手动录入"
+        redraw() return
+    }
+    if intake_draft != nil {
+        message = "请先最终确认入库或取消当前草稿，再开始新的图片识别。"
+        redraw() return
+    }
+    if editing_id > 0 || recognition_phase != "" { return }
+    recognition_sequence = recognition_sequence + 1
+    recognition_mode = mode recognition_image = "" recognition_phase = "choose"
+    message = "请选择拍照或从本机导入一张图片；识别后仍需逐项核对。"
+    redraw()
+}
+fn cancel_recognition(){
+    if recognition_phase == "camera" { ui.recognition_cam.stop() }
+    recognition_sequence = recognition_sequence + 1
+    recognition_phase = "" recognition_image = "" recognition_deadline = 0
+    message = "已取消图片识别，库存没有变化；可继续手动录入。"
+    redraw()
+}
+fn recognition_failed(reason){
+    if recognition_phase == "camera" { ui.recognition_cam.stop() }
+    recognition_sequence = recognition_sequence + 1
+    recognition_phase = "" recognition_image = "" recognition_deadline = 0
+    message = reason + "；可继续手动录入。"
+    redraw()
+}
+fn choose_camera(){
+    if recognition_phase != "choose" { return }
+    recognition_phase = "camera" redraw()
+    let token = recognition_sequence
+    try { host.request("camera.permission.request", {}, |r| {
+        recognition_reply = {token: token action: "permission" reply: r}
+    }) } catch { recognition_failed("摄像头授权请求失败") }
+}
+fn camera_captured(){
+    if recognition_phase != "camera" { return }
+    let path = ui.recognition_cam.last()
+    ui.recognition_cam.stop()
+    if !path.is_string() || path == "" { recognition_failed("拍照失败") return }
+    recognize_image(path)
+}
+fn import_recognition_image(){
+    if recognition_phase != "choose" { return }
+    recognition_phase = "import" redraw()
+    let token = recognition_sequence
+    try { host.request("files.import", {path: "/pantry-image-" + time_now() + "-" + token}, |r| {
+        recognition_reply = {token: token action: "import" reply: r}
+    }) } catch { recognition_failed("图片导入失败") }
+}
+fn recognition_schema(){
+    let value = {type: "string" maxLength: 120}
+    {type: "object" additionalProperties: false required: ["items"] properties: {
+        items: {type: "array" minItems: 1 maxItems: 30 items: {type: "object" additionalProperties: false
+            required: ["name" "quantity_text" "unit" "package_size_text" "package_size_unit"
+                "average_item_grams_text" "remaining_days_text" "printed_expires_on"
+                "kcal_text" "protein_text" "fiber_text" "vitamin_c_text"]
+            properties: {name: value quantity_text: value unit: value package_size_text: value
+                package_size_unit: value average_item_grams_text: value remaining_days_text: value
+                printed_expires_on: value kcal_text: value protein_text: value fiber_text: value vitamin_c_text: value}}}}}
+}
+fn recognize_image(path){
+    if !path.is_string() || path == "" { recognition_failed("图片路径无效") return }
+    recognition_image = path recognition_phase = "model"
+    recognition_deadline = time_now() + 95
+    let task = "识别这张冰箱或食材照片中的食材；只列能看清的食材。无法看清的数量、单位、保质期、包装和营养字段留空。不要猜测重量或营养值。"
+    if recognition_mode == "receipt_image" {
+        task = "读取这张购物小票中的食材行；只列能看清的食材，排除价格、运费和非食品。小票未明确给出的数量、单位、保质期、包装和营养字段留空。"
+    }
+    message = "正在识别图片；结果仅为待核对草稿，不会自动入库。" redraw()
+    let token = recognition_sequence
+    try { host.request("model.complete", {task: task + " 最多30行；所有字段都是字符串；只输出符合 schema 的 JSON。"
+        image: {app_path: path} input: {kind: recognition_mode} schema: recognition_schema() class: "fast"},
+        |r| { recognition_reply = {token: token action: "model" reply: r} }) }
+    catch { recognition_failed("图片识别请求失败") }
+}
+fn draft_text(value){ if value != nil && value.is_string() { return value.trim() } "" }
+fn recognized_unit(value){
+    let unit = draft_text(value)
+    if canonical_unit(unit) != "" || package_unit(unit) { return unit }
+    ""
+}
+fn recognized_package_size_unit(value){
+    let unit = draft_text(value)
+    if unit == "g" || unit == "ml" || unit == "piece" { return unit }
+    if unit == "个" { return "piece" }
+    ""
+}
+fn apply_recognition_reply(envelope){
+    if envelope.token != recognition_sequence { return }
+    let r = envelope.reply
+    if envelope.action == "permission" && recognition_phase == "camera" {
+        if r.is_ok && r.data.app_consent == true && r.data.os_permission == "granted" {
+            ui.recognition_cam.start()
+        } else { recognition_failed("摄像头未获授权") }
+        return
+    }
+    if envelope.action == "import" && recognition_phase == "import" {
+        if !r.is_ok {
+            if ("" + r.error).search("foreground_required") >= 0 {
+                recognition_phase = "choose"
+                message = "系统文件选择框尚未把焦点还给冰箱管家。请先点击本窗口，再选择已有图片。"
+                redraw() return
+            }
+            recognition_failed("图片导入失败：" + r.error) return
+        }
+        if r.data.cancelled == true { cancel_recognition() return }
+        recognize_image(r.data.path) return
+    }
+    if envelope.action != "model" || recognition_phase != "model" { return }
+    if !r.is_ok { recognition_failed("图片识别不可用：" + r.error) return }
+    if r.data == nil || !r.data.is_object() { recognition_failed("识别结果格式无效") return }
+    let output = r.data.output
+    if output == nil || !output.is_object() { recognition_failed("识别结果格式无效") return }
+    let items = output.items
+    if items == nil || !items.is_array() || items.len() < 1 || items.len() > 30 {
+        recognition_failed("识别结果格式无效") return
+    }
+    let rows = []
+    for item in items {
+        if item == nil || !item.is_object() { recognition_failed("识别结果格式无效") return }
+        let row = {row_id: rows.len() + 1 selected: true name: draft_text(item.name)
+            quantity_text: draft_text(item.quantity_text) unit: recognized_unit(item.unit)
+            package_size_text: draft_text(item.package_size_text)
+            package_size_unit: recognized_package_size_unit(item.package_size_unit)
+            average_item_grams_text: draft_text(item.average_item_grams_text)
+            remaining_days_text: draft_text(item.remaining_days_text) printed_expires_on: draft_text(item.printed_expires_on)
+            kcal_text: draft_text(item.kcal_text) protein_text: draft_text(item.protein_text)
+            fiber_text: draft_text(item.fiber_text) vitamin_c_text: draft_text(item.vitamin_c_text)}
+        rows.push(row)
+    }
+    if rows.len() == 0 { recognition_failed("图片中没有可核对的食材") return }
+    intake_draft = {draft_id: "image-" + time_now() mode: recognition_mode image_path: recognition_image
+        rows: rows busy: false error: ""}
+    recognition_sequence = recognition_sequence + 1
+    recognition_phase = "" recognition_deadline = 0
+    message = "图片识别得到 " + rows.len() + " 行草稿；请补全不确定的字段，确认后才会入库。"
+    redraw()
+}
+fn remove_draft_row(id){
+    if intake_draft == nil { return }
+    let kept = []
+    for row in intake_draft.rows { if row.row_id != id { kept.push(row) } }
+    intake_draft.rows = kept
+    if kept.len() == 0 { intake_draft = nil }
+    redraw()
+}
+fn reset_manual_form(){
+    draft_name = "" draft_grams = "" draft_unit = "g" draft_days = "" draft_date = ""
+    draft_package_size = "" draft_package_unit = "" draft_average = ""
+    clear_nutrition_draft()
+}
+fn draft_issue(row){
+    let name = row.name.trim()
+    if name == "" || name.len() > 40 { return "食材名称需为 1–40 字。" }
+    let quantity = row.quantity_text.trim().to_f64()
+    if !(quantity > 0) || quantity > 100000 { return "数量需为大于 0 的有效数字。" }
+    if row.unit == "" { return "请选择页面提供的单位，并核对数量。" }
+    if canonical_unit(row.unit) == "" && !package_unit(row.unit) {
+        return "不支持单位“" + row.unit + "”；请选择页面提供的单位，并核对数量。"
+    }
+    if row.remaining_days_text.trim() != "" && row.printed_expires_on.trim() != "" {
+        return "剩余天数和印刷日期只能填一个，或都留空。"
+    }
+    let nutrient_count = 0
+    for value in [row.kcal_text row.protein_text row.fiber_text row.vitamin_c_text] {
+        if value.trim() != "" { nutrient_count = nutrient_count + 1 }
+    }
+    if nutrient_count > 0 && nutrient_count < 4 { return "营养四项需要全部填写，或全部留空。" }
+    "请核对数量、包装、日期和营养值。"
+}
+fn draft_rejected(reason){
+    message = reason
+    intake_draft.error = reason
+    ui.draft_error.set_text(reason)
+}
+fn confirm_intake(){
+    if intake_draft == nil || intake_draft.busy { return }
+    intake_draft.error = ""
+    ui.draft_error.set_text("")
+    let batches = []
+    for row in intake_draft.rows {
+        if row.selected {
+            let batch = draft_batch(row)
+            if batch == nil {
+                draft_rejected("第 " + row.row_id + " 行（" + row.name + "）：" + draft_issue(row))
+                return
+            }
+            batches.push(batch)
+        }
+    }
+    if batches.len() == 0 { draft_rejected("请至少勾选一行有效食材。") return }
+    if editing_id > 0 && batches.len() != 1 { draft_rejected("编辑时只能确认当前批次。") return }
+    let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "add" batches: batches}
+    if editing_id > 0 { operation.type = "edit" operation.batch_id = editing_id operation.batch = batches[0] }
+    if !apply_inventory_operation(operation, nil) { draft_rejected(message) return }
+    intake_draft = nil editing_id = 0 reset_manual_form()
+    message = "已确认入库。旧方案需要重新校验；需要新方案时，请回首页点击生成这一餐。"
     if state.auto_generate && !state.paused && state.profile.done { plan("库存变化") }
     redraw()
 }
 fn edit_food(id){
     for f in state.foods {
         if f.id == id {
-            editing_id = id draft_name = f.name draft_grams = "" + f.grams draft_days = "" + max(0, remaining(f))
+            editing_id = id draft_name = f.name draft_grams = "" + f.quantity draft_unit = f.unit
+            draft_package_size = "" draft_package_unit = f.package_size_unit draft_average = ""
+            if f.package_size > 0 { draft_package_size = "" + f.package_size }
+            if f.average_item_grams > 0 { draft_average = "" + f.average_item_grams }
+            draft_days = "" draft_date = ""
+            if f.expiry_precision == "estimated" { draft_days = "" + remaining(f) }
+            if f.expiry_precision == "exact" { draft_date = calendar_text(f.expires_on_day) }
             clear_nutrition_draft()
             if f.to_json().search("nutrition") >= 0 {
                 show_nutrition_input = true
                 draft_kcal = "" + f.nutrition.kcal draft_protein = "" + f.nutrition.protein
                 draft_fiber = "" + f.nutrition.fiber draft_vitamin_c = "" + f.nutrition.vitamin_c
             }
-            preview = nil removal = nil message = "修改后先预览，再确认保存；现有方案会重新校验。"
+            intake_draft = nil removal = nil message = "修改后先预览，再确认保存；现有方案会重新校验。"
         }
     }
     redraw()
 }
-fn cancel_edit(){ editing_id = 0 preview = nil removal = nil draft_name = "" draft_grams = "" draft_days = "" clear_nutrition_draft() message = "已取消修改。" redraw() }
+fn cancel_edit(){ editing_id = 0 intake_draft = nil removal = nil reset_manual_form() message = "已取消修改。" redraw() }
 fn request_remove(id){
     for f in state.foods { if f.id == id { removal = f } }
-    preview = nil message = "请确认移除这批食材。此操作不会计入已食用进度。" redraw()
+    intake_draft = nil message = "请确认移除这批食材。此操作不会计入已食用进度。" redraw()
 }
 fn confirm_remove(){
     if removal == nil { return }
-    let before = state.to_json()
-    let kept = []
-    for f in state.foods { if f.id != removal.id { kept.push(f) } }
-    state.foods = kept state.revision = state.revision + 1 state.risk_key = ""
-    record("用户确认移除：" + removal.name + " " + removal.grams + "g（不计食用）")
-    if !commit(before) { redraw() return }
-    removal = nil editing_id = 0 draft_name = "" draft_grams = "" draft_days = "" clear_nutrition_draft()
+    let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "discard" batch_id: removal.id}
+    if !apply_inventory_operation(operation, nil) { redraw() return }
+    removal = nil editing_id = 0 reset_manual_form()
     message = "已移除，旧方案已重新校验。"
     if state.auto_generate && !state.paused { plan("库存移除") }
     redraw()
@@ -783,20 +1504,66 @@ fn active_plan(){
     nil
 }
 fn validate(p){
-    if p == nil || p.consumed || p.revision != state.revision || p.uses.len() == 0 { return false }
+    if p == nil || p.consumed || p.revision != state.revision || p.profile_revision != state.profile_revision || p.uses.len() == 0 { return false }
     let totals = {}
     for u in p.uses {
-        if !(u.grams > 0) || u.grams != floor(u.grams) { return false }
+        let amount = use_quantity(u)
+        let unit = use_unit(u)
+        if !(amount > 0) || !(u.grams >= 0) || (plan_numeric(p) && !(u.grams > 0)) { return false }
         let found = false
-        let total = u.grams
+        let total = amount
         for k v in totals { if k == "" + u.food_id { total = total + v } }
         totals["" + u.food_id] = total
         for f in state.foods {
-            if f.id == u.food_id && f.expires >= now() && f.grams >= total && state.profile.avoid.search(f.name) < 0 { found = true }
+            if f.id == u.food_id && unit == f.canonical_unit && total <= f.canonical_quantity {
+                if plan_numeric(p) && plan_eligible(f) {
+                    if unit == "g" && amount == u.grams { found = true }
+                    if unit == "piece" && amount == floor(amount) &&
+                        abs(u.grams - amount * f.average_item_grams) < .01 { found = true }
+                }
+                if !plan_numeric(p) && recipe_eligible(f) {
+                    if unit == "g" && amount == u.grams { found = true }
+                    if unit == "ml" && u.grams == 0 { found = true }
+                    if unit == "piece" && amount == floor(amount) && u.grams == 0 { found = true }
+                }
+            }
         }
         if !found { return false }
     }
     true
+}
+fn recipe_rule_plan(reason){
+    let picked = []
+    let used = {}
+    for step in 3 {
+        let best = nil
+        for f in state.foods {
+            let seen = false
+            for k v in used { if k == "" + f.id { seen = true } }
+            if recipe_eligible(f) && !seen && (best == nil ||
+                (nutrient_reference(f.name, f.id).known && !nutrient_reference(best.name, best.id).known) ||
+                (nutrient_reference(f.name, f.id).known == nutrient_reference(best.name, best.id).known && expiry_order(f) < expiry_order(best))) { best = f }
+        }
+        if best != nil {
+            picked.push(recipe_use(best, min(best.canonical_quantity, 150)))
+            used["" + best.id] = true
+        }
+    }
+    if picked.len() == 0 { message = "没有可规划的库存：请核对过期、忌口及按件食材的数量；包装食材需补充每包装数量。" return }
+    let p = {id: state.next_id title: picked[0].name + "简餐" uses: picked accepted: false consumed: false numeric: false
+        revision: state.revision profile_revision: state.profile_revision created: time_now() reason: reason + " · 营养参考缺失，仅提供做法与库存用量" goal: goal
+        source: "本地规则 · 营养未核算" previous: "" minutes: 20
+        steps: "1. 核对每种食材的新鲜度，保质期未知的食材请先自行确认。\n2. 按清单取用并清洗；根据食材种类选择适当做法。\n3. 充分处理需要加热的食材，完成后核对实际用量。"}
+    let previous = active_plan()
+    if previous != nil { p.previous = previous.title }
+    if !plan_ready(p) { message = "库存用量校验未通过，未创建候选。" return }
+    let before = state.to_json()
+    if state.plans.len() >= 20 { state.plans.remove(0) }
+    state.plans.push(p) state.next_id = state.next_id + 1
+    record(reason + " → 本地规则 → 创建未核算营养的候选 #" + p.id)
+    if !commit(before) { return }
+    selected = state.plans.len() - 1
+    message = "已创建菜谱候选。营养参考缺失，热量和周期营养无法核算；接受前请核对食材状态。"
 }
 fn rule_plan(reason){
     if state.paused { message = "管家已暂停，请在设置里恢复。" return }
@@ -814,9 +1581,9 @@ fn rule_plan(reason){
         for f in state.foods {
             let seen = false
             for k v in used { if k == "" + f.id { seen = true } }
-            if f.grams > 0 && f.expires >= now() && !seen && state.profile.avoid.search(f.name) < 0 && nutrient_reference(f.name, f.id).known {
+            if auto_plan_eligible(f) && !seen && nutrient_reference(f.name, f.id).known {
                 let n = nutrient_reference(f.name, f.id)
-                let score = remaining(f) * 10
+                let score = expiry_order(f) * 10
                 if program.consumed_protein < program.protein_goal && n.protein >= 8 { score = score - 8 }
                 if program.consumed_fiber < program.fiber_goal && n.fiber >= 2 { score = score - 5 }
                 if program.consumed_vitamin_c < program.vitamin_c_goal && n.vitamin_c >= 10 { score = score - 5 }
@@ -824,15 +1591,15 @@ fn rule_plan(reason){
             }
         }
         if best != nil {
-            picked.push({food_id: best.id name: best.name grams: min(best.grams, 150)})
+            picked.push(plan_use(best, min(batch_grams(best), 150)))
             used["" + best.id] = true
         }
     }
-    if picked.len() == 0 { message = "库存中没有具备完整营养参考的可用食材；不能声称符合数值方案。" return }
+    if picked.len() == 0 { recipe_rule_plan(reason) return }
     let estimate = meal_nutrients(picked)
     if estimate.kcal > program_remaining_daily(program) {
         let budget = program_remaining_daily(program)
-        for u in picked { u.grams = max(1, floor(u.grams * budget / estimate.kcal)) }
+        for u in picked { revise_plan_use(u, u.grams * budget / estimate.kcal) }
     }
     if !numeric_budget_ok(picked) { message = "剩余热量额度不足以安排这组食材；未创建候选。" return }
     let title = "清冰箱家常餐"
@@ -850,7 +1617,7 @@ fn rule_plan(reason){
     if tofu { title = "香煎豆腐配时蔬" }
     else { if spinach && egg { title = "菠菜鸡蛋饼" } else { title = picked[0].name + "家常餐" } }
     let p = {id: state.next_id title: title uses: picked accepted: false consumed: false
-        revision: state.revision created: time_now() reason: reason + " · " + goal goal: goal
+        revision: state.revision profile_revision: state.profile_revision created: time_now() reason: reason + " · " + goal goal: goal
         source: "离线规则规划" previous: "" minutes: 20
         steps: "1. 核对食材状态，按清单称重。\n2. 蔬菜洗净切段，豆腐切块；鸡蛋若使用则打散。\n3. 有豆腐先少油煎至两面金黄；其余食材分别炒熟。\n4. 合适食材搭配出餐。按个人饮食需求调整调味。"}
     let previous = active_plan()
@@ -916,6 +1683,20 @@ fn ai_watchdog(){
     if model_reply != nil {
         let received = model_reply model_reply = nil
         apply_model_reply(received)
+    }
+    if vision_reply != nil {
+        let received = vision_reply vision_reply = nil
+        if received.token == vision_sequence {
+            vision_phase = 2
+            if received.reply.is_ok && received.reply.data.schema == 1 && received.reply.data.supported == true { vision_phase = 1 }
+        }
+    }
+    if recognition_reply != nil {
+        let received = recognition_reply recognition_reply = nil
+        apply_recognition_reply(received)
+    }
+    if recognition_phase == "model" && recognition_deadline > 0 && time_now() >= recognition_deadline {
+        recognition_failed("图片识别超时")
     }
     if voice_reply != nil {
         let received = voice_reply voice_reply = nil
@@ -1020,11 +1801,19 @@ fn ai_failure(text){
     commit(before)
     redraw()
 }
+fn recipe_display_text(text){
+    text.replace(regex("库存全部\\s*nutrition_known\\s*=\\s*false", "gi"), "库存食材都缺少营养参考")
+        .replace(regex("nutrition_known\\s*=\\s*false", "gi"), "营养参考不完整")
+        .replace(regex("nutrition_known\\s*=\\s*true", "gi"), "有营养参考")
+        .replace(regex("[ \\t]*food_id[ \\t]*[:=]?[ \\t]*\\d+[ \\t]*", "gi"), "相应批次")
+        .replace(regex("[ \\t]*(unknown expiry|expiry_unknown)[ \\t]*", "gi"), "保质期未知")
+        .replace(regex("[ \\t]*profile[ \\t]*", "gi"), "饮食档案")
+}
 fn save_ai_result(output, reason, requested_goal){
     try {
         if output.reason.len() == 0 || output.reason.len() > 1200 { return false }
         if output.feasible != true {
-            ai_error = "这次要求无法满足：" + output.reason
+            ai_error = "这次要求无法满足：" + recipe_display_text(output.reason)
             message = ai_error
             return true
         }
@@ -1033,24 +1822,35 @@ fn save_ai_result(output, reason, requested_goal){
         if output.steps.len() < 2 || output.steps.len() > 8 { return false }
         let uses = []
         for u in output.uses {
-            let name = ""
-            for f in state.foods { if f.id == u.food_id { name = f.name } }
-            if name == "" { return false }
-            uses.push({food_id: u.food_id name: name grams: u.grams})
+            let planned = nil
+            if ai_snapshot.recipe_only {
+                if !(u.quantity > 0) || u.quantity != floor(u.quantity) { return false }
+                for f in state.foods {
+                    if f.id == u.food_id && u.quantity <= f.canonical_quantity { planned = recipe_use(f, u.quantity) }
+                }
+            } else {
+                if !(u.grams > 0) || u.grams != floor(u.grams) { return false }
+                for f in state.foods {
+                    if f.id == u.food_id && u.grams <= batch_grams(f) { planned = plan_use(f, u.grams) }
+                }
+            }
+            if planned == nil { return false }
+            uses.push(planned)
         }
         let steps = ""
         for i in output.steps.len() {
             let text = output.steps[i].trim()
             if text.len() == 0 || text.len() > 600 { return false }
             if steps != "" { steps = steps + "\n" }
-            steps = steps + (i + 1) + ". " + text
+            steps = steps + (i + 1) + ". " + recipe_display_text(text)
         }
-        let p = {id: state.next_id title: output.title uses: uses accepted: false consumed: false
-            revision: state.revision created: time_now() reason: output.reason goal: requested_goal
+        let p = {id: state.next_id title: recipe_display_text(output.title) uses: uses accepted: false consumed: false
+            revision: state.revision profile_revision: state.profile_revision created: time_now() reason: recipe_display_text(output.reason) goal: requested_goal
             source: "在线 AI" previous: "" minutes: output.minutes steps: steps}
+        if ai_snapshot.recipe_only { p.numeric = false p.source = "在线 AI · 营养未核算" }
         let previous = active_plan()
         if previous != nil { p.previous = previous.title }
-        if !validate(p) || !numeric_budget_ok(p.uses) { return false }
+        if !plan_ready(p) { return false }
         let before = state.to_json()
         if state.plans.len() >= 20 { state.plans.remove(0) }
         state.plans.push(p) state.next_id = state.next_id + 1
@@ -1059,6 +1859,7 @@ fn save_ai_result(output, reason, requested_goal){
         selected = state.plans.len() - 1
         ai_error = ""
         message = "AI 候选已通过库存校验。接受后才会替换今晚方案。"
+        if ai_snapshot.recipe_only { message = "AI 菜谱已生成；热量与营养无法核算。接受前请核对食材状态。" }
         true
     } catch { false }
 }
@@ -1070,13 +1871,36 @@ fn online_plan(reason){
     let inventory = []
     for f in state.foods {
         let nutrient = nutrient_reference(f.name, f.id)
-        if f.grams > 0 && f.expires >= now() && nutrient.known && state.profile.avoid.search(f.name) < 0 {
-            inventory.push({food_id: f.id name: f.name grams: f.grams remaining_days: remaining(f)
+        if auto_plan_eligible(f) && nutrient.known {
+            let entry = {food_id: f.id name: f.name grams: batch_grams(f)
+                quantity: f.canonical_quantity unit: f.canonical_unit average_item_grams: f.average_item_grams
+                remaining_days: remaining(f) expiry_unknown: f.expires_on_day == 0 expires_on_day: f.expires_on_day
                 kcal_per_100g: nutrient.kcal protein_per_100g: nutrient.protein
-                fiber_per_100g: nutrient.fiber vitamin_c_per_100g: nutrient.vitamin_c})
+                fiber_per_100g: nutrient.fiber vitamin_c_per_100g: nutrient.vitamin_c}
+            let ordered = []
+            let inserted = false
+            for previous in inventory {
+                if !inserted && (previous.expiry_unknown ||
+                    (!entry.expiry_unknown && entry.expires_on_day < previous.expires_on_day)) {
+                    ordered.push(entry) inserted = true
+                }
+                ordered.push(previous)
+            }
+            if !inserted { ordered.push(entry) }
+            inventory = ordered
         }
     }
-    if inventory.len() == 0 { message = "没有具备完整营养参考的可用食材；请核对库存、忌口及每 100 g 标签。" return }
+    let recipe_only = inventory.len() == 0
+    if recipe_only {
+        for f in state.foods {
+            if recipe_eligible(f) {
+                inventory.push({food_id: f.id name: f.name quantity: f.canonical_quantity unit: f.canonical_unit
+                    nutrition_known: nutrient_reference(f.name, f.id).known
+                    expiry_unknown: f.expires_on_day == 0 expires_on_day: f.expires_on_day})
+            }
+        }
+    }
+    if inventory.len() == 0 { message = "没有可规划的库存：请核对过期、忌口及按件食材的数量；包装食材需补充每包装数量。" return }
     let previous_title = ""
     let previous = active_plan()
     if previous != nil { previous_title = previous.title }
@@ -1092,24 +1916,39 @@ fn online_plan(reason){
                     grams: {type: "integer" minimum: 1 maximum: 100000}}}}
             steps: {type: "array" minItems: 0 maxItems: 8 items: {type: "string" minLength: 1 maxLength: 200}}
         }}
+    if recipe_only {
+        schema.properties.uses = {type: "array" minItems: 0 maxItems: 6 items: {type: "object" additionalProperties: false
+            required: ["food_id" "quantity"] properties: {food_id: {type: "integer" minimum: 1}
+                quantity: {type: "integer" minimum: 1 maximum: 100000}}}}
+    }
+    let task = "你是一名家常菜冰箱管家。用中文安排一顿可执行的餐食，结合用户当餐 goal、已选周期 program、剩余 daily_kcal 和周期营养缺口 nutrition_remaining，优先用掉临期批次。蛋白质、纤维和维生素 C 是周期累计目标，优先选择能填补缺口的食材；不要假装每餐必须凑齐整个周期目标。方向 profile.scene 不是执行方案。只使用 input.inventory 中食材，food_id 必须来自库存，用量不可超库存；营养参考未知的食材不得纳入候选。能量参考不得超过每日剩余额度，最终会由本地校验，不得编造营养数值。熟食充分加热；profile.allergies 和 profile.avoidances 必须遵守，profile.preferences 只作偏好。烹饪用油、饮料等须在实际用餐核对时另记。不能承诺过敏安全。可满足时 feasible=true，steps 2–8 项；不能满足时 feasible=false 并说明原因。title、reason、steps 必须写成用户能看懂的中文，不得包含 JSON 字段名、布尔值、内部编号或英文状态。只输出 JSON。"
+    if recipe_only {
+        task = "你是一名家常菜冰箱管家。用中文根据 input.inventory 的真实食材安排一顿可执行的餐食。只能使用库存给出的 food_id，uses 中 quantity 使用对应 unit 的原生数量，不能超过库存，也不能添加不存在的食材。优先选 nutrition_known=true 的食材，再考虑已知到期时间较近的食材；保质期未知时在做法中提醒用户先检查新鲜度。营养参考不足以完成整餐核算，不能估算、声称或编造热量、蛋白质、纤维、维生素 C 或周期目标达成情况。遵守 profile.allergies 和 profile.avoidances，熟食充分加热。可满足时 feasible=true，steps 2–8 项；不能满足时 feasible=false 并说明原因。title、reason、steps 必须写成用户能看懂的中文，不得包含 JSON 字段名、布尔值、内部编号或英文状态。只输出 JSON。"
+    }
     let requested_goal = goal
+    let model_input = {goal: requested_goal profile: state.profile inventory: inventory
+        previous_menu: previous_title trigger: reason demo: state.demo}
+    if !recipe_only {
+        model_input.program = program
+        model_input.daily_kcal_remaining = program_remaining_daily(program)
+        model_input.nutrition_remaining = {protein_g: max(0, program.protein_goal - program.consumed_protein)
+            fiber_g: max(0, program.fiber_goal - program.consumed_fiber)
+            vitamin_c_mg: max(0, program.vitamin_c_goal - program.consumed_vitamin_c)}
+        model_input.health = state.health
+    }
     let revision = state.revision
     let offset = state.offset
     ai_sequence = ai_sequence + 1
     let token = ai_sequence
-    ai_snapshot = {revision: revision offset: offset goal: requested_goal reason: reason
+    ai_snapshot = {revision: revision profile_revision: state.profile_revision offset: offset goal: requested_goal reason: reason recipe_only: recipe_only
         program_id: program.id consumed_kcal: program.consumed_kcal}
     model_deadline = time_now() + 95
     ai_busy = true ai_error = "" retry_reason = reason
     message = "正在根据目标与真实库存安排菜单，通常需要几秒到一分钟。"
     redraw()
     host_request_id = host.request("model.complete", {
-        task: "你是一名家常菜冰箱管家。用中文安排一顿可执行的餐食，结合用户当餐 goal、已选周期 program、剩余 daily_kcal 和周期营养缺口 nutrition_remaining，优先用掉临期批次。蛋白质、纤维和维生素 C 是周期累计目标，优先选择能填补缺口的食材；不要假装每餐必须凑齐整个周期目标。方向 profile.scene 不是执行方案。只使用 input.inventory 中食材，food_id 必须来自库存，用量不可超库存；营养参考未知的食材不得纳入候选。能量参考不得超过每日剩余额度，最终会由本地校验，不得编造营养数值。熟食充分加热；profile.avoid 必须遵守。烹饪用油、饮料等须在实际用餐核对时另记。不能承诺过敏安全。可满足时 feasible=true，steps 2–8 项；不能满足时 feasible=false 并说明原因。只输出 JSON。"
-        input: {goal: requested_goal profile: state.profile program: program daily_kcal_remaining: program_remaining_daily(program)
-            nutrition_remaining: {protein_g: max(0, program.protein_goal - program.consumed_protein)
-                fiber_g: max(0, program.fiber_goal - program.consumed_fiber)
-                vitamin_c_mg: max(0, program.vitamin_c_goal - program.consumed_vitamin_c)}
-            health: state.health inventory: inventory previous_menu: previous_title trigger: reason demo: state.demo}
+        task: task
+        input: model_input
         schema: schema class: "fast"
     }, |r| model_received(token, r))
 }
@@ -1121,7 +1960,7 @@ fn apply_model_reply(envelope){
         let r = envelope.reply
         ai_busy = false ai_sequence = ai_sequence + 1
         let current = active_program()
-        if (!state.auto_generate && automatic_reason(ai_snapshot.reason)) || plan_removal != nil || current == nil || current.id != ai_snapshot.program_id || current.consumed_kcal != ai_snapshot.consumed_kcal || state.revision != ai_snapshot.revision || state.offset != ai_snapshot.offset || goal != ai_snapshot.goal || state.paused || !use_ai || pending {
+        if (!state.auto_generate && automatic_reason(ai_snapshot.reason)) || plan_removal != nil || current == nil || current.id != ai_snapshot.program_id || current.consumed_kcal != ai_snapshot.consumed_kcal || state.revision != ai_snapshot.revision || state.profile_revision != ai_snapshot.profile_revision || state.offset != ai_snapshot.offset || goal != ai_snapshot.goal || state.paused || !use_ai || pending {
             ai_error = "等待期间库存、目标或运行状态变化，已丢弃旧结果。请重新生成。"
             message = ai_error redraw() return
         }
@@ -1153,7 +1992,7 @@ fn generate(){
 }
 fn accept(){
     let p = choose_plan()
-    if !validate(p) || !numeric_budget_ok(p.uses) { message = "库存或周期剩余额度已变化，请重新生成方案。" redraw() return }
+    if !plan_ready(p) { message = "库存或周期状态已变化，请重新生成方案。" redraw() return }
     let before = state.to_json()
     p.accepted = true
     state.active = p.id
@@ -1164,12 +2003,51 @@ fn accept(){
 fn begin_consume(){
     let p = choose_plan()
     if p == nil || !p.accepted || p.id != state.active || !validate(p) { message = "只能扣减当前已接受且有效的方案。" redraw() return }
-    pending = true message = "请核对实际食用克数。最后一次确认后才会扣减。" redraw()
+    pending = true message = "请核对实际食用数量。最后一次确认后才会扣减。" redraw()
 }
 fn revise_amount(index, text){
     let amount = text.trim().to_f64()
-    consumption[index].grams = amount
-    if amount > 0 && amount == floor(amount) { message = "已修改实际用量。确认后才会扣减库存。" ui.notice.set_text(message) }
+    let item = consumption[index]
+    item.quantity = amount
+    if !plan_numeric(choose_plan()) {
+        item.grams = 0
+        if use_unit(item) == "g" { item.grams = amount }
+    } else { if use_unit(item) == "piece" {
+        for food in state.foods { if food.id == item.food_id { item.grams = amount * food.average_item_grams } }
+    } else { item.grams = amount } }
+    if amount > 0 && (use_unit(item) != "piece" || amount == floor(amount)) {
+        message = "已修改实际用量。确认后才会扣减库存。" ui.notice.set_text(message)
+    }
+}
+fn cycle_consume_batch(index){
+    if !pending { return }
+    let current = consumption[index]
+    let options = []
+    for food in state.foods {
+        if food.name == current.name && food.canonical_unit == use_unit(current) &&
+            ((plan_numeric(choose_plan()) && plan_eligible(food)) || (!plan_numeric(choose_plan()) && recipe_eligible(food))) {
+            let ordered = []
+            let inserted = false
+            for earlier in options {
+                if !inserted && expiry_order(food) < expiry_order(earlier) { ordered.push(food) inserted = true }
+                ordered.push(earlier)
+            }
+            if !inserted { ordered.push(food) }
+            options = ordered
+        }
+    }
+    if options.len() < 2 { message = "没有其他可选的同名兼容批次。" redraw() return }
+    let position = -1
+    for i in options.len() { if options[i].id == current.food_id { position = i } }
+    let next = options[(position + 1) % options.len()]
+    let revised = nil
+    if plan_numeric(choose_plan()) { revised = plan_use(next, current.grams) }
+    else { revised = recipe_use(next, current.quantity) }
+    if revised == nil { return }
+    current.food_id = revised.food_id current.quantity = revised.quantity
+    current.unit = revised.unit current.grams = revised.grams
+    message = "已改用同名食材的第 " + batch_ordinal(next.id) + " 批；请核对数量后再确认。"
+    redraw()
 }
 let consumption = []
 fn prepare_consume(){
@@ -1185,6 +2063,30 @@ fn confirm_consume(){
     let revised = p.to_json().parse_json()
     revised.uses = consumption
     if !validate(revised) { message = "用量需为正整数，不能超出库存；请修改或取消。" ui.notice.set_text(message) return }
+    if !plan_numeric(p) {
+        let program = active_program()
+        if program == nil || program_remaining_daily(program) <= 0 {
+            message = "周期方案已结束或今日额度已用完，未扣库存。" ui.notice.set_text(message) return
+        }
+        let before = state.to_json()
+        p.uses = revised.uses p.consumed = true
+        ensure_extended_state()
+        program.intake.push({at: now() day: health_day() title: p.title kcal: 0 nutrition_known: false
+            protein: 0 fiber: 0 vitamin_c: 0 extra_kcal: 0})
+        state.meal_count = state.meal_count + 1
+        state.last_meal = p.title state.last_goal = p.goal
+        record_health_meal(revised.uses, false)
+        state.active = 0
+        record("确认食用 #" + p.id + "：营养未核算；库存已扣减")
+        let uses = []
+        for u in revised.uses { uses.push({food_id: u.food_id quantity: use_quantity(u) unit: use_unit(u)}) }
+        let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "consume" uses: uses}
+        if !apply_inventory_operation(operation, before) { redraw() return }
+        pending = false details = false extra_kcal_text = "0"
+        message = "已记录用餐并扣减库存；本餐热量与营养未核算，不计入周期数值。"
+        if state.auto_generate && !state.paused { plan("用餐后再规划") }
+        redraw() return
+    }
     let estimate = meal_nutrients(revised.uses)
     let extra = extra_kcal_text.trim().to_f64()
     let program = active_program()
@@ -1198,15 +2100,6 @@ fn confirm_consume(){
         ui.notice.set_text(message) return
     }
     let before = state.to_json()
-    for u in revised.uses {
-        for f in state.foods {
-            if f.id == u.food_id {
-                let was_risk = remaining(f) <= 3
-                f.grams = f.grams - u.grams
-                if f.grams == 0 && was_risk { state.handled = state.handled + 1 }
-            }
-        }
-    }
     p.uses = revised.uses p.consumed = true p.recorded_kcal = calories
     ensure_extended_state()
     program.intake.push({at: now() day: health_day() title: p.title kcal: calories
@@ -1219,10 +2112,13 @@ fn confirm_consume(){
     state.meal_count = state.meal_count + 1
     state.last_meal = p.title
     state.last_goal = p.goal
-    record_health_meal(revised.uses)
-    state.active = 0 state.revision = state.revision + 1 state.risk_key = ""
+    record_health_meal(revised.uses, true)
+    state.active = 0
     record("确认食用 #" + p.id + "：" + calories + " kcal，周期已用 " + program.consumed_kcal + " / " + program.kcal_goal + "；库存已扣减")
-    if !commit(before) { redraw() return }
+    let uses = []
+    for u in revised.uses { uses.push({food_id: u.food_id quantity: use_quantity(u) unit: use_unit(u)}) }
+    let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "consume" uses: uses}
+    if !apply_inventory_operation(operation, before) { redraw() return }
     pending = false details = false
     extra_kcal_text = "0"
     message = "已记录这顿饭：" + calories + " kcal；本周期还可记录 " + program_remaining_total(program) + " kcal。下一餐请回首页手动生成。"
@@ -1274,7 +2170,7 @@ fn confirm_delete_plan(){
 }
 fn check_risk(){
     if onboarding_step != 4 { return }
-    if !booted || storage_blocked || pending || plan_removal != nil || preview != nil || editing_id > 0 || ai_busy || voice_phase != 0 || (use_ai && (ai_phase == 0 || ai_phase == 3)) { return }
+    if !booted || storage_blocked || pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || ai_busy || voice_phase != 0 || (use_ai && (ai_phase == 0 || ai_phase == 3)) { return }
     if now() - state.cycle_start >= 604800 {
         let before = state.to_json()
         state.cycle_start = now() state.handled = 0 state.baseline = risk_count()
@@ -1286,7 +2182,7 @@ fn check_risk(){
     let key = ""
     let names = ""
     for f in state.foods {
-        if f.grams > 0 && f.expires >= now() && f.expires - now() <= 86400 {
+        if freshness(f) == "临期" && remaining(f) <= 1 {
             let covered = false
             if active != nil { for u in active.uses { if u.food_id == f.id { covered = true } } }
             if !covered { key = key + f.id + ":" names = names + f.name + " " }
@@ -1365,19 +2261,21 @@ fn install_demo(){
         health: {start: today day: floor(today / 86400) meals_per_day: 2 meals_week: 1 meals_today: 1
             protein_week: 0 fiber_week: 0 protein_goal: 308 fiber_goal: 175 calcium_goal: 7000 iron_goal: 126}
         daily_target: 2000 consumed_kcal: 680 meal_count: 1 last_meal: "番茄豆腐汤" last_goal: "清淡一点"}
+    state = migrate_state(state)
+    if !valid_state(state) { state = before.parse_json() message = "演示数据无效，未替换库存。" redraw() return }
     record("载入演示库存与原菜单；确认后才改写正式方案")
     if !commit(before) { redraw() return }
-    selected = 0 preview = nil pending = false plan_removal = nil reset_pending = false tab = 0 editing_id = 0 removal = nil
+    selected = 0 intake_draft = nil pending = false plan_removal = nil reset_pending = false tab = 0 editing_id = 0 removal = nil
     message = "演示已就绪：去设置推进 12 小时，观察豆腐提醒与菜单重排。"
     redraw()
 }
 fn restore_before_demo(){
     if !fs.exists("before-demo.json") { message = "没有可恢复的演示前库存。" redraw() return }
-    let previous = fs.read("before-demo.json").parse_json()
-    if !valid_state(previous) { message = "备份无法读取，未替换当前库存。" redraw() return }
+    let previous = read_saved_state("before-demo.json")
+    if previous == nil { message = "备份无法读取，未替换当前库存。" redraw() return }
     let before = state.to_json()
     stop_ai()
-    state = migrate_state(previous)
+    state = previous
     ensure_extended_state()
     state.model_enabled = use_ai
     if commit(before) { selected = state.plans.len() - 1 message = "已恢复演示前的数据。" }
@@ -1395,6 +2293,32 @@ View{width: Fill height: Fill flow: Overlay
     View{width: Fill height: Fill padding: 0
         GlassCard{
             app_body := View{width: Fill height: Fill on_render: || {
+                if recognition_phase != "" {
+                    View{width: Fill height: Fill flow: Down align: Align{x: .5 y: .5} padding: 24
+                        Frost{width: 720 height: Fit padding: 24 spacing: 14 new_batch: true
+                            Heading{text: "图片识别" draw_text.text_style.font_size: 26}
+                            Hint{text: "一次选择一张照片；结果仅生成可编辑草稿。"}
+                            if recognition_phase == "choose" {
+                                Hint{text: message}
+                                View{width: Fill height: Fit flow: Right spacing: 10
+                                    Action{text: "打开摄像头" on_click: || choose_camera()}
+                                    Action{text: "选择已有图片" on_click: || import_recognition_image()}
+                                }
+                            }
+                            if recognition_phase == "camera" {
+                                Hint{text: "等待摄像头授权和画面；请在宿主弹出的授权提示中确认。"}
+                                recognition_cam := CameraPreview{width: Fill height: 340 facing: "front"
+                                    on_capture: || camera_captured()
+                                    on_error: || recognition_failed("摄像头打开或拍照失败：" + ui.recognition_cam.error())}
+                                Action{text: "拍照并识别" on_click: || ui.recognition_cam.capture({library: false})}
+                            }
+                            if recognition_phase == "import" { Hint{text: "请在系统文件选择框选择图片。"} }
+                            if recognition_phase == "model" { Hint{text: "正在识别，请稍候…"} }
+                            Soft{text: "取消，返回手动录入" on_click: || cancel_recognition()}
+                        }
+                    }
+                    return
+                }
                 if onboarding_step < 4 {
                     ScrollYView{width: Fill height: Fill flow: Down padding: Inset{left: 42 right: 42 top: 34 bottom: 30} spacing: 24
                         View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
@@ -1406,9 +2330,11 @@ View{width: Fill height: Fill flow: Overlay
                                 Label{text: "SMART FRIDGE" padding: 0 draw_text +: {color: muted text_style.font_size: 10}}
                                 Copy{text: "冰箱管家" draw_text.text_style: theme.font_bold{font_size: 19}}
                             }
-                            Hint{text: "首次建档  " + (onboarding_step + 1) + " / 4"}
+                            if profile_edit_backup == nil { Hint{text: "首次建档  " + (onboarding_step + 1) + " / 4"} }
+                            if profile_edit_backup != nil { Hint{text: "修改用户画像  " + (onboarding_step + 1) + " / 3"} }
                         }
                         Divider{}
+                        if profile_edit_backup != nil { Soft{text: "取消修改 · 返回设置" on_click: || cancel_profile_edit()} }
                         if onboarding_step == 0 {
                             View{width: Fill height: Fit flow: Down spacing: 10
                                 Heading{text: "让每一餐，更懂你" draw_text.text_style.font_size: 38}
@@ -1419,25 +2345,29 @@ View{width: Fill height: Fill flow: Overlay
                                     EmojiGlass{width: 50 height: 50 Label{text: "◎" padding: 0 draw_text.text_style.font_size: 22}}
                                     Copy{text: "减脂控卡" draw_text.text_style: theme.font_bold{font_size: 18}}
                                     Hint{text: "更关注份量、饱腹感与长期执行"}
-                                    Soft{text: "选择" on_click: || choose_scene("减脂控卡")}
+                                    if state.profile.scene == "减脂控卡" { ChosenSoft{text: "已选中" on_click: || choose_scene("减脂控卡")} }
+                                    else { Soft{text: "选择" on_click: || choose_scene("减脂控卡")} }
                                 }
                                 Tint{padding: 18 spacing: 12
                                     EmojiGlass{width: 50 height: 50 Label{text: "✦" padding: 0 draw_text.text_style.font_size: 22}}
                                     Copy{text: "日常健康" draw_text.text_style: theme.font_bold{font_size: 18}}
                                     Hint{text: "营养均衡、少浪费、少做决定"}
-                                    Soft{text: "选择" on_click: || choose_scene("日常健康")}
+                                    if state.profile.scene == "日常健康" { ChosenSoft{text: "已选中" on_click: || choose_scene("日常健康")} }
+                                    else { Soft{text: "选择" on_click: || choose_scene("日常健康")} }
                                 }
                                 Tint{padding: 18 spacing: 12
                                     EmojiGlass{width: 50 height: 50 Label{text: "↑" padding: 0 draw_text.text_style.font_size: 22}}
                                     Copy{text: "健身增肌" draw_text.text_style: theme.font_bold{font_size: 18}}
                                     Hint{text: "更关注蛋白质与训练后的餐食安排"}
-                                    Soft{text: "选择" on_click: || choose_scene("健身增肌")}
+                                    if state.profile.scene == "健身增肌" { ChosenSoft{text: "已选中" on_click: || choose_scene("健身增肌")} }
+                                    else { Soft{text: "选择" on_click: || choose_scene("健身增肌")} }
                                 }
                                 Tint{padding: 18 spacing: 12
                                     EmojiGlass{width: 50 height: 50 Label{text: "≈" padding: 0 draw_text.text_style.font_size: 22}}
                                     Copy{text: "轻负担饮食" draw_text.text_style: theme.font_bold{font_size: 18}}
                                     Hint{text: "偏清淡、规律、简单好执行"}
-                                    Soft{text: "选择" on_click: || choose_scene("轻负担饮食")}
+                                    if state.profile.scene == "轻负担饮食" { ChosenSoft{text: "已选中" on_click: || choose_scene("轻负担饮食")} }
+                                    else { Soft{text: "选择" on_click: || choose_scene("轻负担饮食")} }
                                 }
                             }
                             View{width: Fill height: 20}
@@ -1452,9 +2382,12 @@ View{width: Fill height: Fill flow: Overlay
                                 Frost{width: Fill height: Fit padding: 20 spacing: 14 draw_bg.color: #xffffffb8
                                     Copy{text: "基础资料" draw_text.text_style: theme.font_bold{font_size: 18}}
                                     View{width: Fill height: Fit flow: Right spacing: 8
-                                        Soft{text: "女性" on_click: || { profile_sex = "女性" redraw() }}
-                                        Soft{text: "男性" on_click: || { profile_sex = "男性" redraw() }}
-                                        Soft{text: "不透露" on_click: || { profile_sex = "不透露" redraw() }}
+                                        if profile_sex == "女性" { ChosenSoft{text: "女性" on_click: || { profile_sex = "女性" redraw() }} }
+                                        else { Soft{text: "女性" on_click: || { profile_sex = "女性" redraw() }} }
+                                        if profile_sex == "男性" { ChosenSoft{text: "男性" on_click: || { profile_sex = "男性" redraw() }} }
+                                        else { Soft{text: "男性" on_click: || { profile_sex = "男性" redraw() }} }
+                                        if profile_sex == "不透露" { ChosenSoft{text: "不透露" on_click: || { profile_sex = "不透露" redraw() }} }
+                                        else { Soft{text: "不透露" on_click: || { profile_sex = "不透露" redraw() }} }
                                     }
                                     Hint{text: "当前选择 · " + profile_sex}
                                     View{width: Fill height: Fit flow: Right spacing: 10
@@ -1464,15 +2397,21 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     Copy{text: "活动与特殊情况"}
                                     View{width: Fill height: Fit flow: Right spacing: 8
-                                        Soft{text: "轻活动" on_click: || { profile_activity = "轻活动" redraw() }}
-                                        Soft{text: "中活动" on_click: || { profile_activity = "中活动" redraw() }}
-                                        Soft{text: "高活动" on_click: || { profile_activity = "高活动" redraw() }}
+                                        if profile_activity == "轻活动" { ChosenSoft{text: "轻活动" on_click: || { profile_activity = "轻活动" redraw() }} }
+                                        else { Soft{text: "轻活动" on_click: || { profile_activity = "轻活动" redraw() }} }
+                                        if profile_activity == "中活动" { ChosenSoft{text: "中活动" on_click: || { profile_activity = "中活动" redraw() }} }
+                                        else { Soft{text: "中活动" on_click: || { profile_activity = "中活动" redraw() }} }
+                                        if profile_activity == "高活动" { ChosenSoft{text: "高活动" on_click: || { profile_activity = "高活动" redraw() }} }
+                                        else { Soft{text: "高活动" on_click: || { profile_activity = "高活动" redraw() }} }
                                     }
                                     Hint{text: "当前活动 · " + profile_activity}
                                     Field{text: profile_special empty_text: "特殊情况（如有请填写）" on_change: |text| { profile_special = text }}
-                                    Copy{text: "饮食偏好与忌口" draw_text.text_style: theme.font_bold{font_size: 16}}
-                                    Field{text: profile_diet empty_text: "例如：清淡、家常、少油" on_change: |text| { profile_diet = text }}
-                                    Field{text: profile_avoid empty_text: "过敏 / 忌口 / 不喜欢的食材" on_change: |text| { profile_avoid = text }}
+                                    Copy{text: "过敏" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                    Field{text: profile_allergies empty_text: "例如：牛奶、花生" on_change: |text| { profile_allergies = text }}
+                                    Copy{text: "忌口" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                    Field{text: profile_avoidances empty_text: "例如：不吃香菜" on_change: |text| { profile_avoidances = text }}
+                                    Copy{text: "饮食偏好" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                    Field{text: profile_preferences empty_text: "例如：清淡、家常、少油" on_change: |text| { profile_preferences = text }}
                                     Action{text: "下一步 · 选择周期方案  →" on_click: || save_profile()}
                                 }
                                 Frost{width: 330 height: Fit padding: 22 spacing: 14 draw_bg.color: #xf4f0e9d9
@@ -1506,7 +2445,8 @@ View{width: Fill height: Fill flow: Overlay
                                         Hint{text: "蛋白质 " + p.protein_goal + " g · 膳食纤维 " + p.fiber_goal + " g · 维生素 C " + p.vitamin_c_goal + " mg / 周期"}
                                     }
                                     if p.kcal_goal == 0 { Hint{text: "该档案需要专业人员确认摄入目标，当前不自动填入数值。"} }
-                                    Soft{text: "选择这份周期方案" on_click: || select_program(p.id)}
+                                    if p.id == program_selected { ChosenSoft{text: "当前已选中" on_click: || select_program(p.id)} }
+                                    else { Soft{text: "选择这份周期方案" on_click: || select_program(p.id)} }
                                 }
                             }
                             Frost{padding: 18 spacing: 10 draw_bg.color: #eef3e8
@@ -1514,7 +2454,8 @@ View{width: Fill height: Fill flow: Overlay
                                 Hint{text: "确认实际吃完才扣库存和热量；本地只识别少数原料营养，未知食材不冒充严格达标。烹饪油等需另计。"}
                                 Hint{text: "这里只是原型参考估算，不是医疗处方；不自动给未成年人或有特殊情况的档案填写数值目标。"}
                                 Soft{text: "返回修改基础资料" on_click: || { onboarding_step = 1 redraw() }}
-                                Action{text: "确认选中方案 · 去录冰箱  →" on_click: || confirm_health_plan()}
+                                if profile_edit_backup == nil { Action{text: "确认选中方案 · 去录冰箱  →" on_click: || confirm_health_plan()} }
+                                if profile_edit_backup != nil { Action{text: "保存画像与周期方案  →" on_click: || confirm_health_plan()} }
                             }
                         }
                         if onboarding_step == 3 {
@@ -1523,55 +2464,171 @@ View{width: Fill height: Fill flow: Overlay
                                 Copy{text: "第一次先把真实库存录进去。以后只需要持续补充新买的食材与实际吃掉的量。" draw_text.color: muted}
                             }
                             View{width: Fill height: Fit flow: Right spacing: 8
-                                Soft{text: "手动添加 · 可用"}
-                                Quiet{text: "拍照识别 · 敬请期待" enabled: false}
-                                Quiet{text: "导入小票 · 敬请期待" enabled: false}
+                                if intake_draft == nil {
+                                    Hint{text: "下方可手动添加食材"}
+                                } else {
+                                    Soft{text: "取消当前草稿" on_click: || cancel_preview()}
+                                }
+                                Quiet{text: "拍照识别" enabled: intake_draft == nil on_click: || begin_recognition("food_image")}
+                                Quiet{text: "导入小票" enabled: intake_draft == nil on_click: || begin_recognition("receipt_image")}
                             }
+                            if intake_draft != nil { Hint{text: "请先确认或取消当前草稿，再开始新的手动添加、拍照或导入。"} }
+                            Hint{text: message}
                             View{width: Fill height: Fit flow: Right spacing: 18
                                 Frost{width: Fill height: Fit padding: 20 spacing: 12 draw_bg.color: #xffffffc2
-                                    View{width: Fill height: Fit flow: Right spacing: 10
-                                        food_name := Field{text: draft_name empty_text: "食材，例如：豆腐" on_change: |text| { draft_name = text }}
-                                        food_grams := Field{text: draft_grams empty_text: "数量 g" on_change: |text| { draft_grams = text }}
-                                        food_days := Field{text: draft_days empty_text: "剩余天数" on_change: |text| { draft_days = text }}
-                                    }
-                                    Quiet{text: "填写 / 收起包装营养参考" on_click: || { show_nutrition_input = !show_nutrition_input redraw() }}
-                                    Hint{text: "周期核算需完整成分。豆腐、菠菜、鸡蛋、蘑菇使用示例估算；其他食材请按标签填每100g数据。"}
-                                    if show_nutrition_input {
-                                        Field{text: draft_kcal empty_text: "每100g热量 kcal" on_change: |text| { draft_kcal = text }}
-                                        Field{text: draft_protein empty_text: "每100g蛋白质 g" on_change: |text| { draft_protein = text }}
-                                        Field{text: draft_fiber empty_text: "每100g膳食纤维 g" on_change: |text| { draft_fiber = text }}
-                                        Field{text: draft_vitamin_c empty_text: "每100g维生素C mg" on_change: |text| { draft_vitamin_c = text }}
-                                    }
-                                    if preview == nil { Action{text: "预览并确认入库  →" on_click: || preview_food()} }
-                                    if preview != nil {
-                                        Tint{draw_bg.color: #xf0ece4
-                                            Hint{text: "等待确认"}
-                                            Copy{text: preview.name + " · " + preview.grams + "g" draw_text.text_style: theme.font_bold{font_size: 18}}
-                                            Hint{text: "预计剩余 " + remaining(preview) + " 天"}
-                                            View{width: Fill height: Fit flow: Right spacing: 8
-                                                Action{text: "确认入库" on_click: || add_food()}
-                                                Soft{text: "返回修改" on_click: || cancel_preview()}
+                                    if intake_draft == nil {
+                                        Field{text: draft_name empty_text: "食材名称" on_change: |text| { draft_name = text }}
+                                        View{width: Fill height: Fit flow: Right spacing: 8
+                                            Field{text: draft_grams empty_text: "数量" on_change: |text| { draft_grams = text }}
+                                            Copy{text: "单位 · " + draft_unit}
+                                        }
+                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                            if draft_unit == "g" { ChosenQuiet{text: "g" on_click: || { draft_unit = "g" redraw() }} }
+                                            else { Quiet{text: "g" on_click: || { draft_unit = "g" redraw() }} }
+                                            if draft_unit == "kg" { ChosenQuiet{text: "kg" on_click: || { draft_unit = "kg" redraw() }} }
+                                            else { Quiet{text: "kg" on_click: || { draft_unit = "kg" redraw() }} }
+                                            if draft_unit == "ml" { ChosenQuiet{text: "ml" on_click: || { draft_unit = "ml" redraw() }} }
+                                            else { Quiet{text: "ml" on_click: || { draft_unit = "ml" redraw() }} }
+                                            if draft_unit == "L" { ChosenQuiet{text: "L" on_click: || { draft_unit = "L" redraw() }} }
+                                            else { Quiet{text: "L" on_click: || { draft_unit = "L" redraw() }} }
+                                            if draft_unit == "个" { ChosenQuiet{text: "个" on_click: || { draft_unit = "个" redraw() }} }
+                                            else { Quiet{text: "个" on_click: || { draft_unit = "个" redraw() }} }
+                                        }
+                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                            if draft_unit == "盒" { ChosenQuiet{text: "盒" on_click: || { draft_unit = "盒" redraw() }} }
+                                            else { Quiet{text: "盒" on_click: || { draft_unit = "盒" redraw() }} }
+                                            if draft_unit == "袋" { ChosenQuiet{text: "袋" on_click: || { draft_unit = "袋" redraw() }} }
+                                            else { Quiet{text: "袋" on_click: || { draft_unit = "袋" redraw() }} }
+                                            if draft_unit == "瓶" { ChosenQuiet{text: "瓶" on_click: || { draft_unit = "瓶" redraw() }} }
+                                            else { Quiet{text: "瓶" on_click: || { draft_unit = "瓶" redraw() }} }
+                                        }
+                                        if package_unit(draft_unit) {
+                                            Field{text: draft_package_size empty_text: "每包装数量（可留空）" on_change: |text| { draft_package_size = text }}
+                                            Hint{text: "每包装单位 · " + draft_package_unit + "；填包装数量时请选择单位"}
+                                            View{width: Fill height: Fit flow: Right spacing: 6
+                                                if draft_package_unit == "" { ChosenQuiet{text: "未知" on_click: || { draft_package_size = "" draft_package_unit = "" redraw() }} }
+                                                else { Quiet{text: "未知" on_click: || { draft_package_size = "" draft_package_unit = "" redraw() }} }
+                                                if draft_package_unit == "g" { ChosenQuiet{text: "g" on_click: || { draft_package_unit = "g" redraw() }} }
+                                                else { Quiet{text: "g" on_click: || { draft_package_unit = "g" redraw() }} }
+                                                if draft_package_unit == "ml" { ChosenQuiet{text: "ml" on_click: || { draft_package_unit = "ml" redraw() }} }
+                                                else { Quiet{text: "ml" on_click: || { draft_package_unit = "ml" redraw() }} }
+                                                if draft_package_unit == "piece" { ChosenQuiet{text: "个" on_click: || { draft_package_unit = "piece" redraw() }} }
+                                                else { Quiet{text: "个" on_click: || { draft_package_unit = "piece" redraw() }} }
                                             }
                                         }
+                                        if draft_unit == "个" || (package_unit(draft_unit) && draft_package_unit == "piece") {
+                                            Field{text: draft_average empty_text: "平均每个约多少 g（可留空）" on_change: |text| { draft_average = text }}
+                                        }
+                                        Field{text: draft_days empty_text: "还剩几天（可留空）" on_change: |text| { draft_days = text }}
+                                        Field{text: draft_date empty_text: "印刷日期 YYYY-MM-DD" on_change: |text| { draft_date = text }}
+                                        Hint{text: "剩余天数与印刷日期二选一；都留空表示保质期未知。"}
+                                        Quiet{text: "填写 / 收起包装营养参考" on_click: || { show_nutrition_input = !show_nutrition_input redraw() }}
+                                        if show_nutrition_input {
+                                            Field{text: draft_kcal empty_text: "每100g热量 kcal" on_change: |text| { draft_kcal = text }}
+                                            Field{text: draft_protein empty_text: "每100g蛋白质 g" on_change: |text| { draft_protein = text }}
+                                            Field{text: draft_fiber empty_text: "每100g膳食纤维 g" on_change: |text| { draft_fiber = text }}
+                                            Field{text: draft_vitamin_c empty_text: "每100g维生素C mg" on_change: |text| { draft_vitamin_c = text }}
+                                        }
+                                        Action{text: "预览并确认  →" on_click: || preview_food()}
+                                        if editing_id > 0 {
+                                            Soft{text: "取消修改" on_click: || cancel_edit()}
+                                        }
+                                    }
+                                    if intake_draft != nil {
+                                        Hint{text: "点击状态按钮可切换选择；只有已选中的行会在最终确认时入库。"}
+                                        for i in intake_draft.rows.len() {
+                                            let row = intake_draft.rows[i]
+                                            Tint{draw_bg.color: #f0ece4
+                                                View{width: Fill height: Fit flow: Right spacing: 6
+                                                    Quiet{text: "" + row.row_id + " · " + row.name}
+                                                    let selected_text = "✓ 已选中"
+                                                    if !row.selected { selected_text = "○ 未选中" }
+                                                    if row.selected { ChosenSoft{text: selected_text on_click: || { row.selected = !row.selected redraw() }} }
+                                                    else { Soft{text: selected_text on_click: || { row.selected = !row.selected redraw() }} }
+                                                    Quiet{text: "移除" on_click: || remove_draft_row(row.row_id)}
+                                                }
+                                                Field{text: row.name empty_text: "食材名称" on_change: |text| { row.name = text }}
+                                                View{width: Fill height: Fit flow: Right spacing: 8
+                                                    Field{text: row.quantity_text empty_text: "数量" on_change: |text| { row.quantity_text = text }}
+                                                    Hint{text: "单位 · " + (if row.unit == "" { "未选择" } else { row.unit })}
+                                                }
+                                                View{width: Fill height: Fit flow: Right spacing: 6
+                                                    if row.unit == "g" { ChosenQuiet{text: "g" on_click: || { row.unit = "g" redraw() }} }
+                                                    else { Quiet{text: "g" on_click: || { row.unit = "g" redraw() }} }
+                                                    if row.unit == "kg" { ChosenQuiet{text: "kg" on_click: || { row.unit = "kg" redraw() }} }
+                                                    else { Quiet{text: "kg" on_click: || { row.unit = "kg" redraw() }} }
+                                                    if row.unit == "ml" { ChosenQuiet{text: "ml" on_click: || { row.unit = "ml" redraw() }} }
+                                                    else { Quiet{text: "ml" on_click: || { row.unit = "ml" redraw() }} }
+                                                    if row.unit == "L" { ChosenQuiet{text: "L" on_click: || { row.unit = "L" redraw() }} }
+                                                    else { Quiet{text: "L" on_click: || { row.unit = "L" redraw() }} }
+                                                    if row.unit == "个" { ChosenQuiet{text: "个" on_click: || { row.unit = "个" redraw() }} }
+                                                    else { Quiet{text: "个" on_click: || { row.unit = "个" redraw() }} }
+                                                }
+                                                View{width: Fill height: Fit flow: Right spacing: 6
+                                                    if row.unit == "盒" { ChosenQuiet{text: "盒" on_click: || { row.unit = "盒" redraw() }} }
+                                                    else { Quiet{text: "盒" on_click: || { row.unit = "盒" redraw() }} }
+                                                    if row.unit == "袋" { ChosenQuiet{text: "袋" on_click: || { row.unit = "袋" redraw() }} }
+                                                    else { Quiet{text: "袋" on_click: || { row.unit = "袋" redraw() }} }
+                                                    if row.unit == "瓶" { ChosenQuiet{text: "瓶" on_click: || { row.unit = "瓶" redraw() }} }
+                                                    else { Quiet{text: "瓶" on_click: || { row.unit = "瓶" redraw() }} }
+                                                }
+                                                if canonical_unit(row.unit) == "" && !package_unit(row.unit) {
+                                                    Hint{text: "请从上方选择单位，并核对数量。"}
+                                                }
+                                                if package_unit(row.unit) {
+                                                    Field{text: row.package_size_text empty_text: "每包装数量（可留空）" on_change: |text| { row.package_size_text = text }}
+                                                    Hint{text: "每包装单位 · " + row.package_size_unit}
+                                                    View{width: Fill height: Fit flow: Right spacing: 6
+                                                        if row.package_size_unit == "" { ChosenQuiet{text: "未知" on_click: || { row.package_size_text = "" row.package_size_unit = "" redraw() }} }
+                                                        else { Quiet{text: "未知" on_click: || { row.package_size_text = "" row.package_size_unit = "" redraw() }} }
+                                                        if row.package_size_unit == "g" { ChosenQuiet{text: "g" on_click: || { row.package_size_unit = "g" redraw() }} }
+                                                        else { Quiet{text: "g" on_click: || { row.package_size_unit = "g" redraw() }} }
+                                                        if row.package_size_unit == "ml" { ChosenQuiet{text: "ml" on_click: || { row.package_size_unit = "ml" redraw() }} }
+                                                        else { Quiet{text: "ml" on_click: || { row.package_size_unit = "ml" redraw() }} }
+                                                        if row.package_size_unit == "piece" { ChosenQuiet{text: "个" on_click: || { row.package_size_unit = "piece" redraw() }} }
+                                                        else { Quiet{text: "个" on_click: || { row.package_size_unit = "piece" redraw() }} }
+                                                    }
+                                                }
+                                                if row.unit == "个" || (package_unit(row.unit) && row.package_size_unit == "piece") {
+                                                    Field{text: row.average_item_grams_text empty_text: "平均每个约多少 g（可留空）" on_change: |text| { row.average_item_grams_text = text }}
+                                                }
+                                                Field{text: row.remaining_days_text empty_text: "还剩几天（可留空）" on_change: |text| { row.remaining_days_text = text }}
+                                                Field{text: row.printed_expires_on empty_text: "印刷日期 YYYY-MM-DD（可留空）" on_change: |text| { row.printed_expires_on = text }}
+                                                Hint{text: "营养参考四项同时填写，或全部留空。"}
+                                                Field{text: row.kcal_text empty_text: "每100g热量 kcal" on_change: |text| { row.kcal_text = text }}
+                                                Field{text: row.protein_text empty_text: "每100g蛋白质 g" on_change: |text| { row.protein_text = text }}
+                                                Field{text: row.fiber_text empty_text: "每100g膳食纤维 g" on_change: |text| { row.fiber_text = text }}
+                                                Field{text: row.vitamin_c_text empty_text: "每100g维生素C mg" on_change: |text| { row.vitamin_c_text = text }}
+                                            }
+                                        }
+                                        draft_error := Hint{text: intake_draft.error}
+                                        Action{text: "最终确认入库" on_click: || confirm_intake()}
+                                        Soft{text: "取消草稿" on_click: || cancel_preview()}
                                     }
                                 }
                                 Frost{width: 360 height: Fit padding: 18 spacing: 10
                                     View{width: Fill height: Fit flow: Right
-                                        Copy{text: "已识别 / 已录入" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                        Copy{text: "库存已录入" draw_text.text_style: theme.font_bold{font_size: 17}}
                                         Hint{text: "" + available() + " 批"}
                                     }
-                                    if state.foods.len() == 0 { Hint{text: "还没有食材，先录入第一批。"} }
-                                    for f in state.foods {
+                                    if state.foods.len() == 0 {
+                                        Hint{text: "识别结果仍是草稿。请在左侧勾选食材，滚动到底部点“最终确认入库”。"}
+                                    }
+                                    for group in inventory_groups() {
                                         View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: .5}
-                                            EmojiGlass{Label{text: food_emoji(f.name) padding: 0 draw_text.text_style.font_size: 18}}
+                                            EmojiGlass{Label{text: food_emoji(group.name) padding: 0 draw_text.text_style.font_size: 18}}
                                             View{width: Fill height: Fit flow: Down spacing: 2
-                                                Copy{text: f.name draw_text.text_style: theme.font_bold{font_size: 15}}
-                                                Hint{text: "" + f.grams + "g · " + freshness(f)}
+                                                Copy{text: group.name + " · " + group.batches.len() + " 批" draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                Hint{text: group_total_text(group) + " · " + group.status}
                                             }
                                         }
                                     }
                                     Divider{}
-                                    Action{text: "完成建档 · 开始托管  →" enabled: available() > 0 on_click: || finish_onboarding()}
+                                    if available() == 0 {
+                                        Soft{text: "待确认入库至少 1 批" enabled: false}
+                                    } else {
+                                        Action{text: "完成建档 · 开始托管  →" on_click: || finish_onboarding()}
+                                    }
                                 }
                             }
                         }
@@ -1591,10 +2648,12 @@ View{width: Fill height: Fill flow: Overlay
                                 for i in 5 {
                                     let bg = #x00000000
                                     let tc = muted
-                                    if tab == i { bg = #xe9e3d8 tc = ink }
+                                    let hover = #eee9e2
+                                    let down = #ddd6cb
+                                    if tab == i { bg = moss tc = #xffffff hover = #x373632 down = #x171714 }
                                     Pill{width: Fill height: 44 margin: 0 padding: 8 text: labels[i] on_click: || navigate(i)
-                                        draw_bg +: {color: bg color_hover: #eee9e2 color_down: #ddd6cb color_focus: bg border_radius: 14 border_size: 0}
-                                        draw_text +: {color: tc color_hover: ink color_down: ink color_focus: tc text_style.font_size: 12}}
+                                        draw_bg +: {color: bg color_hover: hover color_down: down color_focus: bg border_radius: 14 border_size: 0}
+                                        draw_text +: {color: tc color_hover: tc color_down: tc color_focus: tc text_style.font_size: 12}}
                                 }
                             }}
                             View{width: Fill height: Fill}
@@ -1651,10 +2710,14 @@ View{width: Fill height: Fill flow: Overlay
                                             }
                                         }
                                         View{width: Fill height: Fit flow: Right spacing: 8
-                                            Quiet{text: "清淡" on_click: || set_goal("今天想吃点清淡的")}
-                                            Quiet{text: "高蛋白" on_click: || set_goal("今天想吃高蛋白一点")}
-                                            Quiet{text: "低卡" on_click: || set_goal("今天想吃低卡一点")}
-                                            Quiet{text: "快手" on_click: || set_goal("今天只想做 15 分钟快手菜")}
+                                            if goal == "今天想吃点清淡的" { ChosenQuiet{text: "清淡" on_click: || set_goal("今天想吃点清淡的")} }
+                                            else { Quiet{text: "清淡" on_click: || set_goal("今天想吃点清淡的")} }
+                                            if goal == "今天想吃高蛋白一点" { ChosenQuiet{text: "高蛋白" on_click: || set_goal("今天想吃高蛋白一点")} }
+                                            else { Quiet{text: "高蛋白" on_click: || set_goal("今天想吃高蛋白一点")} }
+                                            if goal == "今天想吃低卡一点" { ChosenQuiet{text: "低卡" on_click: || set_goal("今天想吃低卡一点")} }
+                                            else { Quiet{text: "低卡" on_click: || set_goal("今天想吃低卡一点")} }
+                                            if goal == "今天只想做 15 分钟快手菜" { ChosenQuiet{text: "快手" on_click: || set_goal("今天只想做 15 分钟快手菜")} }
+                                            else { Quiet{text: "快手" on_click: || set_goal("今天只想做 15 分钟快手菜")} }
                                             Action{width: 210 text: "生成这一餐  →" enabled: !ai_busy && voice_phase == 0 && (!use_ai || ai_phase != 0) on_click: || generate()}
                                         }
                                     }
@@ -1709,50 +2772,149 @@ View{width: Fill height: Fill flow: Overlay
                                             Heading{text: "冰箱食材" draw_text.text_style.font_size: 30}
                                             Hint{text: "购买后更新一次，Agent 会持续维护数量、临期与下一餐。"}
                                         }
-                                        Quiet{text: "拍照识别 · 敬请期待" enabled: false}
-                                        Quiet{text: "导入小票 · 敬请期待" enabled: false}
+                                        Quiet{text: "拍照识别" enabled: intake_draft == nil on_click: || begin_recognition("food_image")}
+                                        Quiet{text: "导入小票" enabled: intake_draft == nil on_click: || begin_recognition("receipt_image")}
                                     }
+                                    if intake_draft != nil { Hint{text: "先确认或取消当前草稿，才能开始新的拍照或导入。"} }
                                     View{width: Fill height: Fit flow: Right spacing: 16
                                         Frost{width: 360 height: Fit padding: 18 spacing: 10
                                             Copy{text: "手动添加 / 修改" draw_text.text_style: theme.font_bold{font_size: 17}}
-                                            if preview == nil && removal == nil {
-                                                food_name := Field{text: draft_name empty_text: "食材名称" on_change: |text| { draft_name = text }}
+                                            if intake_draft == nil && removal == nil {
+                                                Field{text: draft_name empty_text: "食材名称" on_change: |text| { draft_name = text }}
                                                 View{width: Fill height: Fit flow: Right spacing: 8
-                                                    food_grams := Field{text: draft_grams empty_text: "数量 g" on_change: |text| { draft_grams = text }}
-                                                    food_days := Field{text: draft_days empty_text: "剩余天数" on_change: |text| { draft_days = text }}
+                                                    Field{text: draft_grams empty_text: "数量" on_change: |text| { draft_grams = text }}
+                                                    Copy{text: "单位 · " + draft_unit}
                                                 }
-                                                Quiet{text: "填写 / 收起包装营养参考" on_click: || { show_nutrition_input = !show_nutrition_input redraw() }}
-                                    Hint{text: "周期核算需完整成分。豆腐、菠菜、鸡蛋、蘑菇使用示例估算；其他食材请按标签填每100g数据。"}
-                                    if show_nutrition_input {
-                                        Field{text: draft_kcal empty_text: "每100g热量 kcal" on_change: |text| { draft_kcal = text }}
-                                        Field{text: draft_protein empty_text: "每100g蛋白质 g" on_change: |text| { draft_protein = text }}
-                                        Field{text: draft_fiber empty_text: "每100g膳食纤维 g" on_change: |text| { draft_fiber = text }}
-                                        Field{text: draft_vitamin_c empty_text: "每100g维生素C mg" on_change: |text| { draft_vitamin_c = text }}
-                                    }
-                                    Action{text: "预览并确认  →" on_click: || preview_food()}
-                                                if editing_id > 0 {
-                                                    View{width: Fill height: Fit flow: Right spacing: 8
-                                                        Soft{text: "取消修改" on_click: || cancel_edit()}
-                                                        Soft{text: "移除这批…" on_click: || request_remove(editing_id)}
+                                                View{width: Fill height: Fit flow: Right spacing: 6
+                                                    if draft_unit == "g" { ChosenQuiet{text: "g" on_click: || { draft_unit = "g" redraw() }} }
+                                                    else { Quiet{text: "g" on_click: || { draft_unit = "g" redraw() }} }
+                                                    if draft_unit == "kg" { ChosenQuiet{text: "kg" on_click: || { draft_unit = "kg" redraw() }} }
+                                                    else { Quiet{text: "kg" on_click: || { draft_unit = "kg" redraw() }} }
+                                                    if draft_unit == "ml" { ChosenQuiet{text: "ml" on_click: || { draft_unit = "ml" redraw() }} }
+                                                    else { Quiet{text: "ml" on_click: || { draft_unit = "ml" redraw() }} }
+                                                    if draft_unit == "L" { ChosenQuiet{text: "L" on_click: || { draft_unit = "L" redraw() }} }
+                                                    else { Quiet{text: "L" on_click: || { draft_unit = "L" redraw() }} }
+                                                    if draft_unit == "个" { ChosenQuiet{text: "个" on_click: || { draft_unit = "个" redraw() }} }
+                                                    else { Quiet{text: "个" on_click: || { draft_unit = "个" redraw() }} }
+                                                }
+                                                View{width: Fill height: Fit flow: Right spacing: 6
+                                                    if draft_unit == "盒" { ChosenQuiet{text: "盒" on_click: || { draft_unit = "盒" redraw() }} }
+                                                    else { Quiet{text: "盒" on_click: || { draft_unit = "盒" redraw() }} }
+                                                    if draft_unit == "袋" { ChosenQuiet{text: "袋" on_click: || { draft_unit = "袋" redraw() }} }
+                                                    else { Quiet{text: "袋" on_click: || { draft_unit = "袋" redraw() }} }
+                                                    if draft_unit == "瓶" { ChosenQuiet{text: "瓶" on_click: || { draft_unit = "瓶" redraw() }} }
+                                                    else { Quiet{text: "瓶" on_click: || { draft_unit = "瓶" redraw() }} }
+                                                }
+                                                if package_unit(draft_unit) {
+                                                    Field{text: draft_package_size empty_text: "每包装数量（可留空）" on_change: |text| { draft_package_size = text }}
+                                                    Hint{text: "每包装单位 · " + draft_package_unit + "；填包装数量时请选择单位"}
+                                                    View{width: Fill height: Fit flow: Right spacing: 6
+                                                        if draft_package_unit == "" { ChosenQuiet{text: "未知" on_click: || { draft_package_size = "" draft_package_unit = "" redraw() }} }
+                                                        else { Quiet{text: "未知" on_click: || { draft_package_size = "" draft_package_unit = "" redraw() }} }
+                                                        if draft_package_unit == "g" { ChosenQuiet{text: "g" on_click: || { draft_package_unit = "g" redraw() }} }
+                                                        else { Quiet{text: "g" on_click: || { draft_package_unit = "g" redraw() }} }
+                                                        if draft_package_unit == "ml" { ChosenQuiet{text: "ml" on_click: || { draft_package_unit = "ml" redraw() }} }
+                                                        else { Quiet{text: "ml" on_click: || { draft_package_unit = "ml" redraw() }} }
+                                                        if draft_package_unit == "piece" { ChosenQuiet{text: "个" on_click: || { draft_package_unit = "piece" redraw() }} }
+                                                        else { Quiet{text: "个" on_click: || { draft_package_unit = "piece" redraw() }} }
                                                     }
+                                                }
+                                                if draft_unit == "个" || (package_unit(draft_unit) && draft_package_unit == "piece") {
+                                                    Field{text: draft_average empty_text: "平均每个约多少 g（可留空）" on_change: |text| { draft_average = text }}
+                                                }
+                                                Field{text: draft_days empty_text: "还剩几天（可留空）" on_change: |text| { draft_days = text }}
+                                                Field{text: draft_date empty_text: "印刷日期 YYYY-MM-DD" on_change: |text| { draft_date = text }}
+                                                Hint{text: "剩余天数与印刷日期二选一；都留空表示保质期未知。"}
+                                                Quiet{text: "填写 / 收起包装营养参考" on_click: || { show_nutrition_input = !show_nutrition_input redraw() }}
+                                                if show_nutrition_input {
+                                                    Field{text: draft_kcal empty_text: "每100g热量 kcal" on_change: |text| { draft_kcal = text }}
+                                                    Field{text: draft_protein empty_text: "每100g蛋白质 g" on_change: |text| { draft_protein = text }}
+                                                    Field{text: draft_fiber empty_text: "每100g膳食纤维 g" on_change: |text| { draft_fiber = text }}
+                                                    Field{text: draft_vitamin_c empty_text: "每100g维生素C mg" on_change: |text| { draft_vitamin_c = text }}
+                                                }
+                                                Action{text: "预览并确认  →" on_click: || preview_food()}
+                                                if editing_id > 0 {
+                                                    Soft{text: "取消修改" on_click: || cancel_edit()}
                                                 }
                                             }
                                             if removal != nil {
                                                 Tint{draw_bg.color: #f4ede4
-                                                    Copy{text: "确认移除 " + removal.name + " · " + removal.grams + "g？" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                                    Copy{text: "确认移除 " + removal.name + " · " + removal.quantity + removal.unit + "？" draw_text.text_style: theme.font_bold{font_size: 17}}
                                                     Hint{text: "不会计作吃完；已有菜单会重新校验。"}
                                                     Action{text: "确认移除" on_click: || confirm_remove()}
                                                     Soft{text: "取消" on_click: || cancel_edit()}
                                                 }
                                             }
-                                            if preview != nil {
-                                                Tint{draw_bg.color: #f0ece4
-                                                    Hint{text: "请核对"}
-                                                    Copy{text: preview.name draw_text.text_style: theme.font_bold{font_size: 21}}
-                                                    Hint{text: "" + preview.grams + "g · 剩余 " + remaining(preview) + " 天"}
-                                                    Action{text: "确认入库" on_click: || add_food()}
-                                                    Soft{text: "返回修改" on_click: || cancel_preview()}
+                                            if intake_draft != nil {
+                                                Hint{text: "点击状态按钮可切换选择；只有已选中的行会在最终确认时入库。"}
+                                                for i in intake_draft.rows.len() {
+                                                    let row = intake_draft.rows[i]
+                                                    Tint{draw_bg.color: #f0ece4
+                                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                                            Quiet{text: "" + row.row_id + " · " + row.name}
+                                                            let selected_text = "✓ 已选中"
+                                                            if !row.selected { selected_text = "○ 未选中" }
+                                                            if row.selected { ChosenSoft{text: selected_text on_click: || { row.selected = !row.selected redraw() }} }
+                                                            else { Soft{text: selected_text on_click: || { row.selected = !row.selected redraw() }} }
+                                                            Quiet{text: "移除" on_click: || remove_draft_row(row.row_id)}
+                                                        }
+                                                        Field{text: row.name empty_text: "食材名称" on_change: |text| { row.name = text }}
+                                                        View{width: Fill height: Fit flow: Right spacing: 8
+                                                            Field{text: row.quantity_text empty_text: "数量" on_change: |text| { row.quantity_text = text }}
+                                                            Hint{text: "单位 · " + (if row.unit == "" { "未选择" } else { row.unit })}
+                                                        }
+                                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                                            if row.unit == "g" { ChosenQuiet{text: "g" on_click: || { row.unit = "g" redraw() }} }
+                                                            else { Quiet{text: "g" on_click: || { row.unit = "g" redraw() }} }
+                                                            if row.unit == "kg" { ChosenQuiet{text: "kg" on_click: || { row.unit = "kg" redraw() }} }
+                                                            else { Quiet{text: "kg" on_click: || { row.unit = "kg" redraw() }} }
+                                                            if row.unit == "ml" { ChosenQuiet{text: "ml" on_click: || { row.unit = "ml" redraw() }} }
+                                                            else { Quiet{text: "ml" on_click: || { row.unit = "ml" redraw() }} }
+                                                            if row.unit == "L" { ChosenQuiet{text: "L" on_click: || { row.unit = "L" redraw() }} }
+                                                            else { Quiet{text: "L" on_click: || { row.unit = "L" redraw() }} }
+                                                            if row.unit == "个" { ChosenQuiet{text: "个" on_click: || { row.unit = "个" redraw() }} }
+                                                            else { Quiet{text: "个" on_click: || { row.unit = "个" redraw() }} }
+                                                        }
+                                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                                            if row.unit == "盒" { ChosenQuiet{text: "盒" on_click: || { row.unit = "盒" redraw() }} }
+                                                            else { Quiet{text: "盒" on_click: || { row.unit = "盒" redraw() }} }
+                                                            if row.unit == "袋" { ChosenQuiet{text: "袋" on_click: || { row.unit = "袋" redraw() }} }
+                                                            else { Quiet{text: "袋" on_click: || { row.unit = "袋" redraw() }} }
+                                                            if row.unit == "瓶" { ChosenQuiet{text: "瓶" on_click: || { row.unit = "瓶" redraw() }} }
+                                                            else { Quiet{text: "瓶" on_click: || { row.unit = "瓶" redraw() }} }
+                                                        }
+                                                        if canonical_unit(row.unit) == "" && !package_unit(row.unit) {
+                                                            Hint{text: "请从上方选择单位，并核对数量。"}
+                                                        }
+                                                        if package_unit(row.unit) {
+                                                            Field{text: row.package_size_text empty_text: "每包装数量（可留空）" on_change: |text| { row.package_size_text = text }}
+                                                            Hint{text: "每包装单位 · " + row.package_size_unit}
+                                                            View{width: Fill height: Fit flow: Right spacing: 6
+                                                                if row.package_size_unit == "" { ChosenQuiet{text: "未知" on_click: || { row.package_size_text = "" row.package_size_unit = "" redraw() }} }
+                                                                else { Quiet{text: "未知" on_click: || { row.package_size_text = "" row.package_size_unit = "" redraw() }} }
+                                                                if row.package_size_unit == "g" { ChosenQuiet{text: "g" on_click: || { row.package_size_unit = "g" redraw() }} }
+                                                                else { Quiet{text: "g" on_click: || { row.package_size_unit = "g" redraw() }} }
+                                                                if row.package_size_unit == "ml" { ChosenQuiet{text: "ml" on_click: || { row.package_size_unit = "ml" redraw() }} }
+                                                                else { Quiet{text: "ml" on_click: || { row.package_size_unit = "ml" redraw() }} }
+                                                                if row.package_size_unit == "piece" { ChosenQuiet{text: "个" on_click: || { row.package_size_unit = "piece" redraw() }} }
+                                                                else { Quiet{text: "个" on_click: || { row.package_size_unit = "piece" redraw() }} }
+                                                            }
+                                                        }
+                                                        if row.unit == "个" || (package_unit(row.unit) && row.package_size_unit == "piece") {
+                                                            Field{text: row.average_item_grams_text empty_text: "平均每个约多少 g（可留空）" on_change: |text| { row.average_item_grams_text = text }}
+                                                        }
+                                                        Field{text: row.remaining_days_text empty_text: "还剩几天（可留空）" on_change: |text| { row.remaining_days_text = text }}
+                                                        Field{text: row.printed_expires_on empty_text: "印刷日期 YYYY-MM-DD（可留空）" on_change: |text| { row.printed_expires_on = text }}
+                                                        Hint{text: "营养参考四项同时填写，或全部留空。"}
+                                                        Field{text: row.kcal_text empty_text: "每100g热量 kcal" on_change: |text| { row.kcal_text = text }}
+                                                        Field{text: row.protein_text empty_text: "每100g蛋白质 g" on_change: |text| { row.protein_text = text }}
+                                                        Field{text: row.fiber_text empty_text: "每100g膳食纤维 g" on_change: |text| { row.fiber_text = text }}
+                                                        Field{text: row.vitamin_c_text empty_text: "每100g维生素C mg" on_change: |text| { row.vitamin_c_text = text }}
+                                                    }
                                                 }
+                                                draft_error := Hint{text: intake_draft.error}
+                                                Action{text: "最终确认入库" on_click: || confirm_intake()}
+                                                Soft{text: "取消草稿" on_click: || cancel_preview()}
                                             }
                                         }
                                         View{width: Fill height: Fit flow: Down spacing: 10
@@ -1761,15 +2923,28 @@ View{width: Fill height: Fill flow: Overlay
                                                 Hint{text: "" + available() + " 批"}
                                             }
                                             if state.foods.len() == 0 { Hint{text: "冰箱还是空的，先录入第一批食材。"} }
-                                            for f in state.foods {
+                                            for group in inventory_groups() {
                                                 Tint{padding: 13 draw_bg.color: #ffffffa8
                                                     View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
-                                                        EmojiGlass{Label{text: food_emoji(f.name) padding: 0 draw_text.text_style.font_size: 19}}
+                                                        EmojiGlass{Label{text: food_emoji(group.name) padding: 0 draw_text.text_style.font_size: 19}}
                                                         View{width: Fill height: Fit flow: Down spacing: 3
-                                                            Copy{text: f.name draw_text.text_style: theme.font_bold{font_size: 16}}
-                                                            Hint{text: "" + f.grams + "g · " + freshness(f)}
+                                                            Copy{text: group.name + " · " + group.batches.len() + " 批" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                            Hint{text: group_total_text(group) + " · " + group.status}
                                                         }
-                                                        Quiet{text: "编辑" on_click: || edit_food(f.id)}
+                                                        Quiet{text: "展开 / 收起" on_click: || toggle_group(group.name)}
+                                                    }
+                                                    if expanded_name == group.name {
+                                                        for i in group.batches.len() {
+                                                            let f = group.batches[i]
+                                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                View{width: Fill height: Fit flow: Down spacing: 2
+                                                                    Copy{text: "第 " + (i + 1) + " 批 · " + f.quantity + f.unit}
+                                                                    Hint{text: freshness(f) + " · " + expiry_text(f)}
+                                                                }
+                                                                Quiet{text: "编辑" on_click: || edit_food(f.id)}
+                                                                Quiet{text: "丢弃/移除" on_click: || request_remove(f.id)}
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1801,7 +2976,7 @@ View{width: Fill height: Fill flow: Overlay
                                     if p == nil {
                                         Frost{padding: 26
                                             Copy{text: "还没有候选方案" draw_text.text_style: theme.font_bold{font_size: 20}}
-                                            Hint{text: "回到首页说一句你今晚想吃什么。"}
+                                            Hint{text: message}
                                             Action{text: "回首页" on_click: || navigate(0)}
                                         }
                                     }
@@ -1810,7 +2985,7 @@ View{width: Fill height: Fill flow: Overlay
                                         if p.accepted { status = "已接受 · 今晚按此执行" }
                                         if p.accepted && p.id != state.active { status = "历史方案" }
                                         if p.consumed { status = "已完成 · 已记录到档案" }
-                                        if !p.consumed && (!validate(p) || !numeric_budget_ok(p.uses)) { status = "方案已失效 · 请重新生成" }
+                                        if !p.consumed && !plan_ready(p) { status = "方案已失效 · 请重新生成" }
                                         View{width: Fill height: Fit flow: Right spacing: 16
                                             Frost{width: Fill height: Fit padding: 22 spacing: 13 draw_bg.color: #ffffffc2
                                                 View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
@@ -1829,26 +3004,34 @@ View{width: Fill height: Fill flow: Overlay
                                                     }
                                                 }
                                                 Divider{}
-                                                Copy{text: p.reason}
+                                                Copy{text: recipe_display_text(p.reason)}
                                                 View{width: Fill height: Fit flow: Right spacing: 10
-                                                    Tint{draw_bg.color: #f1ede7
-                                                        Hint{text: "库存利用率"}
-                                                        Copy{text: "" + plan_percent(p) + "%" draw_text.text_style: theme.font_bold{font_size: 20}}
-                                                    }
-                                                    Tint{draw_bg.color: #f5f2ed
-                                                        Hint{text: "本餐估算"}
-                                                        Copy{text: "约 " + meal_kcal(p) + " kcal" draw_text.text_style: theme.font_bold{font_size: 20}}
+                                                    if plan_numeric(p) {
+                                                        Tint{draw_bg.color: #f1ede7
+                                                            Hint{text: "库存利用率"}
+                                                            Copy{text: "" + plan_percent(p) + "%" draw_text.text_style: theme.font_bold{font_size: 20}}
+                                                        }
+                                                        Tint{draw_bg.color: #f5f2ed
+                                                            Hint{text: "本餐估算"}
+                                                            Copy{text: "约 " + meal_kcal(p) + " kcal" draw_text.text_style: theme.font_bold{font_size: 20}}
+                                                        }
+                                                    } else {
+                                                        Tint{draw_bg.color: #f4ede4
+                                                            Copy{text: "热量与营养无法核算" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                                            Hint{text: "按库存原单位规划；保质期未知的食材，请先确认新鲜度。"}
+                                                        }
                                                     }
                                                 }
                                                 Copy{text: "将使用" draw_text.text_style: theme.font_bold{font_size: 16}}
                                                 View{width: Fill height: Fit flow: Right spacing: 8
-                                                    for u in p.uses { Quiet{text: food_emoji(u.name) + " " + u.name + "  " + u.grams + "g"} }
+                                                    for u in p.uses { Quiet{text: food_emoji(u.name) + " " + u.name + "  " + use_quantity(u) + use_unit_text(u)} }
                                                 }
                                                 if details {
                                                     Tint{draw_bg.color: #f4f0e9
                                                         Copy{text: "做法" draw_text.text_style: theme.font_bold{font_size: 16}}
-                                                        Copy{text: p.steps}
-                                                        Hint{text: "请复核食材状态；营养数值为粗略估算，不替代医疗或营养专业建议。"}
+                                                        Copy{text: recipe_display_text(p.steps)}
+                                                        if plan_numeric(p) { Hint{text: "请复核食材状态；营养数值为粗略估算，不替代医疗或营养专业建议。"} }
+                                                        else { Hint{text: "保质期未知的食材请先确认新鲜度；本餐不提供热量或营养数值。"} }
                                                     }
                                                 }
                                                 if p.previous != "" {
@@ -1885,13 +3068,15 @@ View{width: Fill height: Fill flow: Overlay
                                         Frost{padding: 22 spacing: 12
                                             Heading{text: "核对实际吃掉的量" draw_text.text_style.font_size: 26}
                                             Hint{text: "只有最后确认后才会扣减库存，并写入今天和本周期的饮食档案。"}
-                                            Field{text: extra_kcal_text empty_text: "额外用油、饮料等热量 kcal" on_change: |text| { extra_kcal_text = text }}
+                                            if plan_numeric(p) { Field{text: extra_kcal_text empty_text: "额外用油、饮料等热量 kcal" on_change: |text| { extra_kcal_text = text }} }
+                                            else { Hint{text: "本餐热量与营养未核算；确认后只扣实际使用的库存。"} }
                                             for i in consumption.len() {
                                                 let u = consumption[i]
                                                 View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: .5}
-                                                    Copy{text: u.name}
-                                                    Field{width: 120 text: "" + u.grams on_change: |text| revise_amount(i, text)}
-                                                    Hint{text: "克"}
+                                                    Copy{text: u.name + " · 第 " + batch_ordinal(u.food_id) + " 批"}
+                                                    Field{width: 120 text: "" + use_quantity(u) on_change: |text| revise_amount(i, text)}
+                                                    Hint{text: use_unit_text(u)}
+                                                    Quiet{text: "换同名批次" on_click: || cycle_consume_batch(i)}
                                                 }
                                             }
                                         }
@@ -1902,8 +3087,9 @@ View{width: Fill height: Fill flow: Overlay
                                         let program = active_program()
                                         Heading{text: "当前周期方案"}
                                         Copy{text: program.name + " · 第 " + program_day_index(program) + " / " + program.days + " 天"}
-                                        Hint{text: "周期热量已记录 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
-                                        Hint{text: "周期剩余 " + program_remaining_total(program) + " kcal · 今日已记录 " + program_today_kcal(program) + " kcal"}
+                                        Hint{text: "周期已核算热量 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
+                                        Hint{text: "按已核算餐食计算的余额 " + program_remaining_total(program) + " kcal · 今日已核算 " + program_today_kcal(program) + " kcal"}
+                                        if unquantified_meals() > 0 { Hint{text: "另有 " + unquantified_meals() + " 餐营养未核算；上述余额不代表实际剩余额度。"} }
                                         Hint{text: "蛋白质 " + program.consumed_protein + " / " + program.protein_goal + " g"}
                                         Hint{text: "膳食纤维 " + program.consumed_fiber + " / " + program.fiber_goal + " g"}
                                         Hint{text: "维生素 C " + program.consumed_vitamin_c + " / " + program.vitamin_c_goal + " mg"}
@@ -1916,7 +3102,7 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     View{width: Fill height: Fit flow: Right spacing: 16
                                         Frost{width: 330 height: Fit padding: 22 spacing: 14 draw_bg.color: #ffffffc2
-                                            Hint{text: "今日摄入 · 本地示例估算"}
+                                            Hint{text: "今日已核算摄入 · 本地示例估算"}
                                             View{width: Fill height: Fit flow: Right spacing: 14 align: Align{y: .5}
                                                 View{width: 100 height: 100 flow: Overlay align: Align{x: .5 y: .5}
                                                     ProgressRing{width: 100 height: 100 draw_bg.progress: nutrition_percent() / 100}
@@ -1924,8 +3110,9 @@ View{width: Fill height: Fill flow: Overlay
                                                 }
                                                 View{width: Fill height: Fit flow: Down spacing: 5
                                                     Copy{text: "/ " + state.daily_target + " kcal" draw_text.text_style: theme.font_bold{font_size: 17}}
-                                                    Hint{text: "剩余约 " + remaining_budget() + " kcal"}
+                                                    Hint{text: "按已核算餐食剩余约 " + remaining_budget() + " kcal"}
                                                     Hint{text: "已记录 " + state.meal_count + " 餐"}
+                                                    if unquantified_meals() > 0 { Hint{text: "其中 " + unquantified_meals() + " 餐营养未核算"} }
                                                 }
                                             }
                                             Divider{}
@@ -1936,7 +3123,7 @@ View{width: Fill height: Fill flow: Overlay
                                             View{width: Fill height: Fit flow: Right spacing: 10
                                                 Tint{draw_bg.color: #f1ede7 Hint{text: "使用场景"} Copy{text: state.profile.scene draw_text.text_style: theme.font_bold{font_size: 16}}}
                                                 Tint{draw_bg.color: #f5f2ed Hint{text: "近期偏好"} Copy{text: preference_summary() draw_text.text_style: theme.font_bold{font_size: 16}}}
-                                                Tint{draw_bg.color: #f1ede7 Hint{text: "忌口"} Copy{text: state.profile.avoid draw_text.text_style: theme.font_bold{font_size: 16}}}
+                                                Tint{draw_bg.color: #f1ede7 Hint{text: "过敏 / 忌口"} Copy{text: state.profile.allergies + " / " + state.profile.avoidances draw_text.text_style: theme.font_bold{font_size: 16}}}
                                             }
                                             Divider{}
                                             Copy{text: "最近完成的餐" draw_text.text_style: theme.font_bold{font_size: 16}}
@@ -1945,7 +3132,8 @@ View{width: Fill height: Fill flow: Overlay
                                                 if p2.consumed {
                                                     View{width: Fill height: Fit flow: Right spacing: 8
                                                         Copy{text: p2.title}
-                                                        Hint{text: "约 " + meal_kcal(p2) + " kcal"}
+                                                        if plan_numeric(p2) { Hint{text: "约 " + meal_kcal(p2) + " kcal"} }
+                                                        else { Hint{text: "热量与营养未核算"} }
                                                     }
                                                 }
                                             }
@@ -1961,8 +3149,9 @@ View{width: Fill height: Fill flow: Overlay
                                     View{width: Fill height: Fit flow: Right spacing: 16
                                         Frost{width: Fill height: Fit padding: 20 spacing: 12
                                             Copy{text: "用户画像" draw_text.text_style: theme.font_bold{font_size: 18}}
-                                            Hint{text: state.profile.scene + " · " + state.profile.diet}
-                                            if state.profile.avoid != "" { Hint{text: "忌口 · " + state.profile.avoid} }
+                                            Hint{text: state.profile.scene + " · " + state.profile.preferences}
+                                            if state.profile.allergies != "" { Hint{text: "过敏 · " + state.profile.allergies} }
+                                            if state.profile.avoidances != "" { Hint{text: "忌口 · " + state.profile.avoidances} }
                                             Soft{text: "重新设置用户画像" on_click: || restart_profile()}
                                             Soft{text: "选择下一周期方案…" on_click: || renew_programs()}
                                             Divider{}
@@ -2038,7 +3227,7 @@ View{width: Fill height: Fill flow: Overlay
                                         confirm_consumption := Action{text: "确认吃完 · 扣减库存并写入档案" on_click: || confirm_consume()}
                                         Soft{text: "取消" on_click: || cancel_consume()}
                                     }
-                                    if !pending && plan_removal == nil && !p.consumed && validate(p) && numeric_budget_ok(p.uses) {
+                                    if !pending && plan_removal == nil && !p.consumed && plan_ready(p) {
                                         if !p.accepted { Action{text: "就吃这套 · 设为今晚方案  →" enabled: !ai_busy on_click: || accept()} }
                                         if p.accepted && p.id == state.active { Action{text: "我吃完了 · 核对实际用量" enabled: !ai_busy on_click: || prepare_consume()} }
                                     }

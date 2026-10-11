@@ -52,6 +52,9 @@ class UI:
         self.get("t", t=text, wait=1)
 
     def state_path(self):
+        direct = self.profile / "pantry-steward" / "pantry.json"
+        if direct.exists():
+            return direct
         files = list((self.profile / "apps/pantry-steward").rglob("pantry.json"))
         assert len(files) == 1, files
         return files[0]
@@ -77,212 +80,171 @@ class UI:
         return "\n".join(w.get("t", "") for w in self.snap())
 
 
+def enter(ui, placeholder, value):
+    ui.click(placeholder)
+    ui.get("k", k="down", c="KeyA", ctrl=1, wait=1)
+    ui.get("k", k="up", c="KeyA", ctrl=1, wait=1)
+    ui.get("t", t=value, wait=1)
+
+
+def add(ui, name, quantity, unit="g", days=None, printed_date=None, package=None):
+    before = list(ui.state()["foods"])
+    ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
+    enter(ui, "食材名称", name)
+    enter(ui, "数量", quantity)
+    if unit != "g":
+        ui.click(unit)
+    if days is not None:
+        enter(ui, "还剩几天（可留空）", days)
+    if printed_date is not None:
+        enter(ui, "印刷日期 YYYY-MM-DD", printed_date)
+    if package is not None:
+        enter(ui, "每包装数量（可留空）", package)
+        ui.click("g", index=1)
+    ui.click("预览并确认  →")
+    ui.check("预览未写入库存", ui.state()["foods"] == before)
+    ui.click("最终确认入库")
+
+
 def exercise(ui):
-    ui.check("官方宿主显示首次建档", "首次建档" in ui.text())
-    if "首次建档  1 / 3" in ui.text():
-        ui.click("选择", index=1)
-    if "首次建档  1 / 4" in ui.text():
-        ui.click("选择", index=1)
-        ui.click("女性")
-        for index, text in enumerate(("30", "170", "65", "", "清淡", "无")):
-            ui.fill(text, index)
-        ui.click("下一步 · 选择周期方案  →")
-        ui.check("周期候选为7/21/30天且未自动启用", [p["days"] for p in ui.state()["programs"]] == [7, 21, 30] and ui.state()["program_active"] == 0)
-        ui.click("确认选中方案 · 去录冰箱  →")
-    else:
-        for index, text in enumerate(("30", "170", "65", "清淡", "无")):
-            ui.fill(text, index)
-        ui.click("下一步 · 建立冰箱档案  →")
-    ui.check("档案保存并进入入库页", ui.state()["profile"]["scene"] == "日常健康")
-    ui.fill("豆腐", name="food_name")
-    ui.fill("abc", name="food_grams")
-    ui.fill("2", name="food_days")
-    ui.click("预览并确认入库  →")
-    ui.check("非法数量不写库存", not ui.state()["foods"])
-    ui.fill("250", name="food_grams")
-    ui.click("预览并确认入库  →")
-    ui.check("预览不写库存", not ui.state()["foods"])
-    ui.click("确认入库")
-    ui.check("确认才写库存", ui.state()["foods"][0]["grams"] == 250)
+    ui.check("首次建档显示", "首次建档  1 / 4" in ui.text())
+    ui.click("选择", index=1)
+    ui.click("女性")
+    for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65"),
+                         ("例如：牛奶、花生", "花生"), ("例如：清淡、家常、少油", "清淡")):
+        enter(ui, label, value)
+    ui.click("下一步 · 选择周期方案  →")
+    ui.check("周期候选未自动启用", [p["days"] for p in ui.state()["programs"]] == [7, 21, 30]
+             and ui.state()["program_active"] == 0)
+    ui.click("确认选中方案 · 去录冰箱  →")
+    for entry in ("拍照识别", "导入小票"):
+        ui.click(entry)
+        ui.check(entry + " 官方宿主回退手动录入",
+                 "当前宿主暂不支持图片识别，请使用手动录入" in ui.text()
+                 and "选择已有图片" not in ui.text())
+    enter(ui, "食材名称", "豆腐")
+    enter(ui, "数量", "abc")
+    enter(ui, "还剩几天（可留空）", "2")
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
+    ui.check("非法数量原子拒绝", ui.state()["foods"] == [])
+    ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
+    ui.fill("250", index=1)
+    ui.click("最终确认入库")
+    ui.check("首次确认落盘", ui.state()["foods"][0]["quantity"] == 250 and
+             ui.state()["inventory_events"][0]["type"] == "add")
     ui.click("完成建档 · 开始托管  →")
-    ui.check("首页完整显示", "今天想吃点什么？" in ui.text() and ui.state()["profile"]["done"])
-    ui.click(name="voice_button")
-    ui.check("麦克风明确说明不支持，不启动录音", "语音识别服务" in ui.text())
+    ui.check("建档完成", ui.state()["profile"]["done"])
+    ui.click("▣  冰箱")
+    add(ui, "豆腐", "100")
+    ui.check("同名批次分别保存", [f["quantity"] for f in ui.state()["foods"] if f["name"] == "豆腐"] == [250, 100])
+    add(ui, "牛奶", "500", "ml", days="20")
+    add(ui, "鸡蛋", "3", "个", printed_date="2020-01-01")
+    add(ui, "豆浆", "2", "盒", package="300")
+    foods = ui.state()["foods"]
+    ui.check("单位、包装和四种有效期落盘", foods[-1]["canonical_quantity"] == 600
+             and foods[-1]["canonical_unit"] == "g"
+             and {f["expiry_precision"] for f in foods} == {"estimated", "unknown", "exact"}
+             and "豆腐 · 2 批" in ui.text() and "正常" in ui.text() and "已过期" in ui.text()
+             and "临期" in ui.text() and "保质期未知" in ui.text())
+    ui.click("展开 / 收起", index=0)
+    ui.click("编辑", index=0)
+    ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
+    ui.fill("220", index=1)
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
+    ui.check("编辑只更新原批次", ui.state()["foods"][0]["id"] == 1 and
+             ui.state()["foods"][0]["quantity"] == 220)
+    ui.click("丢弃/移除", index=1)
+    saved_foods = list(ui.state()["foods"])
+    ui.click("确认移除")
+    ui.check("丢弃需确认且不计用餐", len(ui.state()["foods"]) == len(saved_foods) - 1 and
+             ui.state()["meal_count"] == 0)
     ui.click("⚙  设置")
-    ui.check("预算不冒充模型已配置", "宿主服务可用" in ui.text() and "在线 AI 已配置" not in ui.text())
+    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")
-    ui.check("本地规则开关持久化", ui.state()["model_enabled"] is False)
-    ui.check("默认关闭自动生成且建档未生成方案", ui.state()["auto_generate"] is False and not ui.state()["plans"])
-    ui.click("▣  冰箱")
-    ui.click("编辑", index=0)
-    saved = ui.state_path().read_bytes()
-    ui.click("取消修改")
-    ui.check("取消编辑不改库存或生成方案", ui.state_path().read_bytes() == saved)
-    ui.click("编辑", index=0)
-    ui.fill("300", name="food_grams")
-    ui.click("预览并确认  →")
-    ui.click("确认入库")
-    ui.check("编辑确认仅更新库存不生成", ui.state()["foods"][0]["grams"] == 300 and not ui.state()["plans"])
-    ui.click("编辑", index=0)
-    ui.click("移除这批…")
-    ui.click("确认移除")
-    ui.check("移除库存不自动生成", not ui.state()["foods"] and not ui.state()["plans"])
-    ui.click("⚙  设置")
-    ui.click("载入演示数据…")
-    before = ui.state_path().read_bytes()
-    ui.check("演示替换需要确认", "确认替换并开始演示" in ui.text())
-    ui.click("确认替换并开始演示")
-    ui.check("演示库存建立且正式菜单保留", ui.state()["active"] == 5 and len(ui.state()["foods"]) == 4)
-    ui.shot("01-main.png")
-    ui.click("⚙  设置")
-    ui.click("时间 +12 小时")
-    ui.check("默认临期只提醒，不生成或跳转方案", len(ui.state()["plans"]) == 1 and ui.state()["active"] == 5 and "不会自动创建方案" in ui.text())
+    ui.check("本地规则选择持久化", ui.state()["model_enabled"] is False)
+    ui.get("m", k="scroll", x=750, y=600, dy=-650, wait=1)
+    plan_count = len(ui.state()["plans"])
+    ui.click("开启自动生成（可选）")
+    ui.check("开启自动生成只改设置", ui.state()["auto_generate"] is True and
+             len(ui.state()["plans"]) == plan_count)
+    ui.click("关闭自动生成")
+    ui.check("关闭自动生成只改设置", ui.state()["auto_generate"] is False and
+             len(ui.state()["plans"]) == plan_count)
     ui.click("⌂  首页")
     ui.click("生成这一餐  →")
-    ui.check("手动生成才创建候选且不替换今晚方案", len(ui.state()["plans"]) == 2 and ui.state()["active"] == 5)
-    ui.click("▣  冰箱")
-    ui.click("编辑", index=2)
-    ui.fill("300", name="food_grams")
-    ui.click("预览并确认  →")
-    ui.click("确认入库")
-    ui.check("库存变化使旧候选失效但不创建新方案", len(ui.state()["plans"]) == 2)
-    ui.click("✦  方案")
-    ui.check("失效方案有明确提示及手动入口", "方案已失效 · 请重新生成" in ui.text() and "回首页重新生成" in ui.text())
-    ui.click("回首页重新生成")
-    ui.check("回首页入口本身不生成", len(ui.state()["plans"]) == 2)
-    ui.click("生成这一餐  →")
-    ui.shot("02-plan.png")
+    ui.check("手动生成候选", len(ui.state()["plans"]) == 1 and not ui.state()["plans"][0]["accepted"])
     ui.click("就吃这套 · 设为今晚方案  →")
-    ui.check("用户接受候选成为正式菜单", ui.state()["active"] != 5)
+    ui.check("接受方案", ui.state()["active"] == ui.state()["plans"][0]["id"])
     ui.click("我吃完了 · 核对实际用量")
     before = ui.state_path().read_bytes()
-    ui.fill("999999", 1)
-    ui.click(name="confirm_consumption")
-    ui.check("超库存扣减被拒绝", ui.state_path().read_bytes() == before and "不能超出库存" in ui.text())
     ui.click("取消")
-    ui.check("取消不改库存", ui.state_path().read_bytes() == before)
+    ui.check("取消用餐不改存储", ui.state_path().read_bytes() == before)
     ui.click("我吃完了 · 核对实际用量")
-    ui.shot("03-confirm.png")
-    prior = sum(f["grams"] for f in ui.state()["foods"])
-    plan_count = len(ui.state()["plans"])
-    ui.click(name="confirm_consumption")
-    ui.check("确认扣减并记录用餐", sum(f["grams"] for f in ui.state()["foods"]) < prior and ui.state()["meal_count"] == 2)
-    ui.check("确认吃完不自动创建下一餐", len(ui.state()["plans"]) == plan_count)
-    ui.click("▣  冰箱")
-    ui.shot("04-updated.png")
+    ui.click("确认吃完 · 扣减库存并写入档案")
+    ui.check("确认用餐扣库存并写档案", ui.state()["meal_count"] == 1 and
+             ui.state()["plans"][0]["consumed"] and
+             ui.state()["foods"][0]["quantity"] < 220)
+    ui.click("+ 再给我一个备选")
+    preserved = ui.state()["foods"]
+    ui.click("删除这个方案…")
+    ui.click("确认删除方案")
+    ui.check("删除候选不回滚库存", len(ui.state()["plans"]) == 1 and ui.state()["foods"] == preserved)
+    ui.click("⚙  设置")
+    saved_profile = ui.state_path().read_bytes()
+    ui.click("重新设置用户画像")
+    ui.check("画像修改可取消且尚未落盘", "取消修改 · 返回设置" in ui.text()
+             and ui.state_path().read_bytes() == saved_profile)
+    ui.click("取消修改 · 返回设置")
+    ui.check("取消画像修改恢复原档案", ui.state_path().read_bytes() == saved_profile
+             and "管家设置" in ui.text())
+    ui.click("重新设置用户画像")
+    ui.click("已选中")
+    enter(ui, "清淡", "少油")
+    ui.click("下一步 · 选择周期方案  →")
+    ui.check("画像编辑保持库存且等待确认", ui.state_path().read_bytes() == saved_profile
+             and len(ui.state()["foods"]) == len(preserved))
+    ui.click("保存画像与周期方案  →")
+    ui.check("画像确认后旧菜单失效且保留库存", ui.state()["profile"]["preferences"] == "少油"
+             and ui.state()["profile"]["done"] and ui.state()["active"] == 0
+             and len(ui.state()["foods"]) == len(preserved))
+    (ui.profile / "expected-state.json").write_text(
+        json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
+    (ui.profile / "checks.json").write_text(
+        json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
+
+
+def exercise_recipe(ui):
+    ui.click("选择", index=1)
+    ui.click("女性")
+    for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
+        enter(ui, label, value)
+    ui.click("下一步 · 选择周期方案  →")
+    ui.click("确认选中方案 · 去录冰箱  →")
+    enter(ui, "食材名称", "番茄")
+    enter(ui, "数量", "3")
+    ui.click("个")
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
+    ui.click("完成建档 · 开始托管  →")
+    ui.click("⚙  设置")
+    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
+    ui.click("改用本地规则")
     ui.click("⌂  首页")
     ui.click("生成这一餐  →")
-    deletion_checks(ui)
-    automatic_checks(ui)
-    ui.click("⚙  设置")
-    ui.click("重新设置用户画像")
-    ui.check("可返回资料页且库存保留", "首次建档" in ui.text() and len(ui.state()["foods"]) == 4)
-    (ui.profile / "expected-state.json").write_text(json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
-    (ui.profile / "checks.json").write_text(json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
-    ui.shot("return-profile.png")
-
-
-def deletion_checks(ui):
-    def preserved(value):
-        fields = ("foods", "revision", "consumed_kcal", "meal_count", "last_meal", "last_goal", "handled")
-        return {key: value[key] for key in fields}
-
-    ui.click("✦  方案")
-    before = ui.state()
-    protected = preserved(before)
-    target = before["plans"][-1]["id"]
-    saved = ui.state_path().read_bytes()
-    ui.click("删除这个方案…")
-    ui.check("删除前展示确认且不改存储", "确认删除这个方案？" in ui.text() and ui.state_path().read_bytes() == saved)
-    ui.click("取消删除")
-    ui.check("取消删除保留全部方案和数据", ui.state_path().read_bytes() == saved)
-    ui.click("删除这个方案…")
-    ui.click("确认删除方案")
-    after = ui.state()
-    ui.check("仅删除选中的候选且不改库存档案", [p["id"] for p in after["plans"]] == [p["id"] for p in before["plans"] if p["id"] != target] and preserved(after) == protected)
-    ui.shot("delete-candidate.png")
-    completed = next(p for p in after["plans"] if p["consumed"])
-    while completed["title"] not in ui.text():
-        ui.click("‹ 上一个")
-    ui.click("删除这个方案…")
-    ui.click("确认删除方案")
-    ui.check("删除已完成方案不回滚库存和用餐记录", not any(p["id"] == completed["id"] for p in ui.state()["plans"]) and preserved(ui.state()) == protected)
-    ui.click("⚙  设置")
-    ui.click("载入演示数据…")
-    ui.click("确认替换并开始演示")
-    before = ui.state()
-    protected = preserved(before)
-    ui.click("✦  方案")
-    ui.click("删除这个方案…")
-    ui.check("删除今晚方案时明确警告", "这是当前今晚方案" in ui.text() and ui.state()["active"] == before["active"])
-    ui.click("确认删除方案")
-    after = ui.state()
-    ui.check("删除最后的今晚方案清除选中且不改库存档案", after["active"] == 0 and after["plans"] == [] and preserved(after) == protected and "还没有候选方案" in ui.text())
-    ui.shot("delete-empty.png")
-
-
-def automatic_checks(ui):
-    ui.click("⚙  设置")
-    ui.click("载入演示数据…")
-    ui.click("确认替换并开始演示")
-    ui.click("⚙  设置")
-    ui.click("开启自动生成（可选）")
-    ui.check("可选自动开关保存且切换不生成", ui.state()["auto_generate"] is True and len(ui.state()["plans"]) == 1)
-    ui.click("时间 +12 小时")
-    ui.check("开启后临期可生成候选不替换菜单", len(ui.state()["plans"]) == 2 and ui.state()["active"] == 5)
-    ui.click("▣  冰箱")
-    ui.click("编辑", index=2)
-    ui.fill("300", name="food_grams")
-    ui.click("预览并确认  →")
-    ui.click("确认入库")
-    ui.check("开启后编辑确认可生成候选", len(ui.state()["plans"]) == 3 and ui.state()["active"] == 5)
-    ui.click("⚙  设置")
-    plan_count = len(ui.state()["plans"])
-    ui.click("关闭自动生成")
-    ui.check("关闭自动开关保存且不生成", ui.state()["auto_generate"] is False and len(ui.state()["plans"]) == plan_count)
-    ui.shot("manual-setting.png")
-
-
-def legacy_checks(ui):
-    before = ui.state()
-    ui.check("旧数据未预置开关且加载为手动", "auto_generate" not in before and "手动生成" in ui.text())
-    ui.click("⚙  设置")
-    ui.click("开启自动生成（可选）")
-    ui.click("关闭自动生成")
-    after = ui.state()
-    ui.check("旧数据迁移保留库存方案和用餐数据", after["auto_generate"] is False and all(after[key] == value for key, value in before.items() if key != "log"))
-    ui.click("恢复演示前数据")
-    ui.check("恢复旧备份也默认手动且保留数据", ui.state() == dict(before, auto_generate=False))
-    ui.click("开启自动生成（可选）")
-    ui.click("✦  方案")
+    plan = ui.state()["plans"][0]
+    ui.check("无营养且无单个重量可生成菜谱", plan["numeric"] is False and
+             plan["uses"][0]["unit"] == "piece" and plan["uses"][0]["grams"] == 0 and
+             "热量与营养无法核算" in ui.text())
+    ui.click("就吃这套 · 设为今晚方案  →")
     ui.click("我吃完了 · 核对实际用量")
-    ui.click(name="confirm_consumption")
-    ui.check("可选自动模式吃完生成下一餐但不接受", len(ui.state()["plans"]) == 2 and ui.state()["meal_count"] == before["meal_count"] + 1 and ui.state()["active"] == 0)
-    ui.click("▣  冰箱")
-    ui.fill("菠菜", name="food_name")
-    ui.fill("200", name="food_grams")
-    ui.fill("3", name="food_days")
-    ui.click("预览并确认  →")
-    ui.click("确认入库")
-    ui.check("可选自动模式入库生成候选", len(ui.state()["plans"]) == 3)
-    ui.click("编辑", index=0)
-    ui.click("移除这批…")
-    ui.click("确认移除")
-    ui.check("可选自动模式移除后按剩余库存生成", len(ui.state()["plans"]) == 4 and len(ui.state()["foods"]) == 1)
-    ui.click("⚙  设置")
-    ui.click("关闭自动生成")
-    ui.click("▣  冰箱")
-    ui.fill("豆腐", name="food_name")
-    ui.fill("200", name="food_grams")
-    ui.fill("3", name="food_days")
-    ui.click("预览并确认  →")
-    ui.click("确认入库")
-    ui.check("关闭可选自动模式后入库再次不生成", len(ui.state()["plans"]) == 4 and ui.state()["auto_generate"] is False)
-    ui.click("✦  方案")
-    ui.shot("invalid-plan.png")
-    ui.click("+ 再给我一个备选")
-    ui.check("手动备选按钮仍可生成", len(ui.state()["plans"]) == 5)
-    (ui.profile / "checks.json").write_text(json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
+    ui.click("确认吃完 · 扣减库存并写入档案")
+    state = ui.state()
+    program = next(p for p in state["programs"] if p["id"] == state["program_active"])
+    ui.check("未核算菜谱扣库存且不写入虚构热量", state["foods"] == [] and
+             state["meal_count"] == 1 and program["consumed_kcal"] == 0 and
+             program["intake"][0]["nutrition_known"] is False)
 
 
 def main():
@@ -290,14 +252,15 @@ def main():
     parser.add_argument("--port", type=int, default=18442)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--restart", action="store_true")
-    parser.add_argument("--legacy", action="store_true", help="独立 profile 需预置合成旧数据与 before-demo.json")
+    parser.add_argument("--recipe", action="store_true")
     args = parser.parse_args()
     ui = UI(args.port, args.profile.resolve())
-    if args.legacy:
-        legacy_checks(ui)
-    elif args.restart:
+    if args.restart:
         expected = json.loads((ui.profile / "expected-state.json").read_text(encoding="utf-8"))
-        ui.check("重启保留档案、库存、菜单与选项", ui.state() == expected)
+        ui.check("重启保留画像、库存、方案、历史和 IDs", ui.state() == expected)
+        ui.check("重启进入首页", "今天想吃点什么？" in ui.text())
+    elif args.recipe:
+        exercise_recipe(ui)
     else:
         exercise(ui)
 

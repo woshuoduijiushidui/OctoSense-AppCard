@@ -13,6 +13,28 @@ spec.loader.exec_module(launch)
 
 
 class LaunchTests(unittest.TestCase):
+    def test_explicit_app_hub_source_requires_pinned_clean_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            host = Path(directory) / "host"
+            source = Path(directory) / "app-hub"
+            (source / "crates/app-hub").mkdir(parents=True)
+            host.mkdir()
+            (host / "Cargo.toml").write_text(
+                '[workspace.dependencies]\noctosense-app-hub-app = { rev = "pinned" }\n',
+                encoding="utf-8",
+            )
+            (source / "Cargo.toml").touch()
+            (source / "crates/app-hub/Cargo.toml").touch()
+            with patch.object(launch, "ROOT", host), patch.object(launch, "run", side_effect=["pinned", ""]) as call:
+                self.assertEqual(launch.hub_source(source), (source.resolve(), "pinned"))
+                self.assertEqual(call.call_count, 2)
+            with patch.object(launch, "ROOT", host), patch.object(launch, "run", return_value="other"):
+                with self.assertRaisesRegex(RuntimeError, "固定的提交"):
+                    launch.hub_source(source)
+            with patch.object(launch, "ROOT", host), patch.object(launch, "run", side_effect=["pinned", " M Cargo.toml"]):
+                with self.assertRaisesRegex(RuntimeError, "本地修改"):
+                    launch.hub_source(source)
+
     def test_current_hub_check_needs_no_host_or_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             tool = Path(directory) / "hub.exe"

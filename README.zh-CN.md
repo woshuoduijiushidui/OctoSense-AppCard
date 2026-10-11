@@ -6,64 +6,67 @@
 
 ## 版本与验证范围
 
-本目录为 **0.6.2 可编辑候选**，修正发布资料和独立启动器。业务脚本与 0.6.1 相同。[Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) 请求审核的是 **0.6.1**，不是此候选；不声称任何版本已获准上架。
+此功能分支是尚未发布的 Issue #2 **0.8.0 源码候选**。除手动库存、周期和菜单外，它在具备图片能力的本地改版宿主上提供拍照／导入图片识别草稿；官方宿主回退手动录入。源码包通过当前固定版本 App Hub 门禁。[Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) 请求审核的是 **0.6.1**，不是此候选；不声称已发布或获 App Hub 审批。
 
-仅声明 Windows：当前固定工具链已通过源码检查和有限原生冒烟测试。本候选的完整在线模型回归、新电脑安装、全功能回归和封存包安装仍未验证，见[验证记录](VALIDATION.md)。
+目标平台仅为 Windows。2026-10-11，0.8.0 包通过固定版本 App Hub 检查，19 项 Python 测试通过；未修改的官方完整宿主在隔离档案完成 26 项 UI／数据检查和重启检查，两种图片入口都显示手动回退。本地改版宿主通过图片能力探测、共用选择界面及取消不写库检查；任务专用模拟结果验证了两类可编辑草稿和多行一次入库。用户报告剩余的 MiniMax 图片、摄像头、重试和重启前台验收通过；没有逐步独立日志。正式 Store 发布仍未验证。见[验证记录](VALIDATION.md)。
 
 ## 功能闭环
 
 确认饮食档案及 7／21／30 天周期 → 预览库存批次 → 生成本地规则或官方 model.complete 候选 → 查看做法和用量 → 接受方案 → 单独确认实际食用量，才扣库存和累计摄入。
 
+此工作分支把过敏、忌口和饮食偏好分开；录入先生成可编辑草稿，再由用户确认入库。支持 g/kg、ml/L、个，以及由用户确认换算量的简单包装单位。同名食材按组展示，每批仍可分别编辑或移除。图片识别仅在本地改版宿主报告 `model.vision_capability` 时启用；结果中不确定的字段由用户补齐。
+
 今日和周期数值为原型估算。存档旧周期保留库存。默认手动生成；可在设置中主动开启自动生成，但接受菜单和扣减仍须确认。删除菜谱不回滚库存或删除摄入记录。详见[周期说明](CYCLE-PLANS.md)。
 
 ## 演示
 
-[查看录屏](video/演示视频.mp4)
+[历史手动流程录屏](video/演示视频.mp4)
 
-![历史 Windows 截图](bundle/screenshots/01-main.png)
+![先前 Windows card-host 首页截图](bundle/screenshots/01-main.png)
 
 [菜单候选](bundle/screenshots/02-plan.png) · [食用确认](bundle/screenshots/03-confirm.png) · [库存](bundle/screenshots/04-updated.png)
 
-截图来自历史 Windows 原生运行，不是手机截图或 0.6.2 在线模型完整证据。视频不放进分发包。
+现有录屏及四张截图来自先前 0.7.0 候选在隔离的官方 Windows card-host 中使用合成数据的手动流程；其中图片按钮状态不代表当前 0.8.0 界面。当前版合成数据截图包括[首页](docs/qa/issue-2-home-after.png)、[修改用户画像](docs/qa/issue-2-profile-edit-after.png)、[库存](docs/qa/issue-2-inventory-after.png)、[改版宿主图片选择](docs/qa/issue-2-image-chooser-after.png)、[官方宿主手动提示](docs/qa/issue-2-official-fallback-after.png)、[菜谱](docs/qa/issue-2-recipe-after.png)和[食用前核对](docs/qa/issue-2-consumption-after.png)。新版截图只说明界面，不能证明真实图片识别、Store 发布或真实模型响应。新录屏不属于本次 PR。
 
 ## Windows 源码运行
 
 本仓库只含应用，不是完整宿主或安装包。入口是根目录 run.cmd，不是 apps/pantry-steward/run.cmd。
 
-需要 Git、Python 3.11+、Rust、Windows C++ 工具和 Windows SDK。按[官方 Quickstart](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/main/docs/QUICKSTART.md)准备当前原生工作区，构建 hub 与 card-host；复用共享框架，但必须核对官方固定版本，不能只用旧缓存程序代替。
+需要 Git、Python 3.11+、Rust、Windows C++ 工具和 Windows SDK。按[官方 Quickstart](https://github.com/OctoSense-org/OctoScript-App-Design-Flow/blob/main/docs/QUICKSTART.md)准备当前原生工作区。0.8.0 的摄像头授权声明要求完整 OctoSense shell；独立 card-host 不实现该授权代理。
 
-此候选的发布工作流固定 App Hub 655114c4943cd2490daaefa2173e7b5aaa20669f。本地已使用该版本、未修改的源代码和锁文件编译检查器。完整新电脑下载/构建仍未验证。
+早期 0.6.2 发布工作流固定 App Hub 655114c4943cd2490daaefa2173e7b5aaa20669f；当前 OctoSense 宿主固定的是 App Hub 8347a489141c0e24cab564883db7c4592935a8b2。验证此编辑后的 bundle 须使用当前宿主固定版本。
 
-假设工具仓库位于同级 OctoSense-App-Hub，在本应用目录执行：
+固定版本工具在同级 OctoSense 仓库中构建后，从本应用目录用全新测试档案执行。第二条命令使用该仓库的当前分支；它是未修改官方宿主还是本地改版宿主，取决于检出版本。第二条命令保持运行，第三条在另一个终端执行：
 
 ```cmd
-run.cmd --hub ..\OctoSense-App-Hub\target\release\hub.exe --check
-run.cmd --hub ..\OctoSense-App-Hub\target\release\hub.exe --card-host ..\OctoSense-App-Hub\target\release\card-host.exe --standalone
+run.cmd --hub ..\OctoSense\target\release\hub.exe --check
+run.cmd --host-workspace ..\OctoSense --hidden --remote 18442 --app-data target\qa-d2
+python -X utf8 tools\smoke.py --port 18442 --profile target\qa-d2
 ```
 
---hub --check 不需要宿主工程或密钥；--standalone 使用官方 card-host，仅验证本地规则，没有模型服务，也不是商店安装。--app-data 可指定独立测试目录，默认预览数据在 .local-state/standalone。删除数据前请备份。
+`--hub --check` 不需要宿主工程或密钥。完整宿主的隔离安装需要此前经本人许可生成的本地测试密钥；原生冒烟脚本需要全新、隔离的 `--app-data` 目录。重启相同档案后可加 `--restart` 核对持久化。
 
-启动器只校验现有摘要，不自动修复。当前工具的源码摘要已记录在 VALIDATION.md；旧版 Windows hub 会产生不同的路径摘要，并可能误拒绝许可证的网址。遇到拒绝应更新工具，不得删除法律声明、改权限绕过门禁，或对封存包重新 stamp。
+启动器只校验现有摘要，不自动修复。当前 0.8.0 候选已用固定版本 App Hub 重新盖章并通过包检查；修改 bundle 后须再次盖章。
 
-旧 --host-workspace / --prepare-local-test 路线仅保留给历史 0.6.1 的隔离兼容演练，不推荐用它运行此候选。后者涉及仓库外本机测试密钥，必须本人另行同意；本次没有生成密钥。原来的工程和库存未更改。
+本机 D2 已用本地测试签名在完整宿主的隔离档案中安装；这不是正式 Store 发布。`--prepare-local-test` 会在 Git 之外创建本地测试密钥，必须取得本人同意。测试不能使用他人的现有库存。
 
-在线 AI 必须在提供官方 model 服务的兼容 OctoSense 宿主中测试，在宿主 AI providers 页配置提供方。此处的 card-host 命令不能验证它。正式封存包还要求 publisher-github-v1 支持，兼容正式宿主尚待官方发布；不声称已验证安装或在线完整流程。
+图片 AI 必须在本地改版 OctoSense 宿主中测试，并在宿主 AI providers 页配置提供方。未修改的官方完整宿主已单独通过手动回退检查；不能仅凭上面的命令认定宿主为官方版本。用户报告 MiniMax 图片识别前台验收通过。正式封存包还要求 publisher-github-v1 支持；本地测试签名安装不等于正式发布。
 
 ## AI、隐私和边界
 
-- storage 只保存应用自己的库存、档案、方案、历史和备份。
-- model 经官方宿主将目标、档案、库存成分与周期余额发送到用户配置的模型提供方。密钥留在宿主；应用不读取 ai.env 或收集密钥。
+- storage 保存应用自己的库存、档案、方案、历史、备份和用户选择的图片。
+- model 经官方宿主将目标、填写的档案（包括过敏、忌口和偏好）、合格批次的名称与原生单位／数量发送到用户配置的模型提供方。数值规划另发送估算克数、营养参考和周期余额；未核算菜谱仅标注营养参考是否完整。密钥留在宿主；应用不读取 ai.env 或收集密钥。
 - 在宿主的 AI providers 页面配置模型。预算查询成功不代表模型已配置。失败时手动选择本地规则。停止等待不保证撤销已发送或计费的请求。
-- 没有直接联网主机、麦克风权限或独立应用 Agent 工具。不录音，语音不可用；没有 OCR、照片识别或宿主关闭后的后台执行。
-- 营养数值为原型估算，不是医疗建议，不保证过敏或食品安全。未知食材参与数值规划前须补齐包装标签。
+- 图片识别需相机／文件权限。Windows 本地改版宿主只接受一张应用内 JPEG、PNG 或 WebP 图片，最大 10 MiB；仅支持 `minimax`／`minimax-cn` 的 `MiniMax-M3` 或 `moonshot` 的 `kimi-k2.5`，将图片及识别提示词送至用户配置的提供方，返回可编辑草稿。官方宿主不支持时显示手动录入提示。没有直接联网主机、麦克风权限或独立应用 Agent 工具；语音不可用，宿主关闭后不后台执行。
+- 营养数值为原型估算，不是医疗建议，不保证过敏或食品安全。生成时优先使用具备完整营养参考的食材；缺少参考时可生成标为“营养未核算”的菜谱，按原单位扣减库存，但不计入周期热量与营养数值。未知食材若要参与数值规划，须补齐每 100g 营养参考。
 
-用户曾报告旧版在线生成成功；本候选完整在线回归未验证。参见发布者已确认的[隐私说明](PRIVACY.md)、[支持说明](SUPPORT.md)和[审核回答](REVIEW-ANSWERS.md)。
+用户报告本候选的在线菜谱和图片识别前台检查通过；未留存完整的独立提供方逐步日志。参见发布者已确认的[隐私说明](PRIVACY.md)、[支持说明](SUPPORT.md)和[审核回答](REVIEW-ANSWERS.md)。
 
 ## 发布
 
 只分发 bundle/；工具、视频、审核包和本地状态留在包外。Git 属性保护 Windows 下的原始包字节。
 
-[最新默认路线](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/SUBMITTING.md)使用准备好的 GitHub 标签工作流及不可变工具链，无需开发者签名密钥。本人审阅工作流并授权发布后，推新的 v0.6.2 标签、校验封存 Release 包，再创建关联 #99 的新版 Issue。不要移动 v0.6.1。目前只在本地准备；不声称已运行工作流、推标签、发布、创建新 Issue 或获批。封存包需支持 publisher-github-v1 的宿主；所引官方指南说明兼容正式宿主仍待发布。
+[App Hub 提交指南](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/SUBMITTING.md)说明发布路线。0.8.0 候选尚需正式发布证据复核、公开链接核对及另行取得本人发布授权。不声称已运行发布工作流、推标签、发布、创建新 Issue 或获批。
 
 待本人确认的环节见[提交准备](SUBMISSION.md)。源码检查或工作流成功不等于比赛合格或 Hub 审核通过。
 
