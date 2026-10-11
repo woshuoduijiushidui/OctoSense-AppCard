@@ -1,17 +1,17 @@
 # Migration validation
 
-## Issue #2 D2–D4 foreground report, 2026-10-11 — user reported pass
+## Issue #2 foreground verification, 2026-10-11 — user reported pass
 
 After installing digest `ba2d1a2bf588bd48a74c9c6112cfa706146375649c45cdff0fad5e2449498ff5`,
-the user reported that the remaining manual checks listed under the D2–D4
-foreground acceptance checklist passed: receipt and food-image import, OBS
+the user reported that the remaining manual checks listed under the historical
+foreground checklist below passed: receipt and food-image import, OBS
 camera recognition, cancellations and immediate retry, restart persistence,
 adjacent profile/menu/consumption flows, and the official-host unsupported
 image path. This is a user report, not an independently captured per-step log
 or a fresh automated full-shell replay on this digest. The user explicitly
 excluded demonstration-video recording from their task and this PR. The old
-0.7.0 recording remains historical evidence only. A current synthetic-data
-QA captures of the current home, profile edit, inventory, image chooser,
+0.7.0 recording remains historical evidence only. Current synthetic-data
+QA captures of the home, profile edit, inventory, image chooser,
 official-host fallback, recipe, and consumption review are in `docs/qa/`.
 They use synthetic data and do not claim to prove a real provider response.
 The prior `main` screenshots were kept under `bundle/screenshots/` at
@@ -23,7 +23,7 @@ During PR preparation, the pinned App Hub bundle check passed again and all
 `PermissionError` in Python temporary directories; rerunning the same tests
 outside that filesystem restriction passed without code changes.
 
-## Issue #2 D3 recipe wording, 2026-10-11 — installed and foreground replayed
+## Issue #2 recipe wording, 2026-10-11 — installed and foreground replayed
 
 The live MiniMax recipe exposed internal fields such as `nutrition_known=false`
 and `profile` in its explanation, and `unknown expiry` / `food_id` in its
@@ -46,7 +46,7 @@ profile in the foreground, expanded the saved recipe, and reported that none
 of `nutrition_known`, `profile`, `food_id`, or `unknown expiry` appeared. This
 confirms the saved-plan display; a new live MiniMax completion was not rerun.
 
-## Issue #2 D3 recipe generation with missing nutrition, 2026-10-11 — installed locally
+## Issue #2 recipe generation with missing nutrition, 2026-10-11 — installed locally
 
 The visible profile has seven confirmed food batches, four inventory events,
 and no recipe candidates. None of its seven batches has a complete per-100-g
@@ -87,7 +87,7 @@ unquantified source, and `就吃这套` action; the seven food batches and four
 inventory events were unchanged. The host produced an online recipe result.
 The user previously reported MiniMax `Connected`; the provider identity was
 not independently inspected during this recipe call. This is a text recipe
-completion, not D3's still-pending image-recognition evidence.
+completion, not evidence of image recognition, which was still pending then.
 
 After the user closed the visible shell, the final digest was signed, verified,
 and installed into the same isolated MiniMax profile using existing local test
@@ -95,9 +95,9 @@ keys. The profile JSON SHA-256 remained
 `472c26fa4dd699422719957dacfc1a991e60e859fceb2d1e0af2c54d3e5e3a8e`:
 seven foods, four events, zero plans, and completed onboarding immediately
 after installation. The later visible run created the candidate described
-above. D3's receipt/cancellation/video checks remain open.
+above. Receipt import, cancellation, and video checks were still open then.
 
-## Issue #2 D3 profile return and selected controls, 2026-10-11 — installed locally
+## Issue #2 profile return and selected controls, 2026-10-11 — installed locally
 
 The inventory date inputs now have separate full-width rows in onboarding and
 the regular inventory form; a native capture showed the complete date
@@ -126,10 +126,10 @@ local test keys. The profile JSON SHA-256 stayed
 `e9d0e54235447b6b917679fc5aa4896b910e0410e58a02da49153f7efca76701`:
 seven foods, four inventory events, and completed onboarding remain. Exactly
 one local catalog matches the new digest. The user's foreground view of this
-bundle is pending; D3 receipt import, remaining cancellation stages, and final
-video remain open.
+bundle, receipt import, remaining cancellation stages, and a final video were
+still pending at this checkpoint.
 
-## Issue #2 D3 chooser retry and inventory labels, 2026-10-11 — installed locally
+## Issue #2 chooser retry and inventory labels, 2026-10-11 — installed locally
 
 After a native file-picker cancellation, the user saw an occasional
 `foreground_required` error on an immediate second attempt; waiting restored
@@ -149,20 +149,20 @@ for the position within that food and identify the persistent global key as
 Stamped 0.8.0 digest at that checkpoint:
 `04d8bd5ccf1fdcd7cf45ea8b72fc9ebd7815def3e6bd68ff89ee62502b4d5e3b`.
 Pinned Hub check and 19/19 Pantry tests passed. In task-owned
-`target/d3-official-ui-fix`, the unmodified official shell passed 26/26
+an isolated test profile, the unmodified official shell passed 26/26
 UI/data and 2/2 restart checks. Native captures showed both selection states
 fully visible and a milk row labelled `第 1 批` with a separate global ID.
-A task-only bundle in `target/d3-focus-fixture` injected the exact host error:
+A task-only bundle injected the exact host error:
 the chooser retained its retry and cancel buttons, showed the focus hint,
 and left foods/events unchanged; the fixture was not shipped. The restamped
 bundle was signed, verified, and installed into the existing isolated MiniMax
 profile with existing local test keys. Its six foods, three inventory events,
 and completed onboarding were unchanged; one mirror matches the new digest.
-The actual native cancel/immediate-retry timing still needs a user foreground
-replay. D3 receipt import, remaining cancellation stages, and final video
-remain open.
+The actual native cancel/immediate-retry timing still needed a user foreground
+replay. Receipt import, remaining cancellation stages, and a final video were
+also pending at this checkpoint.
 
-## Issue #2 D3 recognized-unit correction, 2026-10-11 — installed locally
+## Issue #2 recognized-unit correction, 2026-10-11 — installed locally
 
 The foreground custom host showed a real OBS Virtual Camera preview and returned
 five editable rows from a MiniMax image request. One row was `Green Onion`,
@@ -189,12 +189,12 @@ fixture returned `2 bunch` and `2 个`: the first row displayed an unselected
 unit, confirmation refused it without writing inventory, then choosing `个`
 produced two batches in one event and allowed onboarding to finish. This
 fixture was never shipped. The unmodified official shell passed 26/26 UI/data
-checks and 2/2 restart checks on the exact current bundle in
-`target/d3-official-unit-fix-2`; both image buttons retained the manual fallback.
+checks and 2/2 restart checks on the exact current bundle in an isolated
+test profile; both image buttons retained the manual fallback.
 The updated unit behavior has not yet been replayed by the user in the real
 foreground MiniMax host.
 
-## Issue #2 D3 camera consent visibility repair, 2026-10-11 — foreground preview verified
+## Issue #2 camera consent visibility repair, 2026-10-11 — foreground preview verified
 
 The user reported that both buttons on the camera screen appeared inert. A
 read-only snapshot of their running host found a live `DevicePermissionPrompt`
@@ -211,7 +211,7 @@ an isolated local-host installation rendered the native camera-consent sheet
 clearly on top of Pantry. Choosing `Not now` returned to manual entry with a
 visible authorization message. The pinned Hub gate and 19/19 Pantry tests
 passed; the unmodified official full shell passed 26/26 UI/data and 2/2
-restart checks in `target/d3-official-modal-fix`. Native `Continue` requires a
+restart checks in an isolated test profile. Native `Continue` requires a
 physical foreground click and was not automated. After the user relaunched the
 visible host, a read-only remote capture showed the OBS Virtual Camera image
 inside Pantry's camera preview. Capture, file selection, MiniMax image
@@ -221,7 +221,7 @@ verified, and installed into the existing isolated MiniMax profile without
 regenerating keys or changing provider settings. Foreground capture and model
 replay are pending.
 
-## Issue #2 D3 foreground chooser visibility repair, 2026-10-11 — awaiting user replay
+## Issue #2 foreground chooser visibility repair, 2026-10-11 — awaiting user replay
 
 The user opened the real local-host Pantry window and reported that the photo
 recognition screen was dark with unreadable controls. A remote snapshot showed
@@ -242,30 +242,32 @@ the later inventory tab. Both photo and receipt chooser cancellation left zero
 foods and inventory events in onboarding; a later inventory-tab cancellation
 left its existing inventory event count unchanged and restored manual entry. On the same
 new digest, the unmodified official full shell passed 26/26 UI/data checks and
-2/2 restart checks in `target/d3-official-overlay-fix`. The new bundle was
+2/2 restart checks in an isolated test profile. The new bundle was
 installed into the original isolated MiniMax profile after the user closed the
 old window. Foreground user replay, native file selection, camera capture,
 actual Pantry MiniMax image results, and final video are still pending.
 
-## Issue #2 D4 documentation and manual handoff, 2026-10-11 — local preparation complete
+## Issue #2 documentation and manual handoff, 2026-10-11 — local preparation complete
 
-At the D4 handoff checkpoint, the 0.8.0 bundle had `storage`, `model`, `camera`, and `files` grants,
+At this handoff checkpoint, the 0.8.0 bundle had `storage`, `model`, `camera`, and `files` grants,
 the optional `camera.permission.request@1` host API, and digest
 `0f08bd1b1044e56b70f66e1d6af45be56cff01ff1cf8d37aedc611961171cbb5`.
 The later chooser repair above changed the bundle digest. Its listing was
-reviewed against the D3 evidence; no bundle bytes changed during D4 itself.
+reviewed against the image-recognition evidence; no bundle bytes changed during
+this documentation pass.
 The bilingual READMEs, privacy policy, review answers, submission checkpoint,
 and historical brief now distinguish the official manual fallback from the
 Windows local-host image path. The four bundled screenshots and existing video
 are explicitly labelled as historical 0.7.0 manual-flow material. New captures
-must come from the real foreground D3 demonstration, so they were not replaced.
+must come from a real foreground demonstration, so they were not replaced.
 Older sections below are point-in-time evidence, not claims about today's bundle.
 
 Repository handoff: Pantry is on
 `feat/issue-2-pantry-inventory-multimodal` at HEAD
 `af85d81f0027507ec2a74f3b1afe4838b9371257` (base `main` at
-`d6d08d1ccf67b785ecf8813ea3b5a0eb6be04588`). Its M0–M4, D2–D4 work
-shares 21 modified tracked paths and remains uncommitted; an isolated D4 commit
+`d6d08d1ccf67b785ecf8813ea3b5a0eb6be04588`). Its earlier inventory,
+menu, image-intake, and documentation work shares 21 modified tracked paths and
+remains uncommitted; an isolated documentation commit
 would misleadingly include earlier edits. OctoSense is on
 `feat/pantry-steward-vision-bridge` at local HEAD
 `808005eaabe00b60f4fc37cc1967e4fa4fc061a2` (base `main` at
@@ -273,19 +275,16 @@ would misleadingly include earlier edits. OctoSense is on
 No branch was pushed, no production identity was used, and no release, Hub
 submission, or upstream platform PR was made.
 
-### Historical D2–D4 foreground checklist — later user-reported pass
+### Historical foreground checklist — later user-reported pass
 
-Use the existing isolated test profile and synthetic fixtures; keep API keys in
-the host-owned AI providers page, never in chat. Start OBS Virtual Camera and,
-from the user's own PowerShell, run:
+The checks used an isolated test profile, synthetic fixtures, and OBS Virtual
+Camera. API keys stayed in the host-owned AI providers page. The user launched
+the local test host from their own PowerShell so native windows had foreground
+access.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File "D:\projects\GOSIMAPP\PantrySteward\target\d3-demo\run-d3-visible.ps1"
-```
-
-The script selects the currently stamped 0.8.0 bundle and starts the locally
-modified release host in a foreground window. Confirm the configured
-`minimax-cn / MiniMax-M3` still shows `Connected` in AI providers; that host
+The local test launch selected the then-stamped 0.8.0 bundle and started the
+modified release host in a foreground window. The configured
+`minimax-cn / MiniMax-M3` had shown `Connected` in AI providers; that host
 connection check is prior user-reported evidence, not a Pantry image result.
 At this earlier checkpoint, the following checks were pending. The user later
 reported that checks 1–5 passed; see the current report at the top of this
@@ -293,14 +292,12 @@ file. No per-step log was independently captured. Model outputs must be judged
 as actual provider results rather than fixed fixture rows:
 
 1. Before recognition, note inventory count and event count. Click `导入小票`
-   then `选择已有图片`; select
-   `D:\projects\GOSIMAPP\PantrySteward\target\d3-demo\synthetic-receipt.png`.
+   then `选择已有图片`; select the synthetic receipt image.
    Check that the real model returns an editable draft, uncertain values remain
    blank, and no inventory changes before confirmation. Edit one field,
    deselect/remove a row, confirm selected valid rows once, and inspect the
    resulting separate batches/events.
-2. Click `拍照识别` then `选择已有图片`; select
-   `D:\projects\GOSIMAPP\PantrySteward\target\d3-demo\synthetic-fridge.png`.
+2. Click `拍照识别` then `选择已有图片`; select the synthetic fridge image.
    Check the food-photo prompt, editable rows, and final confirmation. Model
    names, row counts, and units may vary; correct them rather than assuming the
    synthetic illustration proves recognition quality.
@@ -328,15 +325,17 @@ as actual provider results rather than fixed fixture rows:
    from this PR; the current synthetic inventory comparison only illustrates
    UI changes.
 
-## Issue #2 D3 multimodal demo verification, 2026-10-11 — earlier checkpoint
+## Issue #2 image-intake verification, 2026-10-11 — earlier checkpoint
 
-At the first D3 checkpoint, the unpublished Pantry 0.8.0 bundle digest was
+At the first image-intake checkpoint, the unpublished Pantry 0.8.0 bundle
+digest was
 `0f08bd1b1044e56b70f66e1d6af45be56cff01ff1cf8d37aedc611961171cbb5`.
 `python -X utf8 tools/launch.py --hub D:\projects\GOSIMAPP\OctoSense\target\release\hub.exe --check`
 passed; `python -X utf8 -m unittest discover -s tools -p 'test_*.py' -q`
 passed 19/19 with the test process allowed to clean its own Windows temporary
-directories. The D1 OctoSense branch passed `cargo test --locked --offline -p
-octosense-llm-service --test complete -- --test-threads=1` (23/23), `cargo test
+directories. The locally modified OctoSense branch passed
+`cargo test --locked --offline -p octosense-llm-service --test complete -- --test-threads=1`
+(23/23), `cargo test
 --locked --offline -p octosense-shell --features app-hub platform_services --lib
 -- --test-threads=1` (12/12), and `cargo build --release --locked --offline -p
 octosense --no-default-features --features octos-core,app-hub`. The unchanged
@@ -345,8 +344,8 @@ that custom build. Both worktrees were checked for credential-shaped values and
 tracked/untracked key, profile, app-data, log, or build artifacts; none appeared
 in the changed file lists. OctoSense's tracked tree remains clean.
 
-The unmodified official full shell with that earlier bundle in
-`target/d3-official-current` passed all 26 `tools/smoke.py` UI/data checks and
+The unmodified official full shell with that earlier bundle in an isolated
+test profile passed all 26 `tools/smoke.py` UI/data checks and
 both restart checks. Both recognition buttons displayed the exact unsupported
 message without a chooser; manual inventory, menu, consumption, and profile
 flows worked. The negative `begin_recognition` path returns before file, camera,
@@ -360,11 +359,11 @@ UI capture exposed a retained overlay after cancel; the bundle now toggles the
 overlay view's visibility, and a new capture confirmed that the chooser closes
 and manual entry remains usable. This change was restamped and reinstalled.
 No real MiniMax image result, Pantry camera capture, native file import, or
-final demo video has yet been verified. Those D3 checks need a foreground host
+final demo video had yet to be verified. Those checks needed a foreground host
 window launched from the user's own Windows terminal; the agent's shell has no
 Windows foreground window and cannot complete the native chooser or consent.
 
-## Issue #2 D2 multimodal intake, 2026-10-11 — local implementation
+## Issue #2 image intake, 2026-10-11 — local implementation
 
 The unpublished `pantry-steward` 0.8.0 bundle has `storage`, `model`, `camera`,
 and `files` grants, declares the complete shell's `host-api-v1` device-consent
@@ -378,45 +377,47 @@ test process allowed to clean its own temporary files.
 
 Local test signatures installed the unchanged final bundle into isolated full
 shell profiles. The unmodified official release shell passed 26 checks from
-`tools/smoke.py` in `target/d2-official-smoke2`, plus two restart checks. The
-exact final bundle then passed a focused official fallback check in
-`target/d2-official-final2`. Both
-image buttons displayed `当前宿主暂不支持图片识别，请使用手动录入` without an image chooser;
+`tools/smoke.py` in an isolated test profile, plus two restart checks. The
+exact final bundle then passed a focused official fallback check in a second
+isolated profile. Both image buttons displayed
+`当前宿主暂不支持图片识别，请使用手动录入` without an image chooser;
 manual inventory, menu, and consumption flows still passed. In source,
 `begin_recognition` returns on that probe result before the chooser, file API,
-or image `model.complete`; no separate host-call trace was recorded. The D1-patched
-debug shell at OctoSense commit `808005e` passed the positive capability,
+or image `model.complete`; no separate host-call trace was recorded. The
+locally modified debug shell at OctoSense commit `808005e` passed the positive
+capability,
 shared camera/file chooser, cancellation, and zero-inventory-write checks in
-`target/d2-custom-final2` with the exact final bundle. An ignored, task-only model-response fixture
-passed receipt/photo draft, row edit/removal, two-batch single-operation add,
-cancellation, and unavailable-provider-to-manual checks in
-`target/d2-fixture-profile-3`. Fixture responses were never shipped in the
-bundle. No real image was sent to MiniMax/Kimi from Pantry in D2; camera
-capture inside the full Pantry UI, real image recognition, and a new video
-remain D3 work. The standalone `card-host` cannot admit this bundle because
-it lacks the required device-consent broker; the official fallback was tested
-in the unmodified full shell.
+an isolated profile with the exact final bundle. An ignored, task-only
+model-response fixture passed receipt/photo draft, row edit/removal, two-batch
+single-operation add, cancellation, and unavailable-provider-to-manual checks
+in another isolated profile. Fixture responses were never shipped in the
+bundle. No real image was sent to MiniMax/Kimi from Pantry at this checkpoint;
+camera capture inside the full Pantry UI, real image recognition, and a new video
+remained for later foreground verification. The standalone `card-host` could
+not admit this bundle because it lacked the required device-consent broker;
+the official fallback was tested in the unmodified full shell.
 
-Pantry remains on `feat/issue-2-pantry-inventory-multimodal` at `af85d81` with
-earlier M0-M4 work already uncommitted before D2. D2 changes are left
-uncommitted to avoid combining that prior work into a misleading isolated
-commit. The OctoSense D1 branch is clean at local commit `808005e`. Neither
-repository was pushed or published for D2.
+Pantry was on `feat/issue-2-pantry-inventory-multimodal` at `af85d81` with
+earlier inventory and menu work already uncommitted before image intake. The
+image-intake changes were left uncommitted to avoid combining earlier work into
+a misleading isolated commit. The locally modified OctoSense branch was clean at local commit
+`808005e`. Neither repository was pushed or published at this checkpoint.
 
-## Issue #2 D0 host readiness, 2026-10-11 — incomplete
+## Issue #2 host readiness, 2026-10-11 — incomplete at this checkpoint
 
 The unmodified OctoSense source at
 `40ca21da68cc05ae930931adcfcf6d382d49ec26` passed the locked release
-build during M3. D0 reused that exact executable; a redundant build retry was
-stopped before completion. No tracked OctoSense source was changed for D0.
+build during official-host verification. This check reused that exact executable;
+a redundant build retry was stopped before completion. No tracked OctoSense
+source was changed for this check.
 
 After explicit user approval, the 0.7.0 Pantry bundle was signed with local
 test keys, verified and installed through App Hub in
-`target/d0-isolated-profile`. The full official desktop launched its onboarding
+an isolated test profile. The full official desktop launched its onboarding
 page from that profile. No production signing key or personal pantry data was
-used. A separate ignored `target/d0-api-probe` bundle was signed and installed
+used. A separate ignored host API probe bundle was signed and installed
 for host API rehearsal. With a synthetic 345-byte PNG selected through the
-native chooser, `files.import` returned `/d0-import.png`; the file in the
+native chooser, `files.import` returned an app-local PNG path; the file in the
 probe's app jail was byte-identical to the selected image. A later second
 import was refused with `foreground_required` when the app was no longer the
 native foreground window; the earlier import remained intact.
@@ -429,13 +430,14 @@ Camera capture and its app-local return path have therefore **not** been
 verified. The user configured MiniMax in the isolated host's AI providers UI
 and reported `Connected` from `Test connection` on 2026-10-11. That host test
 sends a small real provider request; this result was observed by the user,
-not independently through Pantry's `model.complete` path. D0 remains open.
+not independently through Pantry's `model.complete` path. Camera capture and
+the Pantry image-recognition path were still open at this checkpoint.
 
-## Issue #2 M4 local handoff, 2026-10-11 — unpublished
+## Issue #2 local handoff, 2026-10-11 — unpublished at this checkpoint
 
 Pantry branch: `feat/issue-2-pantry-inventory-multimodal`; local HEAD:
 `af85d81f0027507ec2a74f3b1afe4838b9371257`. The working tree contains
-uncommitted M1–M4 source, tools, docs, listing, manifest, and screenshot edits.
+uncommitted source, tools, docs, listing, manifest, and screenshot edits.
 The two `.local-planning/` milestone sets remain ignored and local-only.
 The official OctoSense checkout is on `feat/pantry-steward-vision-bridge` at
 `40ca21da68cc05ae930931adcfcf6d382d49ec26` with no tracked changes.
@@ -465,8 +467,8 @@ Windows permissions, including the updated version/listing guards. Sandboxed
 Python test attempts could not create temporary files because of Windows ACLs;
 their metadata assertions were updated before the successful normal-permission
 run. The unchanged business script had already passed the full pinned parser
-and 33 source-extracted VM cases at M3; these were not rerun for M4 metadata
-and screenshot edits.
+and 33 source-extracted VM cases during official-host verification; these were
+not rerun for the later metadata and screenshot edits.
 
 Full Store installation, live model-provider calls, other platforms, sealed
 publisher pack verification, current remote privacy-page review, App Hub
@@ -477,7 +479,7 @@ used here; the publishing route must be reviewed before any 0.7.0 tag.
 No commit, push, tag, release, review issue, or submission was made for this
 candidate.
 
-## Issue #2 M3 official-host verification, 2026-10-11
+## Issue #2 official-host verification, 2026-10-11
 
 The initial official-host retry waited for the default Cargo cache lock held by
 a separate background download, then stopped without interrupting it. A later
@@ -494,7 +496,7 @@ accepts `--app-hub-source` and verifies that source's commit and clean status
 against the official host pin. The Python tool suite passed 19 tests with normal
 Windows permissions; sandbox-only temporary-directory ACL failures were not
 application failures. The official `hub` CLI refused a stale digest as expected.
-After the final M3 source edit, `hub stamp bundle` wrote
+After the final source edit in this verification pass, `hub stamp bundle` wrote
 `fc160ecda2e1f144dad4b54ee01424d7fc4876e03fac806b4fef501c6f6dea83`;
 `python -X utf8 tools/launch.py --host-workspace D:\projects\GOSIMAPP\OctoSense
 --app-hub-source D:\projects\GOSIMAPP\OctoSense\target\dependency-probe\app-hub
@@ -528,7 +530,7 @@ At the earlier plan split, the local-only milestone covered the active profile/m
 and `.local-planning/deferred-multimodal/` for image recognition, the local
 OctoSense bridge, custom-host video, and related release claims. Neither plan
 is distributed. At that point the Pantry source still had disabled image buttons;
-there was no recognition request or OctoSense source patch. The D1/D2 section
+there was no recognition request or OctoSense source patch. The image-intake section
 above records the subsequent local implementation.
 
 The full edited bundle passed the pinned Makepad parser. Two ignored harness
@@ -545,11 +547,12 @@ candidate. `bundle/listing.json` and `bundle/manifest.json` still identify the
 old candidate. The current source digest now passes the pinned official Hub
 gate, but final versioning/listing and a subsequent restamp are needed before
 distribution.
-The subsequent M3 section above supersedes the dependency and native-check
-limits of this earlier offline checkpoint. No test keys or provider credentials
+The subsequent official-host verification section above supersedes the
+dependency and native-check limits of this earlier offline checkpoint. No test
+keys or provider credentials
 were created, and no source was changed in OctoSense.
 
-## Issue #2 M2 local UI and menu compatibility, 2026-10-10 — uncommitted
+## Issue #2 local UI and menu compatibility, 2026-10-10 — uncommitted at this checkpoint
 
 The Pantry feature branch now has separate allergy, avoidance, and preference
 inputs; one editable intake draft for manual and future image rows; grouped
@@ -560,7 +563,7 @@ non-expired dates in expiry order; the consumption review can switch to another
 compatible batch, including one with an unknown date. Expired, volume, and
 unconverted package batches are excluded from gram-based menu generation.
 
-The task-owned ignored `target/m1-parser-probe` harness extracts actual script
+The task-owned ignored parser harness extracts actual script
 functions and passes 19 focused Makepad VM cases for migration, calendar boundaries,
 multi-row atomic confirmation, profile revision staleness, grouped totals and
 freshness, manual edit/discard, rule/model menus, plan acceptance, cancellation,
@@ -576,7 +579,7 @@ pinned Git dependency, `octos-org/octos` revision
 checkout is still missing. The edited bundle's manifest
 digest still needs an official Hub restamp. No local test keys were generated.
 
-## Issue #2 M1 local data-core work, 2026-10-10 — uncommitted
+## Issue #2 local inventory data work, 2026-10-10 — uncommitted at this checkpoint
 
 The Pantry feature branch contains schema-2 migration, unit and expiration
 normalization, and one confirmed-inventory mutation boundary in
@@ -586,14 +589,14 @@ passed: representative schema-1 migration and JSON round trip; all supported
 unit labels and expiration boundaries; add/edit/discard/consume, duplicate ID,
 and atomic rejection; confirmed package conversion; zero-quantity removal;
 confirmation-day expiry conversion and cancellation; and built-in demo data
-migration. At this M1 checkpoint the manual UI still exposed only grams; the
-M2 work above added other units, unknown expiry, and confirmed printed dates.
-The task-owned harness is under ignored `target/m1-parser-probe`; its commit
+migration. At this checkpoint the manual UI still exposed only grams; the
+later UI work above added other units, unknown expiry, and confirmed printed
+dates. The task-owned parser harness was ignored by Git; its commit
 function is stubbed, so this is not native filesystem or host launch evidence.
 The existing `tools` unittest suite passed all 18 tests. `git diff --check`
 passed. The editable bundle's manifest digest has not been restamped; the
 official host bundle gate, native restart, and real-provider flows were not
-run while the M0 Cargo dependency download remained incomplete. No local test
+run while the Cargo dependency download remained incomplete. No local test
 keys, publisher artifacts, or release were created.
 
 ## Original-artwork confirmation, 2026-10-08 — current 0.6.2 candidate
