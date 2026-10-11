@@ -1,5 +1,156 @@
 # Migration validation
 
+## Automatic online nutrition estimates and usable unknown stock, 2026-10-11
+
+This supersedes the historical requirement for users to fill nutrition labels.
+Physical stock availability is checked separately from nutritional references.
+Online AI estimates missing per-100g energy, protein, fibre and vitamin C after
+stock entry and before menu requests, and for unknown actual-food drafts.
+Estimates are approximate and labelled with source, time and raw/cooked
+assumptions. User-provided packaging references take precedence. Estimation
+never changes quantity or confirms a meal; final actual confirmation freezes
+its reference and provenance. Failure or ambiguity stays explicitly unknown,
+with incomplete totals shown as the referenced portion, rather than fake zero.
+
+- `tools/qa_ai_nutrition.py`: **30 native checks passed** with deterministic
+  model fixtures in a private copied bundle. Covers physically available unknown
+  stock, expired/zero/avoided exclusions, per-100g schema, estimates without body
+  profile, request failure, duplicate keys, mismatched names and invalid ranges,
+  automatic stock and outside-food estimates, actual arithmetic, source/time/
+  assumptions, packaging corrections, draft cancellation and late replies,
+  ambiguity, actual-estimate retry, three meals, 100% and immutable history.
+- `tools/qa_stock_only.py`: **21 native checks passed again** on this behavior,
+  retaining the stock-only restrictions, exact exhausted-batch removal and
+  independent confirmed snapshots. The existing automated suite: **18 passed**.
+- Final native captures were visually inspected. No script errors in successful
+  logs. Official source gate passed with expected unsigned-source warning.
+- Source digest: `cbc3411d1a8ef4dc945c0b7b1d7051aa93c6ea0bb03db4f709e386a044c4b59c`. Bundle: **8,387,990 bytes**
+  (limit 8,388,608). No fixture dispatch is present in the distributed source.
+- Stock/history tests used isolated synthetic profiles. No real user inventory
+  writes or real model calls were performed for these tests; no keys generated.
+- Full live-provider success, other platforms and release installation remain
+  unverified. Menu quality and nutrition accuracy are not established by model
+  fixtures. This remains a local editable candidate, not a published release.
+
+## Stock-only menus and requested exhausted-batch removal, 2026-10-11
+
+This supersedes the replenishment behavior described in historical entries.
+Removed simulated replenishment and purchase UI, request schema fields and
+stock-insertion functions. Ordinary and trial menus use online AI with existing
+inventory only. Unknown IDs, aggregate excess quantities, missing-item output,
+and unallocated known/inventory food names in recipe text are rejected.
+Insufficient stock returns a reason and preserves current data.
+
+- `tools/qa_stock_only.py`: **21 native checks passed**, using synthetic
+  provider replies in a private test bundle. Includes exact exhausted-batch
+  removal, preserving other stock and confirmed records, clearing old unconfirmed
+  missing menus, missing/unknown/excess/text rejection, schema and UI removal,
+  stock-only three meals, 33/66/100%, regeneration and history retention.
+- Existing automated suite: **18 tests passed**. Native completed-trial captures
+  inspected; successful run has no script errors. Source gate passed with the
+  expected unsigned-source warning.
+- Batch-removal markers only match ID, name, expiry and 0g; the separate marker
+  prevents an older open window from restoring the requested exhausted batch
+  after reload. Confirmed execution snapshots remain independent of inventory.
+- Digest: `a46ae2352cdb10ddf9b5747ba001e1118e63880bb779ff7aceb70fee100b2b78`. Bundle: **8,377,163 bytes** (limit 8,388,608).
+- Test data were isolated. The separately authorized user-stock removal is a
+  backed-up operation, not test evidence. No keys, real model calls or purchase.
+- Live provider success, other platforms and release installation unverified.
+
+
+## Online-only menus, 2026-10-11 — editable candidate
+
+This supersedes earlier local-rule behavior and validation descriptions below.
+New ordinary and 1-day trial menus use official model.complete only. The status
+no longer says manual generation; default requests still start on button clicks,
+and multi-day automatic candidate generation remains optional.
+
+- Removed the local generator, fixed trial templates and local-mode switch.
+  Old local-mode settings migrate to online-only. Existing history is retained.
+- Three-meal responses are validated as one update: exact unconfirmed slots,
+  stock IDs, aggregate stock across meals, expiry/avoid rules, missing-item
+  references and daily calorie budget. Confirmed slots keep their snapshots.
+- `tools/qa_online.py`: **4 native checks** on the unmodified source in an
+  unsupported host, proving no local ordinary/trial fallback or local toggle.
+- **26 native checks** with deterministic provider fixtures in a private
+  copied test bundle. Only host-request dispatch is substituted; production
+  request builders, response callbacks, validators, persistence and confirmation
+  are exercised. Checks include no-provider failure, ordinary AI routing, malformed
+  and excessive responses, three AI meal snapshots, simulated replenishment,
+  33/66/100% confirmation, preserved history and cancelled/stale replies.
+  These are synthetic responses, not evidence of actual provider output.
+- Existing automated suite: **18 tests passed**. Source admission passed with
+  the expected unsigned warning. Successful native logs contain no script errors.
+- Digest: `11605b65e1b382de1b2be772835eefa49faac76ff2f60d62aeebc2a3bdd8a6e7`. Bundle: **8,380,043 bytes** (limit 8,388,608).
+- Native completed-trial screenshot inspected. No real inventory, credentials,
+  purchase, model API bill, key generation, publication or release installation.
+- Live configured-provider success, other platforms and sealed release remain
+  unverified. Source launch rechecks the private compatibility snapshot on reload.
+
+
+## Actual confirmation feedback fix, 2026-10-11 — editable candidate
+
+- Cause: unknown stock nutrition and invalid optional calories shared an ambiguous
+  error; rerendering the editor reset its scroll position.
+- Inline stock-reference fields, separate named validation errors, and in-place
+  notices now preserve drafts and scrolling. Blank extra calories count as zero.
+  Stock references entered here belong to the confirmed execution snapshot.
+- `tools/qa_actual_feedback.py`: **12 native checks passed** in a separate
+  synthetic `qa-feedback-labels-final` profile, including unknown-reference
+  rejection without writes, stable scrolling, successful stock deduction and
+  snapshot preservation, and cancelling a label draft.
+- Shared `tools/qa_day.py`: **30 native checks passed** in `qa-feedback-full3`
+  before the final field-label-only edit. Its fill helper now supports clearing
+  text and editors that intentionally retain their scroll position.
+- Existing automated suite: **18 tests passed**. Source gate passed with the
+  expected unsigned warning; final native log has no script errors.
+- Final source digest: `3bc9c37849d862466a75de20c890d24201df544bfbd904703857d06412cbe573`. Bundle: **8,379,395 bytes**, below
+  8,388,608 bytes. Native screenshot inspected. No real stock or provider calls.
+- This updates the editable source. Existing open windows must reload the new
+  bundle; release signing, submission and other platforms remain unverified.
+
+
+## 1-day experience and independent execution ledger, 2026-10-11 — editable candidate
+
+This development change supersedes the earlier statement that the script is
+unchanged from 0.6.1. It has not been published or admitted. Primary health
+programs remain 7/21/30 days; the 1-day experience is optional and local-rule only.
+
+- Unmodified official Windows hub/card-host from the pinned 655114c4943cd2490daaefa2173e7b5aaa20669f toolchain.
+- `tools/qa_day.py` in a task-owned hidden 1200x900 card-host, separate synthetic
+  `qa-day10` data: **30 native acceptance checks passed**. Includes onboarding,
+  optional selection/activation, three menus and missing ingredients, simulated
+  replenishment preview/cancel/confirmation, actual stock substitution and
+  changed grams, no writes before confirmation, 33/66/100% execution progress,
+  invalid-quantity refusal, outside-stock intake without stock deduction,
+  preserved recommendations and execution after regeneration, 100% review,
+  subsequent health program, actual intake beyond reference goals recorded
+  honestly, and history preserved when a menu is deleted.
+- `tools/qa_day.py --restart`: **1 exact-state persistence check passed**,
+  including inventory and all four confirmed execution snapshots.
+- `tools/qa_day.py --legacy` in a separate synthetic pre-ledger profile:
+  **4 migration checks passed**. Stock/plans/active program retained; existing
+  multi-day programs received defaults; actual history was not invented.
+- Existing automated suite: **18 tests passed**. Updated native smoke/preview
+  expectations for the optional fourth candidate; their full legacy drivers
+  were not separately rerun. New native QA above exercises the shared confirmation path.
+- `tools/launch.py --hub <current-official-hub> --check` passed with the expected
+  unsigned-source warning. No key generation, model API requests or real purchases.
+- Final source digest: `22b0bff8e95428bb7876a6e946c409e86c001aef3a5e3cc96f7211f9322081bf`.
+  Bundle: **8,376,659 bytes**, below 8,388,608 bytes (11,949 bytes remaining).
+- Genuine native three-menu and completed-review captures were visually inspected;
+  evidence remains outside bundle. Historical distributed screenshots remain historical.
+- Successful final run, restart and migration logs contained no script errors.
+  Intermediate compatibility failures were fixed by splitting confirmation and
+  finalization into smaller functions; they are not passing evidence.
+- Task-owned hidden previews were closed through their remote quit endpoints.
+  The user's normal inventory and pre-existing run.cmd edits were untouched.
+
+Full live-provider regression, other platforms, multi-stage combination editing,
+new-machine installation and sealed-release installation remain unverified.
+Confirmed record rules are documented in EXPERIENCE.md and ADR-0002.
+
+
 ## Original-artwork confirmation, 2026-10-08 — current 0.6.2 candidate
 
 The author confirmed sunlit-pantry-bg.png is their own original artwork.

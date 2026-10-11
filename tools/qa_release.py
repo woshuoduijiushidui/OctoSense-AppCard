@@ -37,7 +37,7 @@ else:
     for index, text in enumerate(("30", "170", "65", "", "清淡", "")):
         ui.fill(text, index)
     ui.click("下一步 · 选择周期方案  →")
-    ui.check("7/21/30-day candidates require confirmation", [p["days"] for p in ui.state()["programs"]] == [7, 21, 30] and ui.state()["program_active"] == 0)
+    ui.check("primary 7/21/30-day and optional 1-day candidates require confirmation", [p["days"] for p in ui.state()["programs"]] == [7, 21, 30, 1] and ui.state()["program_active"] == 0)
     ui.click("确认选中方案 · 去录冰箱  →")
     ui.check("explicit cycle is active", ui.state()["program_active"] != 0)
     ui.fill("菠菜", name="food_name")

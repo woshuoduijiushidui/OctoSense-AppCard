@@ -1,18 +1,30 @@
 {
   "schema": 1,
   "subtitle": "把临期食材变成今晚的一顿饭",
-  "description": "独立 OctoScript 冰箱管家原型：建立饮食档案，确认7、21或30天周期，手动确认食材入库，通过本地规则或官方宿主的model.complete生成菜单候选；接受菜单与确认实际用量分别操作，最终确认才扣减库存和记录摄入。默认手动生成，自动生成须主动开启。在线结果经过结构、到期与累计用量校验；提供方和密钥由宿主管理，应用不读取ai.env。可手动切换本地规则。此版本完整在线模型流程及新电脑冷启动未重新验证；截图来自历史Windows运行。热量和营养为原型估算，不能保证营养或过敏安全。不录音，未接入语音识别、照片或OCR，宿主关闭后不后台运行。",
+  "description": "独立 OctoScript 冰箱管家：主推7、21、30天健康方案，另有可选1天轻食体验。建档、确认库存、通过在线AI按现有可用库存生成菜单，核对实际食物和克数；最终确认才扣库存与记录摄入，三餐确认后100%并展示复盘。推荐与实际独立保存，后续菜单与周期变化不覆盖确认记录。已删除补菜及采购功能，库存不足时说明原因。在线模型由官方宿主管理。仅Windows验证，营养为原型估算，不保证营养、过敏或食品安全；不录音，无OCR及后台执行。",
   "category": "lifestyle",
-  "keywords": ["冰箱", "库存", "临期", "Octoscript"],
-  "screenshots": ["screenshots/01-main.png", "screenshots/02-plan.png", "screenshots/03-confirm.png", "screenshots/04-updated.png"],
+  "keywords": [
+    "冰箱",
+    "库存",
+    "临期",
+    "Octoscript"
+  ],
+  "screenshots": [
+    "screenshots/01-main.png",
+    "screenshots/02-plan.png",
+    "screenshots/03-confirm.png",
+    "screenshots/04-updated.png"
+  ],
   "icon": "assets/icon.svg",
-  "platforms": ["windows"],
+  "platforms": [
+    "windows"
+  ],
   "publisher": {
     "name": "leoniaodo,zix,power胖丸,Roooy",
     "support": "https://github.com/woshuoduijiushidui/OctoSense-AppCard/issues",
     "privacy_policy_url": "https://github.com/woshuoduijiushidui/OctoSense-AppCard/blob/main/PRIVACY.md"
   },
-  "release_notes": "0.6.2：修正支持与隐私链接，更新双语运行说明、许可证及发布资料，保护bundle字节不被Git换行转换。保留0.6.1的7、21、30天周期方案、余额校验、用餐累计与周期存档，应用业务脚本不变。旧库存和历史菜谱保留；未知成分需补包装标签，数值为原型估算。仅Windows已有运行记录；当前版本完整在线模型流程和其他平台未验证。",
+  "release_notes": "0.6.2开发候选：在线AI自动估算未知食材每100g营养，标注来源与假设；包装参考优先，按实际克数确认后才计摄入和扣库存，历史估算快照不改写。仅用现有库存生成菜单，无补菜采购；未发布，真实提供方成功与其他平台未验证。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

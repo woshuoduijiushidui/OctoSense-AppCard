@@ -113,7 +113,8 @@ class LaunchTests(unittest.TestCase):
         for reason in ("库存变化", "库存移除", "用餐后再规划"):
             call = next(line for line in source.splitlines() if f'plan("{reason}")' in line)
             self.assertIn("state.auto_generate", call)
-        self.assertIn('fn retry_ai(){ plan("用户请求重试")', source)
+        retry_body = source.split("fn retry_ai(){", 1)[1].split("\nfn ", 1)[0]
+        self.assertIn('plan("用户请求重试")', retry_body)
         self.assertIn('automatic_reason(ai_snapshot.reason)', source)
 
 

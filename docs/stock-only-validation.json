@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-11",
+  "bundle_blake3": "a46ae2352cdb10ddf9b5747ba001e1118e63880bb779ff7aceb70fee100b2b78",
+  "bundle_bytes": 8377163,
+  "native_synthetic_checks": [
+    "only requested exhausted tofu batch removed",
+    "positive stock and other exhausted batch untouched",
+    "batch removal preserves confirmed history exactly",
+    "legacy unconfirmed missing-stock menu cleared",
+    "ordinary AI cannot name unallocated spinach",
+    "missing-item response rejected without stock or ledger writes",
+    "unknown food id rejected without stock or ledger writes",
+    "aggregate overbooking rejected without stock or ledger writes",
+    "unallocated ingredient in title rejected without stock or ledger writes",
+    "unallocated ingredient in instructions rejected without stock or ledger writes",
+    "insufficient inventory shows reason without substitution",
+    "AI creates three meals only from available tofu",
+    "request schema removes missing and requires stock uses",
+    "replenishment buttons no longer present",
+    "generation leaves stock unchanged",
+    "stock-only 早餐 confirmation advances 33",
+    "regeneration preserves confirmed snapshot",
+    "stock-only 午餐 confirmation advances 66",
+    "stock-only 晚餐 confirmation advances 100",
+    "only actual stock quantities deducted",
+    "earlier history remains available after complete trial"
+  ],
+  "automated_tests": 18,
+  "live_provider_verified": false,
+  "real_inventory_used_for_tests": false
+}

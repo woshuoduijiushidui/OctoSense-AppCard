@@ -6,15 +6,23 @@ Turn confirmed pantry inventory into a meal you can review and execute.
 
 ## Version and evidence
 
-This checkout is the editable **0.6.2 candidate**, correcting publication metadata and the standalone launcher. The application script is unchanged from 0.6.1. [Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) requests review of **0.6.1**, not this candidate. Neither is claimed as admitted.
+This checkout is the editable **0.6.2 candidate**, correcting publication metadata and the standalone launcher. This editable checkout now adds the optional 1-day experience and independent confirmed execution snapshots; it is no longer script-identical to 0.6.1. [Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) requests review of **0.6.1**, not this candidate. Neither is claimed as admitted.
 
 Only Windows is claimed: the current pinned tools passed source admission and a limited native smoke test. Full 0.6.2 live-provider regression, new-computer installation, full functional regression and sealed-release installation remain unverified. See [VALIDATION.md](VALIDATION.md).
 
 ## What it does
 
-Confirm a dietary profile and a 7/21/30-day cycle; preview inventory batches; generate a local-rule or official model.complete candidate; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Daily/cycle values are prototype estimates. Archive a cycle without deleting stock.
+Confirm a dietary profile and a 7/21/30-day cycle; preview inventory batches; generate an online-AI candidate through official model.complete; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Daily/cycle values are prototype estimates. Archive a cycle without deleting stock.
 
-Generation is manual by default. Optional automatic generation must be enabled in Settings; acceptance and consumption still require confirmation. Deleting a plan does not restore inventory or erase meal records. See [cycle details](CYCLE-PLANS.md).
+Click Generate to request online AI by default. Optional automatic generation must be enabled in Settings; acceptance and consumption still require confirmation. Deleting a plan does not restore inventory or erase meal records. See [cycle details](CYCLE-PLANS.md).
+
+## Optional 1-day experience
+
+Keep the primary 7/21/30-day programs, or explicitly select the 1-day experience after profiling. Ask online AI to generate breakfast/lunch/dinner, using only available inventory. There is no replenishment or purchase flow; insufficient stock produces an explanation instead of a missing-ingredient menu. After each meal, edit actual foods and quantities, including stock substitutions and food eaten outside the fridge. Only final confirmation writes intake, completion and stock changes. Three confirmed slots reach 100%; the review separates execution progress from estimated nutrition goals and links to the next health program.
+
+Users only need food names, grams and expiry. Online AI automatically estimates per-100g calories, protein, fibre and vitamin C for unknown stock after entry and before menu generation. Adding outside food or an unknown stock substitution also estimates the actual draft. AI estimates show their source and raw/cooked assumptions; optional package labels take precedence. Final confirmation freezes the reference used with actual quantities. Estimation never deducts stock or confirms a meal. Failed or ambiguous estimates stay explicitly unknown, rather than zero; actual grams can still be confirmed and incomplete totals are labelled. Blank optional extra calories count as zero.
+
+Confirmed `execution_records` preserve recommendation and actual snapshots independently and survive menu regeneration, deletion and cycle changes. These same rules apply to newly confirmed meals in multi-day programs. Old unconfirmed trial menus that require missing ingredients are cleared on migration; confirmed history stays intact. Exact exhausted-batch removal requests are stored in inventory-removals.json and replayed on load only when batch ID, name, expiry and zero grams match. Historical records without actual details are not reconstructed from old recommendations. See [experience and record rules](EXPERIENCE.md). Multi-stage combination editing is outside this change.
 
 ## Demo
 
@@ -41,7 +49,7 @@ run.cmd --hub ..\OctoSense-App-Hub\target\release\hub.exe --check
 run.cmd --hub ..\OctoSense-App-Hub\target\release\hub.exe --card-host ..\OctoSense-App-Hub\target\release\card-host.exe --standalone
 ```
 
---hub --check needs no host workspace or keys. --standalone uses official card-host for local rules; it provides no model service and is not a Store install. --app-data selects an isolated test directory; preview defaults to .local-state/standalone. Back up needed data before deleting it.
+--hub --check needs no host workspace or keys. --standalone uses official card-host to inspect the UI and service-unavailable behavior; it provides no model service, cannot generate menus, and is not a Store install. --app-data selects an isolated test directory; preview defaults to .local-state/standalone. Back up needed data before deleting it.
 
 The launcher checks the existing digest without silently repairing it. VALIDATION.md records the current source digest. Old Windows hub builds hash paths differently and may misclassify license URLs. Update the tools after refusal; do not remove legal notices, widen grants, bypass the gate or restamp a sealed release.
 
@@ -53,9 +61,9 @@ Live AI requires a compatible OctoSense host serving official model methods, con
 
 - storage saves only this app's inventory, profile, plans, history and backups.
 - model sends goals, profile, inventory/composition and cycle budgets through the official host to the person's configured model provider. Credentials stay with the host. No ai.env or key input.
-- Configure the host's own AI providers panel. model.budget success is not provider readiness. On failure, manually select local rules. Already-sent calls may incur charges despite stopping the wait.
+- Configure the host's own AI providers panel. model.budget success is not provider readiness. Menus use online AI only, including the 1-day experience. Local generators and their toggle have been removed. On failure, fix the host configuration and retry; inventory and confirmed records stay unchanged. Already-sent calls may incur charges despite stopping the wait.
 - No direct network hosts, microphone grant or independent app-agent tools. Voice is unavailable; no recording, OCR, photos or execution after the host closes.
-- Nutrition is a prototype estimate, not medical advice, allergy safety or food-safety assurance. Unknown ingredients need complete package labels for numerical planning.
+- Nutrition is a prototype estimate, not medical advice, allergy safety or food-safety assurance. AI estimates are approximate references, with provenance and assumptions; package labels can correct them. Unknown portions are excluded from numeric totals and explicitly flagged.
 
 The user reported earlier online generation; this candidate's full live-provider regression is unverified. See the publisher-confirmed [privacy policy](PRIVACY.md), [support](SUPPORT.md) and [review answers](REVIEW-ANSWERS.md).
 
