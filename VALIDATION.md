@@ -1,5 +1,91 @@
 # Migration validation
 
+## Issue #24 缺菜清单 (derived, editable, follows stock) — 2026-10-13
+
+- `bundle/main.splash`: the menu side panel is now the 缺菜清单. One row per
+ingredient name merges the three meals (用量), shows the available stock
+(库存可用) and the gap (还差 N 克 = max(0, 用量 − 库存可用)). The gap is editable:
+typing a number sets the day menu's merged usage to 库存可用 + that number (a
+proportional split with the rounding remainder on the last meal), and 不需要
+sets the usage to what is already available. Both writes go through
+`commit`, so the day menu and the list cannot disagree. The list itself is
+never stored (ADR 0003); it recomputes on every render, so a stock change is
+visible without a manual refresh and a restart re-derives the same numbers.
+- `tools/smoke.py` / `tools/qa_release.py`: `--menu-purchase` extended with the
+Issue #24 checks, and `UI.scroll` added (the three meals no longer fit one
+screen). `tools/test_release.py` guards the new symbols offline.
+- Committed manifest digest restamped with the pinned App Hub
+`655114c4943cd2490daaefa2173e7b5aaa20669f`: `c25dc206a332269e444781692f517b5569076a8c70bf022f72ffdd8080a92bbf`.
+- The README pair carried unresolved `<<<<<<< HEAD` / `>>>>>>> f0a7de7`
+conflict markers from the #23 branch (the #11 Overview paragraph on one side,
+the three-meal menu on the other). Both paragraphs are kept now and the markers
+are gone.
+- The four `bundle/screenshots/` PNGs were recaptured from the same hidden
+Card-runtime run (1200x800, synthetic inventory) and replace the stale pre-#23
+captures: 01 首页, 02 三餐日菜单 with the 缺菜清单, 03 the 缺菜清单 showing
+还差 941 克 with its editable field, 04 the 冰箱 batch list. The listing
+description now says so instead of "旧截图展示手动流程".
+
+### Base blockers found and fixed (the app did not evaluate at all)
+
+The branch as checked out could not run: `main.splash` failed to parse, and the
+first inventory write was rejected. These are Issue #23/#9 defects, not part of
+the Issue #24 feature, but nothing in the menu flow could be tested without
+them:
+
+- `fn menu_meals` ended `{ return p.meals } []`; the trailing `[]` was parsed as
+  an array index. Rewritten to `return []` through a local.
+- `fn distribute_meals` named a local `use`, which makepad-script reserves.
+  Renamed to `planned`.
+- The default `state` literal had no `program_history`, so a fresh install's
+  first `apply_inventory_operation` failed `valid_state` and no batch could ever
+  be added. Added `program_history: []`.
+- `valid_state` validated `programs` as if they still held stages
+  (`consumed_kcal`, `intake`), but Issue #9 split candidates (`programs`) from
+  confirmed stages (`stages`). Candidate fields are checked on `programs` and a
+  stage check (including the 12-stage cap) was restored for `stages`.
+
+### Native run, 2026-10-13 — bundle files of this commit, adjusted manifest
+
+- The only host on this machine is the pinned App Hub's prebuilt
+  `card-host.exe`/`hub.exe`. It refuses the committed manifest: it does not know
+  the `files` capability and does not implement `host-api-v1` /
+  `app_policy.device_consent@1` (which `tools/install_local.rs` registers for the
+  full shell). That is a pre-existing manifest/host mismatch (main already had
+  `files`), not introduced here.
+- To exercise the bundle anyway, the manifest was patched **in memory of the
+  test directory only** to drop `files`, `requires` and `host_api`, and
+  `card-host --system --allow-unsigned` was used. No bundle file other than
+  `manifest.json` differed; the digest is manifest-excluded, so the same files
+  hash to the committed `98444c…`. The committed manifest was then restored.
+- Command: hidden `card-host.exe` (pinned 655114c) standalone at 1200x800 with a
+task-owned `--app-data` under `.local-state/qa-issue24`, then
+  `python -X utf8 tools/qa_release.py --port 18499 --profile .local-state/qa-issue24 --menu-purchase`
+  — **13/13 checks passed**: one generation gives 早/中/晚, every meal lists grams,
+  an over-budget portion is refused, the three meals merge into one line with the
+  day's total, every meal shows a nutrition reference, a shrunk batch plus an
+  expired batch leaves 库存可用 at the unexpired 100 g, the gap re-derives without
+  a refresh, typing a gap rewrites the day menu's usage (300 = 100 + 200) while
+  the raw state file contains no `shortfall` key, 不需要 falls the usage back to
+  the available amount, the menu is then accepted, and an edit that would empty a
+  meal (both batches removed, then 不需要) is refused and rolled back instead of
+  writing an invalid day menu.
+- `--restart` on the same profile: **1/1 checks passed** (exact synthetic state,
+  so the derived list left nothing behind on disk).
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **26 passed**.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+The committed manifest cannot be admitted by the locally available reference
+host (see above), so the bundle was not run under the full OctoSense shell, no
+live `model.complete` menu was generated, 忌口-excluded batches were not exercised
+through the UI (they share `plan_eligible` with expiry). The screenshots are
+hidden Card-runtime captures of synthetic data, not full-shell captures, because
+the committed manifest cannot be admitted locally (see above). The
+pre-existing `tools/smoke.py exercise()` and the default `tools/qa_release.py`
+main path remain stale for the post-#8/#23 flow and were not run.
+
 ## Issue #23 daily menu, 2026-10-12 — code complete, native QA not run on this machine
 
 - `bundle/main.splash` now generates one day of 早／中／晚 three meals from a

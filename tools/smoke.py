@@ -51,6 +51,11 @@ class UI:
         self.get("k", k="up", c="KeyA", ctrl=1, wait=1)
         self.get("t", t=text, wait=1)
 
+    def scroll(self, dy):
+        card = next(w for w in self.get("snap")["s"] if w.get("i") == "card" and w["ty"] == "Splash")
+        left, top, cw, ch = card["r"]
+        self.get("m", k="scroll", x=left + cw * 0.5, y=top + ch * 0.5, dy=dy, wait=1)
+
     def state_path(self):
         direct = self.profile / "pantry-steward" / "pantry.json"
         if direct.exists():
@@ -244,19 +249,20 @@ def exercise_recipe(ui):
 def exercise_menu_purchase(ui):
     """Issue #23: one generation gives 早/中/晚 three meals, each with grams and a
     nutrition reference, and an edit that breaks the day's remaining budget is
-    refused with a reason. Synthetic inventory only."""
+    refused with a reason. Issue #24: the derived 缺菜清单 merges the three meals,
+    re-derives its gap from eligible stock, and edits the day menu's usage.
+    Synthetic inventory only."""
     ui.click("选择", index=1)
     ui.click("女性")
     for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
         enter(ui, label, value)
     ui.click("下一步 · 选择周期方案  →")
     ui.click("确认计划 · 去录冰箱  →")
-    for name, grams in (("鸡蛋", "2000"),):
-        enter(ui, "食材名称", name)
-        enter(ui, "数量", grams)
-        enter(ui, "还剩几天（可留空）", "5")
-        ui.click("预览并确认  →")
-        ui.click("最终确认入库")
+    enter(ui, "食材名称", "鸡蛋")
+    enter(ui, "数量", "2000")
+    enter(ui, "还剩几天（可留空）", "5")
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
     ui.click("完成建档 · 开始托管  →")
     ui.click("⚙  设置")
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
@@ -268,18 +274,78 @@ def exercise_menu_purchase(ui):
              and [m["slot"] for m in plan["meals"]] == ["早餐", "午餐", "晚餐"])
     ui.check("every meal lists ingredients with grams",
              all(m["uses"] and all(u["grams"] > 0 for u in m["uses"]) for m in plan["meals"]))
+    # 越界拦截: a portion far past today's remaining budget is refused, not saved.
+    portion = plan["meals"][0]["uses"][0]["grams"]
+    ui.fill("9999", index=0)
+    ui.check("an over-budget portion is refused with a reason",
+             "被拦下" in ui.text()
+             and ui.state()["plans"][0]["meals"][0]["uses"][0]["grams"] == portion)
+    # Issue #24: the three meals merge into one 缺菜清单 line holding the day's total.
+    merged = sum(u["grams"] for m in plan["meals"] for u in m["uses"] if u["name"] == "鸡蛋")
+    ui.check("the three meals merge into one line with the day's total",
+             f"用量 {merged} g · 库存可用 2000 g" in ui.text())
     page = ui.text()
-    ui.check("each meal shows a nutrition reference and the day's remainder",
+    ui.scroll(600)
+    page = page + ui.text()
+    ui.check("every meal shows a nutrition reference and the day's remainder",
              "早餐" in page and "午餐" in page and "晚餐" in page
              and "kcal" in page and "今日剩余" in page)
-    ui.check("every ingredient shows 库存够 or 还差 N 克",
-             "库存够" in page or "还差" in page)
-    # 越界拦截: a portion far past today's remaining budget is refused, not saved.
-    ui.fill("9999", index=0)
-    ui.check("an over-budget portion is refused with a reason", "被拦下" in ui.text())
+    ui.scroll(-2000)
+    # 库存可用 counts only eligible batches: shrink the batch and add an expired one.
+    ui.click("▣  冰箱")
+    ui.click("展开 / 收起", index=0)
+    ui.click("编辑", index=0)
+    ui.fill("100", index=1)
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
+    add(ui, "鸡蛋", "500", printed_date="2020-01-01")
+    foods = ui.state()["foods"]
+    today = int((time.time() + ui.state()["offset"]) // 86400)
+    batches = [f for f in foods if f["name"] == "鸡蛋"]
+    available = sum(f["canonical_quantity"] for f in batches if f["expires_on_day"] >= today)
+    gap = max(0, merged - available)
+    ui.click("✦  菜单")
+    ui.scroll(-2000)
+    page = ui.text()
+    ui.check("an expired batch is not counted as available",
+             available == 100 and len(batches) == 2)
+    ui.check("a stock change re-derives the gap without a refresh",
+             f"用量 {merged} g · 库存可用 {available} g" in page and f"还差 {gap} 克" in page)
+    # Editing the gap writes the day menu's usage; the list only re-derives from it.
+    ui.fill("200", name="shortfall_amount")
+    revised = sum(u["grams"] for m in ui.state()["plans"][0]["meals"]
+                  for u in m["uses"] if u["name"] == "鸡蛋")
+    ui.check("editing the gap edits the day menu's usage, not the list",
+             revised == available + 200
+             and f"用量 {revised} g · 库存可用 {available} g" in ui.text()
+             and "还差 200 克" in ui.text())
+    ui.check("the shortfall list is never stored",
+             "shortfall" not in ui.state_path().read_text(encoding="utf-8"))
+    # "不需要" is the same write with the target already in stock.
+    ui.click("不需要")
+    dropped = sum(u["grams"] for m in ui.state()["plans"][0]["meals"]
+                  for u in m["uses"] if u["name"] == "鸡蛋")
+    ui.check("removing a row falls back on the day menu's usage",
+             dropped == available and "库存够，不用买。" in ui.text())
     ui.click("接受今日菜单  →")
     ui.check("a menu that needs no purchase is accepted",
              ui.state()["plans"][0]["accepted"] and ui.state()["active"] == ui.state()["plans"][0]["id"])
+    # Removing the last batch leaves nothing to cover a row; refusing beats writing
+    # a day menu with an empty meal (valid_state would reject it on the next load).
+    ui.click("▣  冰箱")
+    if "丢弃/移除" not in ui.text():
+        ui.click("展开 / 收起", index=0)
+    ui.click("丢弃/移除", index=0)
+    ui.click("确认移除")
+    ui.click("丢弃/移除", index=0)
+    ui.click("确认移除")
+    ui.click("✦  菜单")
+    ui.scroll(-2000)
+    ui.click("不需要")
+    kept = sum(u["grams"] for m in ui.state()["plans"][0]["meals"]
+               for u in m["uses"] if u["name"] == "鸡蛋")
+    ui.check("an edit that would empty a meal is refused",
+             "会让这一餐为空" in ui.text() and kept == dropped)
     (ui.profile / "expected-state.json").write_text(
         json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
     (ui.profile / "checks.json").write_text(
@@ -293,7 +359,7 @@ def main():
     parser.add_argument("--restart", action="store_true")
     parser.add_argument("--recipe", action="store_true")
     parser.add_argument("--menu-purchase", action="store_true",
-                        help="Issue #23 daily-menu QA: generate, three meals, nutrition, over-limit refusal")
+                        help="Issue #23/#24 daily menu: three meals, nutrition, over-limit refusal, derived 缺菜清单")
     args = parser.parse_args()
     ui = UI(args.port, args.profile.resolve())
     if args.restart:

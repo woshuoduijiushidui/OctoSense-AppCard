@@ -4,7 +4,7 @@ let state = {schema: 2 foods: [] plans: [] active: 0 next_id: 1 revision: 0
     offset: 0 demo: false paused: false reminders: true snooze: 0 risk_key: ""
     handled: 0 baseline: 0 cycle_start: time_now() log: [] model_enabled: true auto_generate: false
     profile: {done: false scene: "" sex: "" age: "" height: "" weight: "" allergies: "" avoidances: "" preferences: "" special: "" activity: "轻活动" basics_done: false plan_approved: false}
-    programs: [] stages: [] stage_next: 1 plan_history: [] program_next: 1 cycle_seed: [0 0 0 0 0 0]
+    programs: [] stages: [] stage_next: 1 plan_history: [] program_history: [] program_next: 1 cycle_seed: [0 0 0 0 0 0]
     health: {start: 0 day: 0 meals_per_day: 2 meals_week: 0 meals_today: 0
         protein_week: 0 fiber_week: 0 protein_goal: 0 fiber_goal: 0 calcium_goal: 0 iron_goal: 0}
     daily_target: 2000 consumed_kcal: 0 meal_count: 0 last_meal: "" last_goal: ""}
@@ -810,7 +810,11 @@ fn plan_numeric(p){
 // Issue #23: a menu is one day with three meals. `uses` stays the merged list so
 // stock, budget and eating keep one place to look. Acceptance checks only
 // 过敏忌口、营养参考 and 当天剩余额度; 库存 becomes a per-ingredient status.
-fn menu_meals(p){ if p != nil && p.to_json().search("\"meals\"") >= 0 { return p.meals } [] }
+fn menu_meals(p){
+    if p != nil && p.to_json().search("\"meals\"") >= 0 { return p.meals }
+    let empty = []
+    empty
+}
 fn meal_label(index){ if index == 0 { return "早餐" } if index == 1 { return "午餐" } "晚餐" }
 fn use_grams(item){
     if item.grams > 0 { return item.grams }
@@ -872,9 +876,7 @@ fn menu_stock_lines(p){
         let have = available_grams(line.name)
         let short = 0
         if have < line.grams { short = ceil(line.grams - have) }
-        let status = "库存够"
-        if short > 0 { status = "还差 " + short + " 克" }
-        out.push({name: line.name grams: line.grams available: have short: short status: status enough: short == 0})
+        out.push({name: line.name grams: line.grams available: have short: short})
     }
     out
 }
@@ -883,6 +885,75 @@ fn refresh_menu_uses(p){
     let uses = []
     for meal in p.meals { for item in meal.uses { uses.push(item) } }
     p.uses = uses
+}
+// Issue #24: the 缺菜清单 is derived, never stored (ADR 0003). The only writable
+// place behind a row is the day menu's usage: set the merged usage for one
+// ingredient and the gap re-derives from 用量 − 库存可用.
+fn item_average_grams(food_id){
+    for f in state.foods { if f.id == food_id { return f.average_item_grams } }
+    0
+}
+fn menu_has_empty_meal(p){
+    for meal in p.meals { if meal.uses.len() == 0 { return true } }
+    false
+}
+fn set_menu_ingredient(p, name, target){
+    let meal_at = []
+    let use_at = []
+    let grams_at = []
+    let current = 0
+    for i in p.meals.len() {
+        for j in p.meals[i].uses.len() {
+            if p.meals[i].uses[j].name == name {
+                meal_at.push(i)
+                use_at.push(j)
+                grams_at.push(use_grams(p.meals[i].uses[j]))
+                current = current + use_grams(p.meals[i].uses[j])
+            }
+        }
+    }
+    if current <= 0 { return false }
+    // A meal keeps at least one ingredient and a positive numeric amount, so only
+    // as many meals as the target can cover keep this one; the rest lose it.
+    let affected = meal_at.len()
+    let keep = affected
+    if target < affected { keep = max(0, target) }
+    let allocated = 0
+    for n in meal_at.len() {
+        let item = p.meals[meal_at[n]].uses[use_at[n]]
+        let share = 0
+        if n < keep {
+            share = 1
+            // Proportional split over the meals that keep it, with the rounding
+            // remainder on the last one, so 用量 lands on the requested number.
+            if keep == affected {
+                share = floor(grams_at[n] * target / current)
+                if n == keep - 1 { share = target - allocated }
+                if share < 1 { share = 1 }
+                allocated = allocated + share
+            }
+        }
+        let average = item_average_grams(item.food_id)
+        if share > 0 && use_unit(item) == "piece" && average > 0 {
+            let pieces = max(1, floor(share / average + .5))
+            item.quantity = pieces
+            item.grams = pieces * average
+        } else {
+            item.quantity = share
+            item.grams = share
+        }
+    }
+    // Meals the target could not cover lose the ingredient rather than keep a 0 g
+    // entry that valid_state would reject.
+    for i in p.meals.len() {
+        let kept = []
+        for item in p.meals[i].uses {
+            if item.name != name || use_quantity(item) > 0 { kept.push(item) }
+        }
+        p.meals[i].uses = kept
+    }
+    refresh_menu_uses(p)
+    true
 }
 fn now(){ time_now() + state.offset }
 fn available(){
@@ -1019,8 +1090,13 @@ fn valid_state(value){
         if value.cycle_seed.len() != 6 { return false }
         for seed in value.cycle_seed { if !(seed >= 0) || seed > 1000 { return false } }
         for program in value.programs {
-            if program.days < 1 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 || program.consumed_kcal < 0 || program.intake.len() > 150 { return false }
+            if program.days < 1 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 { return false }
             if program.protein_goal < 0 || program.fiber_goal < 0 || program.vitamin_c_goal < 0 { return false }
+        }
+        if value.stages.len() > 12 { return false }
+        for stage in value.stages {
+            if stage.days < 1 || stage.days > 30 || stage.kcal_goal < 0 || stage.daily_kcal < 0 || stage.consumed_kcal < 0 || stage.intake.len() > 150 { return false }
+            if stage.protein_goal < 0 || stage.fiber_goal < 0 || stage.vitamin_c_goal < 0 || stage.consumed_protein < 0 || stage.consumed_fiber < 0 || stage.consumed_vitamin_c < 0 { return false }
         }
         let ids = []
         for f in value.foods {
@@ -1585,6 +1661,56 @@ fn swap_meal_food(index, use_index){
     }
     record("调整日菜单 #" + p.id + "：" + meal_label(index) + " 换用 " + revised.name)
     if commit(before) { message = meal_label(index) + " 已换成「" + revised.name + "」，营养已重算。" }
+    redraw()
+}
+// Issue #24: the number typed on the 缺菜清单 is how much to top up, so the day
+// menu's usage becomes 库存可用 + that number. Nothing about the list is stored.
+fn revise_shortfall(name, text){
+    if pending || plan_removal != nil { return }
+    let p = choose_plan()
+    if p == nil { return }
+    let typed = text.trim()
+    let gap = 0.0
+    if typed != "" { gap = typed.to_f64() }
+    if typed == "" || !(gap >= 0) { message = "需要补齐的数量请填写 0 或更大的数字。" ui.notice.set_text(message) return }
+    let before = state.to_json()
+    let target = available_grams(name) + floor(gap)
+    if !set_menu_ingredient(p, name, target) { message = "这份菜单里没有「" + name + "」，清单没有变化。" ui.notice.set_text(message) return }
+    if menu_has_empty_meal(p) {
+        state = before.parse_json()
+        message = "「" + name + "」是某一餐唯一的食材，改数量会让这一餐为空，已取消。"
+        ui.notice.set_text(message) redraw() return
+    }
+    let issue = menu_issue(p)
+    if issue != "" {
+        state = before.parse_json()
+        message = "改数量被拦下：" + issue ui.notice.set_text(message) redraw() return
+    }
+    record("调整缺菜清单：" + name + " 转为日菜单用量 " + target + " g")
+    if commit(before) { message = "「" + name + "」的日菜单用量已更新，缺菜清单已重算。" }
+    redraw()
+}
+// "不需要" is the same write with the target set to what is already available,
+// so the row's gap becomes zero without the list keeping a number of its own.
+fn drop_shortfall(name){
+    if pending || plan_removal != nil { return }
+    let p = choose_plan()
+    if p == nil { return }
+    let before = state.to_json()
+    let target = available_grams(name)
+    if !set_menu_ingredient(p, name, target) { message = "这份菜单里没有「" + name + "」。" ui.notice.set_text(message) return }
+    if menu_has_empty_meal(p) {
+        state = before.parse_json()
+        message = "「" + name + "」是某一餐唯一的食材，去掉会让这一餐为空，已取消。"
+        ui.notice.set_text(message) redraw() return
+    }
+    let issue = menu_issue(p)
+    if issue != "" {
+        state = before.parse_json()
+        message = "去掉被拦下：" + issue ui.notice.set_text(message) redraw() return
+    }
+    record("调整缺菜清单：" + name + " 不再补齐，日菜单用量改为库存可用量")
+    if commit(before) { message = "「" + name + "」已从缺菜清单去掉，日菜单用量同步减少。" }
     redraw()
 }
 fn remaining(food){
@@ -2206,10 +2332,10 @@ fn distribute_meals(foods, recipe_only){
         let key = "" + f.id
         let divisor = 1
         for k v in counts { if k == key { divisor = v } }
-        let use = nil
-        if recipe_only { use = recipe_use(f, max(1, floor(f.canonical_quantity / divisor))) }
-        else { use = plan_use(f, max(1, floor(batch_grams(f) / divisor))) }
-        if use != nil { meals[i % 3].uses.push(use) }
+        let planned = nil
+        if recipe_only { planned = recipe_use(f, max(1, floor(f.canonical_quantity / divisor))) }
+        else { planned = plan_use(f, max(1, floor(batch_grams(f) / divisor))) }
+        if planned != nil { meals[i % 3].uses.push(planned) }
     }
     for slot in 3 {
         let names = ""
@@ -3920,18 +4046,30 @@ View{width: Fill height: Fill flow: Overlay
                                                     }
                                                 }
                                             }
-                                            Frost{width: 310 height: Fit padding: 20 spacing: 12 draw_bg.color: #f5f1ebd9
-                                                Copy{text: "每样食材的状态" draw_text.text_style: theme.font_bold{font_size: 18}}
-                                                Hint{text: "库存是否足够不再是接受门槛；补上缺的食材后这份菜单自动变为可执行。"}
+                                            Frost{width: 340 height: Fit padding: 20 spacing: 12 draw_bg.color: #f5f1ebd9
+                                                Copy{text: "缺菜清单" draw_text.text_style: theme.font_bold{font_size: 18}}
+                                                Hint{text: "由「日菜单用量 − 库存可用」算出，不写入存储；在这里改数量，改的就是日菜单的用量。"}
                                                 Divider{}
                                                 for line in menu_stock_lines(p) {
-                                                    View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
-                                                        Copy{text: line.name}
-                                                        Hint{text: line.grams + " 克 · " + line.status}
+                                                    Tint{draw_bg.color: #xffffffd9
+                                                        View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                            Copy{text: line.name draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                            Hint{text: "用量 " + line.grams + " g · 库存可用 " + line.available + " g"}
+                                                        }
+                                                        if line.short > 0 {
+                                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                Hint{text: "需要补齐 g"}
+                                                                shortfall_amount := Field{width: 110 height: 40 margin: 0 padding: Inset{left: 12 right: 12} text: "" + line.short on_change: |text| revise_shortfall(line.name, text)}
+                                                                Quiet{text: "不需要" on_click: || drop_shortfall(line.name)}
+                                                            }
+                                                            Hint{text: "还差 " + line.short + " 克"}
+                                                        }
+                                                        else { Hint{text: "库存够，不用买。"} }
                                                     }
                                                 }
+                                                Hint{text: "清单只描述需要补齐的数量，不代表已经购买或入库。"}
                                                 if menu_executable(p) { Hint{text: "库存够，这份菜单现在可以执行。"} }
-                                                else { Hint{text: "还差一些食材；补上后不必重新生成。"} }
+                                                else { Hint{text: "补齐缺的食材后这份菜单自动变为可执行，不必重新生成。"} }
                                                 Soft{text: "查看 / 收起做法" on_click: || { details = !details redraw() }}
                                                 Quiet{text: "稍后提醒" on_click: || snooze()}
                                             }
