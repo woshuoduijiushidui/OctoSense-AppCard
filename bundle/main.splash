@@ -1917,7 +1917,7 @@ fn render_dashboard(){
     ui.content.render()
     ui.actions.render()
     ui.notice.set_text(message)
-    let status = "在线 AI · 正在守护"
+    let status = "在线 AI · 已关闭"
     if use_ai {
         if ai_phase == 0 { status = "AI 配置 · 正在读取" }
         if ai_phase == 1 { status = "在线 AI · 宿主服务可用" }
@@ -1973,7 +1973,7 @@ fn load(){
     }
     ensure_extended_state()
     if state.plans.len() > 0 { selected = state.plans.len() - 1 }
-    use_ai = true state.model_enabled = true
+    use_ai = state.model_enabled == true
     booted = true
     shown_day = health_day()
     redraw()
@@ -2482,6 +2482,7 @@ fn probe_vision(){
     catch { vision_phase = 2 }
 }
 fn begin_recognition(mode){
+    if !online_ready() { redraw() return }
     if vision_phase != 1 {
         message = "当前宿主暂不支持图片识别，请使用手动录入"
         redraw() return
@@ -2545,6 +2546,7 @@ fn recognition_schema(){
                 printed_expires_on: value kcal_text: value protein_text: value fiber_text: value vitamin_c_text: value}}}}}
 }
 fn recognize_image(path){
+    if !online_ready() { recognition_failed(message) return }
     if !path.is_string() || path == "" { recognition_failed("图片路径无效") return }
     recognition_image = path recognition_phase = "model"
     recognition_deadline = time_now() + 95
@@ -2681,7 +2683,7 @@ fn confirm_intake(){
     if !apply_inventory_operation(operation, nil) { draft_rejected(message) return }
     intake_draft = nil editing_id = 0 reset_manual_form()
     message = "已确认入库。已有菜单会重新校验；需要新菜单时，请回首页点击生成今日菜单。"
-    if !state.paused && ai_phase == 1 && nutrition_items(false).len() > 0 { estimate_nutrition(nutrition_items(false), "stock") }
+    if !state.paused && ai_phase == 1 && nutrition_items(false).len() > 0 { estimate_nutrition(nutrition_items(false), "stock", "库存营养估算") }
     else { if state.auto_generate && !state.paused && state.profile.done { plan("库存变化") } }
     redraw()
 }
@@ -3070,14 +3072,27 @@ fn toggle_auto_generation(){
     if commit(before) {
         message = "已关闭自动生成。库存变化和临期只更新或提醒；请手动生成新菜单。"
         if state.auto_generate { message = "已开启自动生成。之后库存变化、临期和用餐确认可创建候选，仍需你接受。" }
-        if !state.auto_generate && ai_busy && automatic_reason(ai_snapshot.reason) {
+        if !state.auto_generate && ai_busy && (automatic_reason(ai_snapshot.reason) || (has_field(ai_snapshot, "nutrition_flow") && ai_snapshot.nutrition_flow == "stock")) {
             stop_ai()
             message = "已关闭自动生成并忽略正在等待的自动结果；已发出的请求可能仍会计费。"
         }
     }
     redraw()
 }
-fn toggle_model(){ use_ai = true message = "菜单只使用在线 AI，请在宿主配置提供方。" redraw() }
+fn toggle_model(){
+    let before = state.to_json()
+    state.model_enabled = !use_ai
+    if commit(before) {
+        use_ai = state.model_enabled == true
+        if use_ai { message = "已启用在线 AI；生成时会将相关食材、档案或所选图片发送给宿主配置的提供方。" }
+        else {
+            stop_ai()
+            if recognition_phase != "" { cancel_recognition() }
+            message = "已关闭在线 AI，后续不再发送模型请求；已发出的请求可能仍会计费。"
+        }
+    }
+    redraw()
+}
 fn ai_failure(text){
     ai_busy = false ai_error = text message = text
     if text.search("no_provider") >= 0 {
@@ -3169,7 +3184,7 @@ fn save_ai_result(output, reason, requested_goal){
 fn online_plan(reason){
     if ai_busy { return }
     let items = nutrition_items(false)
-    if items.len() > 0 { retry_reason = reason estimate_nutrition(items, "menu") return }
+    if items.len() > 0 { estimate_nutrition(items, "menu", reason) return }
     online_plan_ready(reason)
 }
 fn model_received(token, r){
@@ -3199,7 +3214,7 @@ fn plan(reason){
     if storage_blocked { message = "库存文件异常，已停止生成和写入。请先备份修复。" return }
     if state.paused { message = "管家已暂停，请在设置里恢复。" return }
     if pending || plan_removal != nil { message = "请先完成或取消当前确认。" return }
-    if is_experience() { generate_trial() return }
+    if is_experience() { generate_trial_for(reason) return }
     if current_stage() == nil || program_remaining_daily(current_stage()) <= 0 { message = "请先确认有效周期方案，或查看今日额度与周期进度。" return }
     if !online_ready() { return }
     online_plan(reason)
@@ -3499,6 +3514,7 @@ fn migrate_execution(value){
     value
 }
 fn online_plan_ready(reason){
+    if !online_ready() || (!state.auto_generate && automatic_reason(reason)) { return }
     if ai_busy { message = "正在生成，请稍候。库存若变化，旧结果会自动作废。" return }
     if goal.len() > 1500 { message = "目标太长，请缩短至约 500 字以内。" return }
     let program = current_stage()
@@ -3639,6 +3655,7 @@ fn numeric_budget_ok(uses){
     estimate.kcal <= program_remaining_daily(program) && (!estimate.complete || estimate.kcal > 0)
 }
 fn online_ready(){
+    if !use_ai || !state.model_enabled { message = "在线 AI 已关闭；请在设置中主动启用后再生成或估算。" return false }
     if ai_phase == 1 { return true }
     message = "请在 OctoSense 的 AI 提供方设置配置模型，再重新读取 AI 配置。"
     if ai_phase == 0 { message = "正在读取 AI 配置，请稍候。" }
@@ -3646,6 +3663,7 @@ fn online_ready(){
     return false
 }
 fn request_online_model(payload, token){
+    if !online_ready() || (!state.auto_generate && automatic_reason(ai_snapshot.reason)) { stop_ai() redraw() return }
     try { host_request_id = host.request("model.complete", payload, |r| model_received(token, r)) }
     catch {
         if has_field(ai_snapshot, "nutrition_flow") { apply_nutrition_reply({is_ok: false error: "营养估算请求未能发送"}) }
@@ -3816,14 +3834,17 @@ fn trial_schema(){
                 }}}
         }}
 }
-fn generate_trial(){
+fn generate_trial(){ generate_trial_for("用户请求三餐") }
+fn generate_trial_for(reason){
+    if !state.auto_generate && automatic_reason(reason) { return }
     if pending || ai_busy || state.paused || storage_blocked { message = "请先结束当前操作或恢复管家。" redraw() return }
     if !is_experience() || program_day_index(current_stage()) > 1 || !online_ready() { redraw() return }
     let items = nutrition_items(false)
-    if items.len() > 0 { estimate_nutrition(items, "trial") return }
-    generate_trial_ready()
+    if items.len() > 0 { estimate_nutrition(items, "trial", reason) return }
+    generate_trial_ready(reason)
 }
-fn generate_trial_ready(){
+fn generate_trial_ready(reason){
+    if !state.auto_generate && automatic_reason(reason) { return }
     if pending || ai_busy || state.paused || storage_blocked { message = "请先结束当前操作或恢复管家。" redraw() return }
     let p = current_stage()
     if !is_experience() || program_day_index(p) > 1 { message = "体验日期已结束；已吃的餐仍可如实记录，请选择后续方案。" redraw() return }
@@ -3840,7 +3861,7 @@ fn generate_trial_ready(){
     if inventory.len() == 0 { message = "没有现有可用库存：已用完、过期或忌口批次不参与菜单生成。" redraw() return }
     ai_sequence = ai_sequence + 1
     let token = ai_sequence
-    ai_snapshot = {revision: state.revision profile_revision: state.profile_revision offset: state.offset goal: goal reason: "用户请求三餐"
+    ai_snapshot = {revision: state.revision profile_revision: state.profile_revision offset: state.offset goal: goal reason: reason
         program_id: p.id consumed_kcal: p.consumed_kcal experience: true}
     ai_busy = true ai_error = "" model_deadline = time_now() + 95
     message = "在线 AI 正在安排未确认的三餐，已确认餐次和实际记录保留。" redraw()
@@ -4012,15 +4033,16 @@ fn estimate_actual(){
     if items.len() == 0 { return }
     actual_estimate_attempted = true
     if !online_ready() { actual_error("营养暂未估算，请检查在线 AI；仍可按营养未知确认实际克数。") return }
-    estimate_nutrition(items, "actual")
+    estimate_nutrition(items, "actual", "用户核对实际食用")
 }
-fn estimate_nutrition(items, flow){
+fn estimate_nutrition(items, flow, reason){
+    if !state.auto_generate && automatic_reason(reason) { return }
     if ai_busy || storage_blocked || items.len() == 0 || !online_ready() { return }
     let program_id = 0
     if current_stage() != nil { program_id = current_stage().id }
     ai_sequence = ai_sequence + 1
     ai_snapshot = {nutrition_flow: flow items: items revision: state.revision profile_revision: state.profile_revision offset: state.offset goal: goal
-        reason: "营养自动估算" program_id: program_id draft: consumption.to_json()}
+        reason: reason program_id: program_id draft: consumption.to_json()}
     ai_busy = true ai_error = "" model_deadline = time_now() + 95
     message = "在线 AI 正在自动估算营养；库存数量和实际记录保持不变。" redraw()
     let numeric = {type: "number" minimum: 0 maximum: 100}
@@ -4042,7 +4064,7 @@ fn apply_nutrition_reply(r){
     let snap = ai_snapshot let flow = snap.nutrition_flow
     let current_id = 0
     if current_stage() != nil { current_id = current_stage().id }
-    if state.profile_revision != snap.profile_revision || state.revision != snap.revision || state.offset != snap.offset || current_id != snap.program_id || state.paused || storage_blocked || goal != snap.goal || (flow == "actual" && (!pending || consumption.to_json() != snap.draft)) || (flow != "actual" && pending) {
+    if !use_ai || (!state.auto_generate && automatic_reason(snap.reason)) || state.profile_revision != snap.profile_revision || state.revision != snap.revision || state.offset != snap.offset || current_id != snap.program_id || state.paused || storage_blocked || goal != snap.goal || (flow == "actual" && (!pending || consumption.to_json() != snap.draft)) || (flow != "actual" && pending) {
         message = "等待时食材或实际餐食已变化，旧营养估算已忽略。请重新操作。" redraw() return
     }
     if !r.is_ok { nutrition_failure("AI 营养估算失败：" + r.error, flow) return }
@@ -4068,8 +4090,8 @@ fn apply_nutrition_reply(r){
         redraw() return
     }
     if nutrition_items(false).len() > 0 { message = "部分食材无法估算，保留库存并标注营养未知。" }
-    if flow == "menu" { online_plan_ready(retry_reason) return }
-    if flow == "trial" { generate_trial_ready() return }
+    if flow == "menu" { online_plan_ready(ai_snapshot.reason) return }
+    if flow == "trial" { generate_trial_ready(ai_snapshot.reason) return }
     if state.auto_generate && state.profile.done && !is_experience() && current_stage() != nil { online_plan_ready("库存变化") }
     redraw()
 }
@@ -4089,8 +4111,8 @@ fn validate_nutrition_estimates(output, items){
 }
 fn nutrition_failure(text, flow){
     ai_error = text message = text
-    if flow == "menu" { online_plan_ready(retry_reason) return }
-    if flow == "trial" { generate_trial_ready() return }
+    if flow == "menu" { online_plan_ready(ai_snapshot.reason) return }
+    if flow == "trial" { generate_trial_ready(ai_snapshot.reason) return }
     if flow == "actual" { message = text + " 可重试估算，或按营养未知确认实际克数。" }
     redraw()
 }
@@ -5592,7 +5614,7 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     Frost{padding: 20 spacing: 10
                                         Copy{text: "菜单生成方式" draw_text.text_style: theme.font_bold{font_size: 18}}
-                                        let model_status = "在线 AI：按目标和真实库存安排菜单。"
+                                        let model_status = "在线 AI 已关闭：保留库存与记录；启用后才能生成菜单、估算营养或识别图片。"
                                         if use_ai {
                                             if ai_phase == 0 { model_status = "正在读取宿主 AI 配置…" }
                                             if ai_phase == 1 { model_status = "宿主模型服务可用；提供方由 OctoSense 管理。今日已调用约 " + ai_calls + " 次。" }
@@ -5601,11 +5623,12 @@ View{width: Fill height: Fill flow: Overlay
                                             if ai_phase == 4 { model_status = "当前宿主不支持在线 AI，请使用支持模型服务的宿主。" }
                                         }
                                         Hint{text: model_status}
+                                        Hint{text: "启用在线 AI 后，相关食材、菜单所需档案或所选图片会发送给宿主配置的模型提供方。"}
                                         Hint{text: "模型密钥只在 OctoSense 的 AI 提供方设置中填写。本版本不读取 ai.env；语音识别暂不可用。"}
                                         View{width: Fill height: Fit flow: Right spacing: 8
-                                            let model_button = "在线 AI 菜单"
+                                            let model_button = "关闭在线 AI"
                                             if !use_ai { model_button = "启用在线 AI" }
-                                            Soft{text: model_button enabled: !ai_busy on_click: || toggle_model()}
+                                            Soft{text: model_button on_click: || toggle_model()}
                                             Soft{text: "重新读取 AI 配置" enabled: !ai_busy && ai_phase != 0 on_click: || read_ai_config()}
                                         }
                                     }

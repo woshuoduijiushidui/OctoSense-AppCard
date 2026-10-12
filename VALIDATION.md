@@ -1683,3 +1683,54 @@ This update leaves the five model schemas unchanged.
 Current reproducible entry points: `tools/qa_merge.py` and
 `tools/check_model_schema.py`; see `EXPERIENCE.md`. Personal application data,
 provider settings and existing published commits were not modified for testing.
+
+# PR #21 online opt-out and pending request control — 2026-10-12
+
+Preserve stored `model_enabled=false` at load. Settings explicitly enables or
+disables online AI and persists the choice; menus, nutrition and image-model
+requests check that choice before dispatch. Disabling AI also invalidates
+pending replies. Menus still use online AI only when enabled; no local fallback
+was reintroduced.
+
+Nutrition snapshots now carry the original trigger reason through success,
+malformed output, failure and timeout. Turning off automatic generation
+invalidates pending automatic menu/nutrition flows via the request sequence;
+later re-enabling does not revive them. Both ordinary and experience menu
+continuations recheck the current switch before sending. Explicit manual
+generation continues when only automatic generation is turned off.
+
+Validation on the changed bundle:
+
+- 31/31 offline Python tests passed; `tools/launch.py --check` and official Hub
+ stamp/check passed, retaining version 0.8.0 and production permissions.
+- `tools/qa_request_control.py`: 54/54 native checks across 14 fresh isolated
+ fixtures. Legacy schema-1 and current schema-2 opt-outs survived inventory
+ removal, manual attempts, stock nutrition and image dispatch attempts, saved
+ state and actual process restarts. The UI enable button persisted consent;
+ the next explicit menu request sent nutrition then menu exactly once.
+- Held nutrition replies covered success, error, malformed data and accelerated
+ timeout. Turning auto generation off sent no second request and wrote no
+ late nutrition/menu. Turning it off then on, experience auto generation,
+ stock estimation and disabling online AI during a request were covered.
+ Manual generation continued for each of the four reply outcomes.
+- 24/24 existing `qa_merge.py` checks passed for ordinary menus, optional trial,
+ immutable actual records, inventory deductions and completion recap.
+- All nine current request captures (nutrition, ordinary/experience menus and
+ image schema) compiled through the original official host schema compiler;
+ unsupported `uniqueItems` negative control was still rejected.
+
+The new regression driver reuses synthetic `qa_merge` state and a private
+model-dispatch shim. Initial opt-out removal/enable paths use native UI;
+cancellation cases invoke the same production action functions via test-only
+commands. Only response delivery and the timeout deadline are controlled;
+production guards, persistence, callbacks and watchdog run unchanged. The
+image opt-out test verifies no dispatch, not image recognition capability.
+Standalone-host test-manifest limitations described above still apply. No real
+provider, personal inventory or provider credentials were used. Already sent
+provider requests cannot be guaranteed to stop or avoid billing.
+
+Machine-readable assertions: `docs/model-request-control-validation.json`.
+Reproduction: `tools/qa_request_control.py --profile <fresh .local-state/qa-*>
+--hub <official hub> --card-host <official card-host>`; the driver starts and
+closes its own hidden hosts. Bundle digest:
+`234e13907694e1efabca02da29b9e275557fd6115a4f8eeea95eaf57734c62ed`.

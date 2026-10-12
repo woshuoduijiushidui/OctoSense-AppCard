@@ -38,3 +38,5 @@
 `tools/qa_merge.py` 驱动隔离的原生回归并捕获请求。使用 `tools/check_model_schema.py --host-schema <完整宿主>/apps/ai-providers/host-service/src/complete/schema.rs --offline docs/model-schemas/*.json` 验证宿主编译器；PowerShell 可通过 `Get-ChildItem` 展开文件参数。编译探针直接引用官方源文件，不复制或重新实现关键字表，无需真实提供方。
 
 早期 `qa_day.py`、`qa_online.py`、`qa_stock_only.py`、`qa_review_feedback.py` 和 `qa_ai_nutrition.py` 的整套驱动使用 schema-1 的候选／执行结构，历史结果保留；当前 schema-2 合并版用 `qa_merge.py` 的普通、旧存档、缺菜购物、件单位、营养失败和重启模式验证。
+
+在线 AI 总开关与自动生成开关分开：旧存档中关闭在线 AI 的选择会保留，需在设置主动启用后才发送任何模型请求。关闭自动生成会取消等待中的自动规划及其营养前置流程；迟到的成功、失败或超时不会继续发菜单请求，即使随后重新开启自动生成也不会恢复旧流程。用户主动点击生成不受自动生成开关影响。
