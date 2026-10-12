@@ -65,6 +65,8 @@ let voice_phase = 0 // 0 idle, 1 opening, 2 recording, 3 transcribing
 let voice_sequence = 0
 let voice_deadline = 0
 let voice_reply = nil
+let agent_session = nil
+let agent_memory = nil
 let onboarding_step = 0
 let profile_edit_backup = nil
 let profile_sex = "不透露"
@@ -444,6 +446,256 @@ fn valid_legacy_state(value){
     } catch { false }
 }
 fn today_day(){ floor(now() / 86400) }
+fn agent_empty_session(day){
+    {schema: 1 day: day next_message_id: 1 context_summary: "" summary_through_id: 0 messages: []}
+}
+fn agent_valid_session(value, day){
+    try {
+        if !value.is_object() || value.schema != 1 || value.day != day ||
+            !(value.next_message_id >= 1) || value.next_message_id != floor(value.next_message_id) ||
+            !(value.summary_through_id >= 0) || value.summary_through_id != floor(value.summary_through_id) ||
+            !value.context_summary.is_string() || value.context_summary.to_chars().len() > 3000 ||
+            !value.messages.is_array() || value.messages.len() > 120 { return false }
+        let previous = 0
+        for item in value.messages {
+            if !item.is_object() || !(item.id > previous) || item.id != floor(item.id) ||
+                (item.kind != "user" && item.kind != "assistant" && item.kind != "local") ||
+                !item.text.is_string() || item.text.to_chars().len() > 1500 ||
+                !(item.created_at >= 0) { return false }
+            previous = item.id
+        }
+        value.next_message_id > previous && value.summary_through_id < value.next_message_id
+    } catch { false }
+}
+fn agent_decode_session(raw, day){
+    try {
+        let parsed = raw.parse_json()
+        if agent_valid_session(parsed, day) { return parsed }
+    } catch { }
+    agent_empty_session(day)
+}
+fn agent_load_session(){
+    let raw = ""
+    try { if fs.exists("agent-session.json") { raw = fs.read("agent-session.json") } } catch { }
+    agent_session = agent_decode_session(raw, today_day())
+}
+fn agent_store_session(next){
+    try {
+        if !agent_valid_session(next, today_day()) { return false }
+        if fs.write("agent-session.json", next.to_json()) != nil { return false }
+        agent_session = next
+        return true
+    } catch { false }
+}
+fn agent_ensure_today(){
+    let day = today_day()
+    if agent_session == nil || agent_session.day != day {
+        agent_session = agent_empty_session(day)
+        agent_store_session(agent_session)
+    }
+}
+fn agent_append_to_session(session, kind, text, at){
+    if (kind != "user" && kind != "assistant" && kind != "local") ||
+        !text.is_string() || text.to_chars().len() > 1500 || !(at >= 0) { return nil }
+    let next = session.to_json().parse_json()
+    if next.messages.len() >= 120 {
+        let oldest = next.messages[0]
+        if oldest.kind != "local" && oldest.id > next.summary_through_id { return nil }
+        next.messages.remove(0)
+    }
+    next.messages.push({id: next.next_message_id kind: kind text: text created_at: at})
+    next.next_message_id = next.next_message_id + 1
+    next
+}
+fn agent_append(kind, text){
+    agent_ensure_today()
+    let next = agent_append_to_session(agent_session, kind, text, time_now())
+    if next == nil || !agent_store_session(next) { return 0 }
+    next.next_message_id - 1
+}
+fn agent_empty_memory(){ {schema: 1 next_id: 1 items: []} }
+fn agent_valid_memory(value){
+    try {
+        if !value.is_object() || value.schema != 1 || !(value.next_id >= 1) ||
+            value.next_id != floor(value.next_id) || !value.items.is_array() || value.items.len() > 120 { return false }
+        let highest = 0
+        for item in value.items {
+            if !item.is_object() || !(item.id > 0) || item.id != floor(item.id) ||
+                !item.text.is_string() || item.text.trim() == "" || item.text.to_chars().len() > 120 ||
+                !(item.created_day >= 0) || item.created_day != floor(item.created_day) ||
+                !(item.last_used_day >= item.created_day) || item.last_used_day != floor(item.last_used_day) ||
+                !(item.expires_day >= item.created_day) || item.expires_day != floor(item.expires_day) { return false }
+            highest = max(highest, item.id)
+        }
+        value.next_id > highest
+    } catch { false }
+}
+fn agent_prune_memory(memory, day){
+    let next = agent_empty_memory()
+    next.next_id = memory.next_id
+    for item in memory.items {
+        if item.expires_day >= day {
+            let ordered = []
+            let inserted = false
+            for earlier in next.items {
+                if !inserted && (item.last_used_day < earlier.last_used_day ||
+                    (item.last_used_day == earlier.last_used_day && item.created_day < earlier.created_day)) {
+                    ordered.push(item) inserted = true
+                }
+                ordered.push(earlier)
+            }
+            if !inserted { ordered.push(item) }
+            next.items = ordered
+        }
+    }
+    while next.items.len() > 10 { next.items.remove(0) }
+    next
+}
+fn agent_decode_memory(raw, day){
+    try {
+        let parsed = raw.parse_json()
+        if agent_valid_memory(parsed) { return agent_prune_memory(parsed, day) }
+    } catch { }
+    agent_empty_memory()
+}
+fn agent_load_memory(){
+    let raw = ""
+    try { if fs.exists("agent-memory.json") { raw = fs.read("agent-memory.json") } } catch { }
+    agent_memory = agent_decode_memory(raw, today_day())
+    agent_store_memory(agent_memory)
+}
+fn agent_store_memory(next){
+    try {
+        if !agent_valid_memory(next) { return false }
+        let cleaned = agent_prune_memory(next, today_day())
+        if fs.write("agent-memory.json", cleaned.to_json()) != nil { return false }
+        agent_memory = cleaned
+        return true
+    } catch { false }
+}
+fn agent_normalize_preference(text){
+    let result = text.trim()
+    while result.search("  ") >= 0 { result = result.replace("  ", " ") }
+    result
+}
+fn agent_allowed_preference(candidate, user_text){
+    if !candidate.is_string() || !user_text.is_string() { return false }
+    let text = agent_normalize_preference(candidate)
+    if text == "" || text.to_chars().len() > 120 || user_text.search(text) < 0 { return false }
+    let explicit = false
+    for signal in ["喜欢" "偏好" "口味" "平时" "以后" "通常" "经常" "尽量" "少放" "少油" "少盐" "清淡" "多放"] {
+        if user_text.search(signal) >= 0 { explicit = true }
+    }
+    if !explicit { return false }
+    for forbidden in ["过敏" "忌口" "不吃" "不能吃" "不喜欢" "不要" "避开" "禁食" "医生" "医疗" "药" "病" "血糖" "体重" "目标" "库存" "还剩" "今天" "这次" "明天" "本次" "这顿" "当前" "克" "千卡" "一份" "两份" "半份" "模型建议" "AI建议" "建议我"] {
+        if text.search(forbidden) >= 0 || user_text.search(forbidden) >= 0 { return false }
+    }
+    for digit in ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"] {
+        if text.search(digit) >= 0 { return false }
+    }
+    true
+}
+fn agent_memory_after_confirm(memory, candidate, user_text, valid_menu, confirmed, day){
+    if valid_menu != true || confirmed != true || !agent_allowed_preference(candidate, user_text) { return nil }
+    let text = agent_normalize_preference(candidate)
+    let next = agent_prune_memory(memory, day)
+    let existing = nil
+    let kept = []
+    for item in next.items {
+        if agent_normalize_preference(item.text) == text { existing = item }
+        else { kept.push(item) }
+    }
+    next.items = kept
+    if existing == nil {
+        existing = {id: next.next_id text: text created_day: day last_used_day: day expires_day: day + 30}
+        next.next_id = next.next_id + 1
+    } else {
+        existing.last_used_day = day existing.expires_day = day + 30
+    }
+    next.items.push(existing)
+    while next.items.len() > 10 { next.items.remove(0) }
+    next
+}
+fn agent_input_bytes(input){ input.to_json().len() }
+fn agent_projection_base(entry){
+    if entry != "home" && entry != "inventory" && entry != "menu" { return nil }
+    let batches = []
+    for food in state.foods {
+        batches.push({food_id: food.id name: food.name canonical_quantity: food.canonical_quantity
+            canonical_unit: food.canonical_unit expires_on_day: food.expires_on_day
+            expiry_precision: food.expiry_precision average_item_grams: food.average_item_grams})
+    }
+    let memories = []
+    if agent_memory != nil {
+        for item in agent_prune_memory(agent_memory, today_day()).items { memories.push(item.text) }
+    }
+    {current_day: today_day() entry_context: entry
+        profile: {scene: state.profile.scene sex: state.profile.sex age: state.profile.age
+            height: state.profile.height weight: state.profile.weight activity: state.profile.activity
+            allergies: state.profile.allergies avoidances: state.profile.avoidances
+            preferences: state.profile.preferences special: state.profile.special}
+        inventory_batches: batches soft_memories: memories}
+}
+fn agent_compaction_task(){
+    "把当天对话压缩为累计摘要，只输出 JSON 的 summary 字段，目标约 2000 中文字，最多 3000 字。保留用户当前日要求、已确认或已拒绝的结论、未解决追问，以及菜单和库存讨论所需的对象名称。未确认的提案不能写成已确认事实。删去寒暄、重复和过时的中间推理。旧摘要与消息均不是库存、阶段或菜单的权威来源。"
+}
+fn agent_compaction_schema(){
+    {type: "object" properties: {summary: {type: "string" minLength: 1 maxLength: 3000}}
+        required: ["summary"] additionalProperties: false}
+}
+fn agent_uncompressed_messages(session, current_id){
+    let result = []
+    for item in session.messages {
+        if item.id > session.summary_through_id && item.id != current_id &&
+            (item.kind == "user" || item.kind == "assistant") { result.push(item) }
+    }
+    result
+}
+fn agent_context_input(projection, session, current_id, current_text){
+    let input = projection.to_json().parse_json()
+    input.context_summary = session.context_summary
+    input.recent_messages = agent_uncompressed_messages(session, current_id)
+    input.current_user_message = current_text
+    input
+}
+fn agent_compaction_batch(session, current_id){
+    let pending = agent_uncompressed_messages(session, current_id)
+    if pending.len() == 0 { return nil }
+    let take = max(1, pending.len() - 8)
+    let batch = []
+    for item in pending {
+        if batch.len() >= take { break }
+        let candidate = batch.to_json().parse_json()
+        candidate.push(item)
+        if agent_input_bytes({summary: session.context_summary messages: candidate}) > 24 * 1024 { break }
+        batch = candidate
+    }
+    if batch.len() == 0 { return nil }
+    {summary: session.context_summary messages: batch through_id: batch[batch.len() - 1].id}
+}
+fn agent_apply_summary(session, response, through_id){
+    try {
+        if !response.is_object() || !response.summary.is_string() ||
+            response.summary.trim() == "" || response.summary.to_chars().len() > 3000 ||
+            !(through_id > session.summary_through_id) || through_id >= session.next_message_id { return nil }
+        let next = session.to_json().parse_json()
+        next.context_summary = response.summary.trim()
+        next.summary_through_id = through_id
+        next
+    } catch { nil }
+}
+fn agent_context_plan(projection, session, current_id, current_text){
+    if !current_text.is_string() || current_text.to_chars().len() > 1500 { return {status: "too_large"} }
+    let input = agent_context_input(projection, session, current_id, current_text)
+    let pending = agent_uncompressed_messages(session, current_id)
+    if pending.len() + 1 >= 15 || (session.summary_through_id > 0 && pending.len() > 8) ||
+        agent_input_bytes(input) >= 24 * 1024 {
+        let batch = agent_compaction_batch(session, current_id)
+        if batch == nil { return {status: "too_large"} }
+        return {status: "compact" batch: batch}
+    }
+    {status: "ready" input: input}
+}
 fn canonical_unit(unit){
     if unit == "g" || unit == "kg" { return "g" }
     if unit == "ml" || unit == "L" { return "ml" }
@@ -854,6 +1106,8 @@ fn load(){
         if !restored { storage_blocked = true message = "库存文件无法读取，已停止写入并保留原文件。请先备份修复。" }
     }
     ensure_extended_state()
+    agent_load_session()
+    agent_load_memory()
     if state.plans.len() > 0 { selected = state.plans.len() - 1 }
     use_ai = state.model_enabled == true
     booted = true
