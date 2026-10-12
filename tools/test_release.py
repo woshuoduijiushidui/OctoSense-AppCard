@@ -107,7 +107,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                        "fn revise_meal(", "fn swap_meal_food(", "fn migrate_menus(",
                        "fn meal_label(index)"):
             self.assertIn(marker, script)
-        self.assertIn('"库存够"', script)
+        self.assertIn('库存够', script)
         self.assertIn('"还差 "', script)
         self.assertIn('"早餐"', script)
         self.assertIn('"午餐"', script)
@@ -120,6 +120,18 @@ class ReleaseMetadataTests(unittest.TestCase):
         for name in capabilities:
             for forbidden in ("network", "http", "shop", "purchase", "payment"):
                 self.assertNotIn(forbidden, name)
+
+    def test_shortfall_list_is_derived_and_editable(self):
+        # Offline guard only: qa_release.py --menu-purchase drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn set_menu_ingredient(", "fn revise_shortfall(", "fn drop_shortfall(",
+                       "fn item_average_grams("):
+            self.assertIn(marker, script)
+        self.assertIn('"缺菜清单"', script)
+        self.assertIn("on_change: |text| revise_shortfall(line.name, text)", script)
+        # The gap is derived from the merged day menu minus available stock.
+        self.assertIn("fn available_grams(name){", script)
+        self.assertIn("fn menu_stock_lines(p){", script)
 
     def test_byte_protection_and_license_files(self):
         attributes = (APP / ".gitattributes").read_text(encoding="utf-8")

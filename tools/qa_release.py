@@ -29,7 +29,7 @@ parser.add_argument("--plan-ended", action="store_true",
 parser.add_argument("--session-switch", action="store_true",
                     help="keep one host open across the civil day and expect the overview to advance itself")
 parser.add_argument("--menu-purchase", action="store_true",
-                    help="Issue #23 daily-menu QA: one generation, three meals, nutrition, over-limit refusal")
+                    help="Issue #23/#24 daily menu: three meals, nutrition, over-limit refusal, derived 缺菜清单")
 args = parser.parse_args()
 profile = args.profile.resolve()
 if not profile.is_relative_to((APP / ".local-state").resolve()) or not profile.name.startswith("qa-"):
