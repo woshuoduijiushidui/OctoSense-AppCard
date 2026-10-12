@@ -89,7 +89,6 @@ let stage_swap_cycle = 7
 let cycle_view = 7
 let cycle_days = [1 3 7 15 21 30]
 let extra_kcal_text = "0"
-let show_shopping = false
 
 let ink = #x22211f
 let muted = #x77736d
@@ -803,21 +802,87 @@ fn clear_nutrition_draft(){
     draft_kcal = "" draft_protein = "" draft_fiber = "" draft_vitamin_c = ""
     show_nutrition_input = false
 }
-fn numeric_budget_ok(uses){
-    let program = current_stage()
-    if program == nil || program.kcal_goal <= 0 { return false }
-    let estimate = meal_nutrients(uses)
-    estimate.complete && estimate.kcal > 0 && estimate.kcal <= program_remaining_daily(program)
-}
+
 fn plan_numeric(p){
     if p != nil && p.to_json().search("\"numeric\"") >= 0 && p.numeric == false { return false }
     true
 }
-fn plan_ready(p){
-    if !validate(p) { return false }
-    if plan_numeric(p) { return numeric_budget_ok(p.uses) }
+// Issue #23: a menu is one day with three meals. `uses` stays the merged list so
+// stock, budget and eating keep one place to look. Acceptance checks only
+// 过敏忌口、营养参考 and 当天剩余额度; 库存 becomes a per-ingredient status.
+fn menu_meals(p){ if p != nil && p.to_json().search("\"meals\"") >= 0 { return p.meals } [] }
+fn meal_label(index){ if index == 0 { return "早餐" } if index == 1 { return "午餐" } "晚餐" }
+fn use_grams(item){
+    if item.grams > 0 { return item.grams }
+    for f in state.foods { if f.id == item.food_id { return batch_grams(f) } }
+    0
+}
+fn use_amount_text(item){
+    if item.grams > 0 { return use_grams(item) + " g" }
+    use_quantity(item) + use_unit_text(item)
+}
+fn menu_meal_grams(meal){
+    let total = 0
+    for item in meal.uses { total = total + use_grams(item) }
+    total
+}
+fn menu_title(p){
+    if p == nil { return "日菜单" }
+    if p.to_json().search("\"title\"") >= 0 && p.title != "" { return p.title }
+    "日菜单"
+}
+fn menu_issue(p){
+    if p == nil { return "这份菜单不存在。" }
+    if p.consumed { return "这份菜单已经记录过用餐。" }
+    if p.uses.len() == 0 { return "这份菜单没有食材。" }
+    if p.to_json().search("\"stage_id\":") >= 0 {
+        let stage = current_stage()
+        if stage == nil || p.stage_id != stage.id { return "当前阶段已变化，请重新生成菜单。" }
+    }
+    for item in p.uses {
+        if excluded_food(item.name) { return "「" + item.name + "」违反过敏或忌口，不能接受。" }
+    }
+    let estimate = meal_nutrients(p.uses)
+    if !estimate.complete { return "有食材缺少每 100 g 营养参考，无法核算，不能接受。" }
+    if estimate.kcal <= 0 { return "这份菜单没有可核算的热量，不能接受。" }
     let program = current_stage()
-    program != nil && program_remaining_daily(program) > 0
+    if program == nil || program_remaining_daily(program) <= 0 { return "当前阶段未启用、已结束，或今天额度已用完。" }
+    if estimate.kcal > program_remaining_daily(program) { return "整份菜单约 " + estimate.kcal + " kcal，超过今天剩余 " + program_remaining_daily(program) + " kcal。" }
+    ""
+}
+fn menu_ready(p){ menu_issue(p) == "" }
+fn menu_ingredients(p){
+    let lines = []
+    for item in p.uses {
+        let found = -1
+        for i in lines.len() { if lines[i].name == item.name { found = i } }
+        if found >= 0 { lines[found].grams = lines[found].grams + use_grams(item) }
+        else { lines.push({name: item.name grams: use_grams(item)}) }
+    }
+    lines
+}
+fn available_grams(name){
+    let total = 0
+    for food in state.foods { if food.name == name && plan_eligible(food) { total = total + batch_grams(food) } }
+    total
+}
+fn menu_stock_lines(p){
+    let out = []
+    for line in menu_ingredients(p) {
+        let have = available_grams(line.name)
+        let short = 0
+        if have < line.grams { short = ceil(line.grams - have) }
+        let status = "库存够"
+        if short > 0 { status = "还差 " + short + " 克" }
+        out.push({name: line.name grams: line.grams available: have short: short status: status enough: short == 0})
+    }
+    out
+}
+fn menu_executable(p){ menu_ready(p) && validate(p) }
+fn refresh_menu_uses(p){
+    let uses = []
+    for meal in p.meals { for item in meal.uses { uses.push(item) } }
+    p.uses = uses
 }
 fn now(){ time_now() + state.offset }
 fn available(){
@@ -974,7 +1039,11 @@ fn valid_state(value){
             for id in event.batch_ids { if !(id > 0) || id != floor(id) { return false } }
         }
         for p in value.plans {
-            if p.uses.len() > 60 || p.title.len() == 0 || !(p.revision >= 0) || !(p.profile_revision >= 1) { return false }
+            if p.uses.len() == 0 || p.uses.len() > 60 || p.title.len() == 0 || !(p.revision >= 0) || !(p.profile_revision >= 1) { return false }
+            if p.to_json().search("\"meals\"") < 0 || p.meals.len() < 1 || p.meals.len() > 3 { return false }
+            for meal in p.meals {
+                if meal.title.len() == 0 || meal.uses.len() == 0 || meal.uses.len() > 8 { return false }
+            }
             for u in p.uses {
                 if !(u.food_id > 0) || !(u.grams >= 0) || (plan_numeric(p) && !(u.grams > 0)) { return false }
             }
@@ -1042,8 +1111,31 @@ fn migrate_candidates(value){
     }
     value
 }
+fn migrate_menus(value){
+    // Issue #23 turns the one-meal 方案 into a 日菜单. Old plans keep their uses
+    // as a single 晚餐 meal so no saved inventory, history or identifiers are lost.
+    for p in value.plans {
+        if p.to_json().search("\"meals\"") < 0 {
+            let uses = []
+            if p.to_json().search("\"uses\"") >= 0 { uses = p.uses }
+            let title = ""
+            if p.to_json().search("\"title\"") >= 0 { title = p.title }
+            let minutes = 20
+            if p.to_json().search("\"minutes\"") >= 0 { minutes = p.minutes }
+            let steps = ""
+            if p.to_json().search("\"steps\"") >= 0 { steps = p.steps }
+            p.meals = [{slot: "晚餐" title: title uses: uses minutes: minutes steps: steps}]
+        }
+        if p.to_json().search("\"day\"") < 0 {
+            let created = time_now()
+            if p.to_json().search("\"created\"") >= 0 { created = p.created }
+            p.day = floor(created / 86400)
+        }
+    }
+    value
+}
 fn migrate_state(value){
-    if value.schema == 2 { return migrate_candidates(value) }
+    if value.schema == 2 { return migrate_menus(migrate_candidates(value)) }
     if value.schema != 1 { return value }
     // The embedded OctoSense desktop can use an older script runtime where
     // missing-field try/catch is unreliable. Inspect serialized keys first,
@@ -1125,7 +1217,7 @@ fn migrate_state(value){
     value.profile_revision = 1
     value.next_operation_id = 1
     value.inventory_events = []
-    migrate_candidates(value)
+    migrate_menus(migrate_candidates(value))
 }
 fn ensure_extended_state(){
     if state.profile.basics_done && state.programs.len() == 0 { make_programs() }
@@ -1243,7 +1335,7 @@ fn cancel_profile_edit(){
 }
 fn set_goal(text){ goal = text message = "已切换本餐偏好：" + text redraw() }
 fn generate_alternative(){
-    if ai_busy { message = "当前方案还在生成，请稍候。" redraw() return }
+    if ai_busy { message = "当前菜单还在生成，请稍候。" redraw() return }
     plan("用户请求备选")
     tab = 3
     redraw()
@@ -1321,7 +1413,7 @@ fn redraw(){
 }
 fn navigate(index){
     if pending { message = "请先确认或取消本次扣减。" redraw() return }
-    if plan_removal != nil { message = "请先确认或取消删除方案。" redraw() return }
+    if plan_removal != nil { message = "请先确认或取消删除菜单。" redraw() return }
     if voice_phase != 0 { message = "请先结束本次语音输入。" redraw() return }
     tab = index
     details = false
@@ -1430,6 +1522,70 @@ fn revise_plan_use(item, desired_grams){
             if revised != nil { item.quantity = revised.quantity item.unit = revised.unit item.grams = revised.grams }
         }
     }
+}
+fn plan_use_by_id(food_id, desired_grams){
+    for food in state.foods { if food.id == food_id { return plan_use(food, desired_grams) } }
+    nil
+}
+// Issue #23: editing a meal's portion or swapping one ingredient recomputes the
+// nutrition at once; a menu that now breaks 忌口、营养参考 or 额度 is refused with
+// the reason and the edit is rolled back.
+fn revise_meal(index, text){
+    if pending || plan_removal != nil { return }
+    let p = choose_plan()
+    if p == nil || index < 0 || index >= p.meals.len() { return }
+    let target = text.trim().to_f64()
+    let current = menu_meal_grams(p.meals[index])
+    if !(target > 0) || !(current > 0) { message = "份量请填写大于 0 的数字。" ui.notice.set_text(message) return }
+    let before = state.to_json()
+    let factor = target / current
+    let revised_uses = []
+    for item in p.meals[index].uses {
+        let rebuilt = plan_use_by_id(item.food_id, max(1, floor(use_grams(item) * factor)))
+        if rebuilt != nil { revised_uses.push(rebuilt) } else { revised_uses.push(item) }
+    }
+    p.meals[index].uses = revised_uses
+    refresh_menu_uses(p)
+    let issue = menu_issue(p)
+    if issue != "" {
+        state = before.parse_json()
+        message = "改份量被拦下：" + issue ui.notice.set_text(message) redraw() return
+    }
+    record("调整日菜单 #" + p.id + "：" + meal_label(index) + " 份量约 " + target + " g")
+    if commit(before) { message = meal_label(index) + " 份量已更新，营养已重算。" }
+    redraw()
+}
+fn swap_meal_food(index, use_index){
+    if pending || plan_removal != nil { return }
+    let p = choose_plan()
+    if p == nil || index < 0 || index >= p.meals.len() { return }
+    if use_index < 0 || use_index >= p.meals[index].uses.len() { return }
+    let current = p.meals[index].uses[use_index]
+    let options = []
+    for food in state.foods {
+        if plan_eligible(food) && food.name != current.name { options.push(food) }
+    }
+    if options.len() == 0 { message = "库存里没有别的可替换食材。" redraw() return }
+    let position = -1
+    for i in options.len() { if options[i].id == current.food_id { position = i } }
+    let next = options[(position + 1) % options.len()]
+    let revised = plan_use(next, max(1, floor(use_grams(current))))
+    if revised == nil { message = "这份食材暂时不能替换。" redraw() return }
+    let before = state.to_json()
+    p.meals[index].uses[use_index].food_id = revised.food_id
+    p.meals[index].uses[use_index].name = revised.name
+    p.meals[index].uses[use_index].quantity = revised.quantity
+    p.meals[index].uses[use_index].unit = revised.unit
+    p.meals[index].uses[use_index].grams = revised.grams
+    refresh_menu_uses(p)
+    let issue = menu_issue(p)
+    if issue != "" {
+        state = before.parse_json()
+        message = "换食材被拦下：" + issue ui.notice.set_text(message) redraw() return
+    }
+    record("调整日菜单 #" + p.id + "：" + meal_label(index) + " 换用 " + revised.name)
+    if commit(before) { message = meal_label(index) + " 已换成「" + revised.name + "」，营养已重算。" }
+    redraw()
 }
 fn remaining(food){
     if food.expires_on_day == 0 { return 0 }
@@ -1576,15 +1732,6 @@ fn urgent_names(){
     }
     if text == "" { return "暂无临期食材" }
     text
-}
-fn plan_percent(p){
-    if p == nil { return 0 }
-    let planned = 0
-    let stocked = 0
-    for food in state.foods { if plan_eligible(food) { stocked = stocked + batch_grams(food) } }
-    for u in p.uses { planned = planned + u.grams }
-    if stocked <= 0 { return 0 }
-    min(100, floor(planned * 100 / stocked))
 }
 fn two_digits(value){ if value < 10 { return "0" + value } "" + value }
 fn calendar_day(text){
@@ -1953,7 +2100,7 @@ fn confirm_intake(){
     if editing_id > 0 { operation.type = "edit" operation.batch_id = editing_id operation.batch = batches[0] }
     if !apply_inventory_operation(operation, nil) { draft_rejected(message) return }
     intake_draft = nil editing_id = 0 reset_manual_form()
-    message = "已确认入库。旧方案需要重新校验；需要新方案时，请回首页点击生成这一餐。"
+    message = "已确认入库。已有菜单会重新校验；需要新菜单时，请回首页点击生成今日菜单。"
     if state.auto_generate && !state.paused && state.profile.done { plan("库存变化") }
     redraw()
 }
@@ -1973,7 +2120,7 @@ fn edit_food(id){
                 draft_kcal = "" + f.nutrition.kcal draft_protein = "" + f.nutrition.protein
                 draft_fiber = "" + f.nutrition.fiber draft_vitamin_c = "" + f.nutrition.vitamin_c
             }
-            intake_draft = nil removal = nil message = "修改后先预览，再确认保存；现有方案会重新校验。"
+            intake_draft = nil removal = nil message = "修改后先预览，再确认保存；现有菜单会重新校验。"
         }
     }
     redraw()
@@ -1988,7 +2135,7 @@ fn confirm_remove(){
     let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "discard" batch_id: removal.id}
     if !apply_inventory_operation(operation, nil) { redraw() return }
     removal = nil editing_id = 0 reset_manual_form()
-    message = "已移除，旧方案已重新校验。"
+    message = "已移除，旧菜单会重新校验。"
     if state.auto_generate && !state.paused { plan("库存移除") }
     redraw()
 }
@@ -2001,9 +2148,9 @@ fn active_plan(){
     nil
 }
 fn validate(p){
-    if p == nil || p.consumed || p.revision != state.revision || p.profile_revision != state.profile_revision || p.uses.len() == 0 { return false }
-    // A menu belongs to the stage that produced it; crossing into the next
-    // stage's dates invalidates it. Legacy menus without a stage keep working.
+    // Issue #23: adding stock must not invalidate an accepted menu; stage scope
+    // still applies, because a menu belongs to the stage that produced it.
+    if p == nil || p.consumed || p.uses.len() == 0 { return false }
     if p.to_json().search("\"stage_id\":") >= 0 {
         let stage = current_stage()
         if stage == nil || p.stage_id != stage.id { return false }
@@ -2035,38 +2182,101 @@ fn validate(p){
     }
     true
 }
-fn recipe_rule_plan(reason){
-    let picked = []
-    let used = {}
-    for step in 3 {
-        let best = nil
-        for f in state.foods {
-            let seen = false
-            for k v in used { if k == "" + f.id { seen = true } }
-            if recipe_eligible(f) && !seen && (best == nil ||
-                (nutrient_reference(f.name, f.id).known && !nutrient_reference(best.name, best.id).known) ||
-                (nutrient_reference(f.name, f.id).known == nutrient_reference(best.name, best.id).known && expiry_order(f) < expiry_order(best))) { best = f }
-        }
-        if best != nil {
-            picked.push(recipe_use(best, min(best.canonical_quantity, 150)))
-            used["" + best.id] = true
+// Issue #23: one menu is one day with 早/中/晚 three meals. The local rule path
+// returns the same shape as the model, so display and acceptance never branch on
+// the source. Stock is not required to accept a menu; it becomes a per-item
+// status (库存够 / 还差 N 克) instead.
+fn distribute_meals(foods, recipe_only){
+    let meals = []
+    for slot in 3 { meals.push({slot: meal_label(slot) title: "" minutes: 20 uses: [] steps: ""}) }
+    if foods.len() == 0 { return meals }
+    // Every picked food is used. A food reused (fewer foods than meals) is split
+    // across the meals it lands in, so the merged 用量 never exceeds one batch.
+    let total = foods.len()
+    if total < 3 { total = 3 }
+    let counts = {}
+    for i in total {
+        let key = "" + foods[i % foods.len()].id
+        let current = 0
+        for k v in counts { if k == key { current = v } }
+        counts[key] = current + 1
+    }
+    for i in total {
+        let f = foods[i % foods.len()]
+        let key = "" + f.id
+        let divisor = 1
+        for k v in counts { if k == key { divisor = v } }
+        let use = nil
+        if recipe_only { use = recipe_use(f, max(1, floor(f.canonical_quantity / divisor))) }
+        else { use = plan_use(f, max(1, floor(batch_grams(f) / divisor))) }
+        if use != nil { meals[i % 3].uses.push(use) }
+    }
+    for slot in 3 {
+        let names = ""
+        for item in meals[slot].uses { if names != "" { names = names + "、" } names = names + item.name }
+        meals[slot].title = names + meal_label(slot)
+        meals[slot].steps = "1. 核对食材状态，按清单称重。\n2. 洗净切好，分别加热至熟透。\n3. 按清单份量出餐，按个人饮食需求调整调味。"
+    }
+    meals
+}
+// Issue #23: keep the menus for the most recent 20 distinct days, not the most
+// recent 20 plans; several menus for one day still count as one day.
+fn prune_menus(){
+    let days = []
+    for p in state.plans {
+        let day = floor(time_now() / 86400)
+        if p.to_json().search("\"day\"") >= 0 { day = p.day }
+        let seen = false
+        for d in days { if d == day { seen = true } }
+        if !seen {
+            let ordered = []
+            let inserted = false
+            for d in days {
+                if !inserted && day > d { ordered.push(day) inserted = true }
+                ordered.push(d)
+            }
+            if !inserted { ordered.push(day) }
+            days = ordered
         }
     }
-    if picked.len() == 0 { message = "没有可规划的库存：请核对过期、忌口及按件食材的数量；包装食材需补充每包装数量。" return }
-    let p = {id: state.next_id title: picked[0].name + "简餐" uses: picked accepted: false consumed: false numeric: false
-        revision: state.revision profile_revision: state.profile_revision created: time_now() reason: reason + " · 营养参考缺失，仅提供做法与库存用量" goal: goal
-        source: "本地规则 · 营养未核算" previous: "" minutes: 20
-        steps: "1. 核对每种食材的新鲜度，保质期未知的食材请先自行确认。\n2. 按清单取用并清洗；根据食材种类选择适当做法。\n3. 充分处理需要加热的食材，完成后核对实际用量。"}
+    let keep_days = []
+    for i in days.len() { if i < 20 { keep_days.push(days[i]) } }
+    let kept = []
+    for p in state.plans {
+        let day = floor(time_now() / 86400)
+        if p.to_json().search("\"day\"") >= 0 { day = p.day }
+        let keep = false
+        for d in keep_days { if d == day { keep = true } }
+        if keep { kept.push(p) }
+    }
+    if kept.len() > 20 {
+        let excess = kept.len() - 20
+        let trimmed = []
+        for i in kept.len() { if i >= excess { trimmed.push(kept[i]) } }
+        kept = trimmed
+    }
+    state.plans = kept
+}
+fn save_day_menu(meals, reason, source, numeric){
+    let uses = []
+    for meal in meals { for item in meal.uses { uses.push(item) } }
+    let stage = current_stage()
+    let stage_id_now = 0
+    if stage != nil { stage_id_now = stage.id }
+    let p = {id: state.next_id day: health_day() title: "今日三餐" meals: meals uses: uses accepted: false consumed: false
+        stage_id: stage_id_now revision: state.revision profile_revision: state.profile_revision created: time_now() reason: reason goal: goal
+        source: source previous: "" minutes: 45 steps: ""}
+    if !numeric { p.numeric = false }
     let previous = active_plan()
-    if previous != nil { p.previous = previous.title }
-    if !plan_ready(p) { message = "库存用量校验未通过，未创建候选。" return }
+    if previous != nil { p.previous = menu_title(previous) }
+    if !validate(p) { message = "菜单未通过库存用量校验，库存没有变化。" return nil }
     let before = state.to_json()
-    if state.plans.len() >= 20 { state.plans.remove(0) }
     state.plans.push(p) state.next_id = state.next_id + 1
-    record(reason + " → 本地规则 → 创建未核算营养的候选 #" + p.id)
-    if !commit(before) { return }
+    prune_menus()
+    record(reason + " → " + source + " → 生成日菜单 #" + p.id)
+    if !commit(before) { return nil }
     selected = state.plans.len() - 1
-    message = "已创建菜谱候选。营养参考缺失，热量和周期营养无法核算；接受前请核对食材状态。"
+    p
 }
 fn rule_plan(reason){
     if state.paused { message = "管家已暂停，请在设置里恢复。" return }
@@ -2076,9 +2286,9 @@ fn rule_plan(reason){
     }
     let picked = []
     let used = {}
-    // Earliest expiry remains the primary signal; known nutrients help fill
-    // the active cycle's protein and vitamin C gap without changing its cap.
-    for step in 3 {
+    // Earliest expiry stays primary; known nutrients help fill the cycle's
+    // protein, fiber and vitamin C gap without changing its daily cap.
+    for step in 6 {
         let best = nil
         let best_score = 100000
         for f in state.foods {
@@ -2093,47 +2303,51 @@ fn rule_plan(reason){
                 if best == nil || score < best_score { best = f best_score = score }
             }
         }
-        if best != nil {
-            picked.push(plan_use(best, min(batch_grams(best), 150)))
-            used["" + best.id] = true
+        if best != nil { picked.push(best) used["" + best.id] = true }
+    }
+    if picked.len() == 0 {
+        // Nutrition references are missing everywhere: still return the same
+        // three-meal shape, but it cannot be accepted until references exist.
+        let recipe_picks = []
+        let used_recipe = {}
+        for step in 6 {
+            let best = nil
+            for f in state.foods {
+                let seen = false
+                for k v in used_recipe { if k == "" + f.id { seen = true } }
+                if recipe_eligible(f) && !seen && (best == nil ||
+                    (nutrient_reference(f.name, f.id).known && !nutrient_reference(best.name, best.id).known) ||
+                    (nutrient_reference(f.name, f.id).known == nutrient_reference(best.name, best.id).known && expiry_order(f) < expiry_order(best))) { best = f }
+            }
+            if best != nil { recipe_picks.push(best) used_recipe["" + best.id] = true }
+        }
+        if recipe_picks.len() == 0 { message = "没有可规划的库存：请核对过期、忌口及按件食材的数量；包装食材需补充每包装数量。" return }
+        let recipe_meals = distribute_meals(recipe_picks, true)
+        let rp = save_day_menu(recipe_meals, reason + " · 营养参考缺失，仅提供三餐与做法", "本地规则 · 营养未核算", false)
+        if rp != nil { message = "已生成三餐菜单，但食材缺少营养参考，暂时不能接受。" }
+        return
+    }
+    let meals = distribute_meals(picked, false)
+    // Three meals share one day's remaining budget.
+    let merged = []
+    for meal in meals { for item in meal.uses { merged.push(item) } }
+    let estimate = meal_nutrients(merged)
+    if estimate.complete && estimate.kcal > program_remaining_daily(program) {
+        let factor = program_remaining_daily(program) / estimate.kcal
+        for slot in 3 {
+            let scaled = []
+            for item in meals[slot].uses {
+                let rebuilt = plan_use_by_id(item.food_id, max(1, floor(use_grams(item) * factor)))
+                if rebuilt != nil { scaled.push(rebuilt) } else { scaled.push(item) }
+            }
+            meals[slot].uses = scaled
         }
     }
-    if picked.len() == 0 { recipe_rule_plan(reason) return }
-    let estimate = meal_nutrients(picked)
-    if estimate.kcal > program_remaining_daily(program) {
-        let budget = program_remaining_daily(program)
-        for u in picked { revise_plan_use(u, u.grams * budget / estimate.kcal) }
-    }
-    if !numeric_budget_ok(picked) { message = "剩余热量额度不足以安排这组食材；未创建候选。" return }
-    let title = "清冰箱家常餐"
-    let names = ""
-    let tofu = false
-    let spinach = false
-    let egg = false
-    for u in picked {
-        if names != "" { names = names + "、" }
-        names = names + u.name
-        if u.name.search("豆腐") >= 0 { tofu = true }
-        if u.name.search("菠菜") >= 0 { spinach = true }
-        if u.name.search("蛋") >= 0 { egg = true }
-    }
-    if tofu { title = "香煎豆腐配时蔬" }
-    else { if spinach && egg { title = "菠菜鸡蛋饼" } else { title = picked[0].name + "家常餐" } }
-    let p = {id: state.next_id title: title uses: picked accepted: false consumed: false
-        stage_id: program.id revision: state.revision profile_revision: state.profile_revision created: time_now() reason: reason + " · " + goal goal: goal
-        source: "离线规则规划" previous: "" minutes: 20
-        steps: "1. 核对食材状态，按清单称重。\n2. 蔬菜洗净切段，豆腐切块；鸡蛋若使用则打散。\n3. 有豆腐先少油煎至两面金黄；其余食材分别炒熟。\n4. 合适食材搭配出餐。按个人饮食需求调整调味。"}
-    let previous = active_plan()
-    if previous != nil { p.previous = previous.title }
-    if !validate(p) || !numeric_budget_ok(p.uses) { message = "方案未通过库存或周期热量校验，库存没有变化。" return }
-    let before = state.to_json()
-    if state.plans.len() >= 20 { state.plans.remove(0) }
-    state.plans.push(p)
-    state.next_id = state.next_id + 1
-    record(reason + " → 读取库存 → 按到期排序 → 用量校验 → 创建候选 #" + p.id)
-    if !commit(before) { return }
-    selected = state.plans.len() - 1
-    message = "新候选已准备好，接受后才会替换今晚方案。"
+    let p = save_day_menu(meals, reason + " · " + goal, "本地规则 · 三餐日菜单", true)
+    if p == nil { return }
+    let issue = menu_issue(p)
+    message = "已生成今日早、中、晚三餐菜单。"
+    if issue != "" { message = "已生成今日菜单，但暂时不能接受：" + issue }
 }
 fn read_ai_config(){
     if ai_busy || voice_phase != 0 { message = "请等待当前在线操作结束，再重新读取配置。" redraw() return }
@@ -2248,7 +2462,7 @@ fn apply_voice_reply(envelope){
     } else {
         goal = ("" + r.data.text).trim()
         if goal == "" { message = "没有识别到清晰内容，请重新录音。" }
-        if goal != "" { message = "语音已填入，请确认文字后再生成方案。" }
+        if goal != "" { message = "语音已填入，请确认文字后再生成菜单。" }
     }
     redraw()
 }
@@ -2273,7 +2487,7 @@ fn toggle_auto_generation(){
     state.auto_generate = !state.auto_generate
     record("自动生成候选：" + state.auto_generate)
     if commit(before) {
-        message = "已关闭自动生成。库存变化和临期只更新或提醒；请手动生成新方案。"
+        message = "已关闭自动生成。库存变化和临期只更新或提醒；请手动生成新菜单。"
         if state.auto_generate { message = "已开启自动生成。之后库存变化、临期和用餐确认可创建候选，仍需你接受。" }
         if !state.auto_generate && ai_busy && automatic_reason(ai_snapshot.reason) {
             stop_ai()
@@ -2305,7 +2519,7 @@ fn ai_failure(text){
         message = "当前宿主未提供模型服务，已使用本地规则，可重新生成。"
     }
     let before = state.to_json()
-    record("AI 规划未完成；库存和正式方案保留，请重试或切换本地规则")
+    record("AI 规划未完成；库存和正式菜单保留，请重试或切换本地规则")
     commit(before)
     redraw()
 }
@@ -2325,52 +2539,65 @@ fn save_ai_result(output, reason, requested_goal){
             message = ai_error
             return true
         }
-        if output.title.len() == 0 || output.title.len() > 240 || output.uses.len() == 0 || output.uses.len() > 6 { return false }
-        if !(output.minutes >= 1) || output.minutes > 120 || output.minutes != floor(output.minutes) { return false }
-        if output.steps.len() < 2 || output.steps.len() > 8 { return false }
+        if output.meals.len() != 3 { return false }
+        let meals = []
         let uses = []
-        for u in output.uses {
-            let planned = nil
-            if ai_snapshot.recipe_only {
-                if !(u.quantity > 0) || u.quantity != floor(u.quantity) { return false }
-                for f in state.foods {
-                    if f.id == u.food_id && u.quantity <= f.canonical_quantity { planned = recipe_use(f, u.quantity) }
+        for slot in 3 {
+            let raw = output.meals[slot]
+            if raw.title.len() == 0 || raw.title.len() > 240 { return false }
+            if !(raw.minutes >= 1) || raw.minutes > 120 || raw.minutes != floor(raw.minutes) { return false }
+            if raw.steps.len() < 2 || raw.steps.len() > 8 { return false }
+            if raw.uses.len() == 0 || raw.uses.len() > 4 { return false }
+            let meal_uses = []
+            for u in raw.uses {
+                let planned = nil
+                if ai_snapshot.recipe_only {
+                    if !(u.quantity > 0) || u.quantity != floor(u.quantity) { return false }
+                    for f in state.foods {
+                        if f.id == u.food_id && u.quantity <= f.canonical_quantity { planned = recipe_use(f, u.quantity) }
+                    }
+                } else {
+                    if !(u.grams > 0) || u.grams != floor(u.grams) { return false }
+                    for f in state.foods {
+                        if f.id == u.food_id && u.grams <= batch_grams(f) { planned = plan_use(f, u.grams) }
+                    }
                 }
-            } else {
-                if !(u.grams > 0) || u.grams != floor(u.grams) { return false }
-                for f in state.foods {
-                    if f.id == u.food_id && u.grams <= batch_grams(f) { planned = plan_use(f, u.grams) }
-                }
+                if planned == nil { return false }
+                meal_uses.push(planned)
+                uses.push(planned)
             }
-            if planned == nil { return false }
-            uses.push(planned)
-        }
-        let steps = ""
-        for i in output.steps.len() {
-            let text = output.steps[i].trim()
-            if text.len() == 0 || text.len() > 600 { return false }
-            if steps != "" { steps = steps + "\n" }
-            steps = steps + (i + 1) + ". " + recipe_display_text(text)
+            let steps = ""
+            for i in raw.steps.len() {
+                let text = raw.steps[i].trim()
+                if text.len() == 0 || text.len() > 600 { return false }
+                if steps != "" { steps = steps + "\n" }
+                steps = steps + (i + 1) + ". " + recipe_display_text(text)
+            }
+            meals.push({slot: meal_label(slot) title: recipe_display_text(raw.title) minutes: raw.minutes uses: meal_uses steps: steps})
         }
         let stage = current_stage()
         let stage_id_now = 0
         if stage != nil { stage_id_now = stage.id }
-        let p = {id: state.next_id title: recipe_display_text(output.title) uses: uses accepted: false consumed: false
+        let p = {id: state.next_id day: health_day() title: "今日三餐" meals: meals uses: uses accepted: false consumed: false
             stage_id: stage_id_now revision: state.revision profile_revision: state.profile_revision created: time_now() reason: recipe_display_text(output.reason) goal: requested_goal
-            source: "在线 AI" previous: "" minutes: output.minutes steps: steps}
+            source: "在线 AI" previous: "" minutes: 45 steps: ""}
         if ai_snapshot.recipe_only { p.numeric = false p.source = "在线 AI · 营养未核算" }
         let previous = active_plan()
-        if previous != nil { p.previous = previous.title }
-        if !plan_ready(p) { return false }
+        if previous != nil { p.previous = menu_title(previous) }
+        if !validate(p) { return false }
         let before = state.to_json()
-        if state.plans.len() >= 20 { state.plans.remove(0) }
         state.plans.push(p) state.next_id = state.next_id + 1
-        record(reason + " → 在线 AI → JSON 与库存用量校验 → 创建候选 #" + p.id)
+        prune_menus()
+        record(reason + " → 在线 AI → JSON 与库存用量校验 → 生成日菜单 #" + p.id)
         if !commit(before) { return true }
         selected = state.plans.len() - 1
         ai_error = ""
-        message = "AI 候选已通过库存校验。接受后才会替换今晚方案。"
-        if ai_snapshot.recipe_only { message = "AI 菜谱已生成；热量与营养无法核算。接受前请核对食材状态。" }
+        message = "AI 已生成今日早、中、晚三餐菜单。"
+        if ai_snapshot.recipe_only { message = "AI 已生成三餐菜单，但营养参考不足，暂时不能接受。" }
+        else {
+            let issue = menu_issue(p)
+            if issue != "" { message = "AI 已生成今日菜单，但暂时不能接受：" + issue }
+        }
         true
     } catch { false }
 }
@@ -2416,25 +2643,38 @@ fn online_plan(reason){
     let previous = active_plan()
     if previous != nil { previous_title = previous.title }
     let schema = {type: "object" additionalProperties: false
-        required: ["feasible" "title" "minutes" "reason" "uses" "steps"]
+        required: ["feasible" "reason" "meals"]
         properties: {
             feasible: {type: "boolean"}
-            title: {type: "string" minLength: 1 maxLength: 80}
-            minutes: {type: "integer" minimum: 1 maximum: 120}
-            reason: {type: "string" minLength: 1 maxLength: 400}
-            uses: {type: "array" minItems: 0 maxItems: 6 items: {type: "object" additionalProperties: false
-                required: ["food_id" "grams"] properties: {food_id: {type: "integer" minimum: 1}
-                    grams: {type: "integer" minimum: 1 maximum: 100000}}}}
-            steps: {type: "array" minItems: 0 maxItems: 8 items: {type: "string" minLength: 1 maxLength: 200}}
+            reason: {type: "string" minLength: 1 maxLength: 800}
+            meals: {type: "array" minItems: 3 maxItems: 3 items: {type: "object" additionalProperties: false
+                required: ["title" "minutes" "uses" "steps"] properties: {
+                    title: {type: "string" minLength: 1 maxLength: 240}
+                    minutes: {type: "integer" minimum: 1 maximum: 120}
+                    uses: {type: "array" minItems: 1 maxItems: 4 items: {type: "object" additionalProperties: false
+                        required: ["food_id" "grams"] properties: {food_id: {type: "integer" minimum: 1}
+                            grams: {type: "integer" minimum: 1 maximum: 100000}}}}
+                    steps: {type: "array" minItems: 2 maxItems: 8 items: {type: "string" minLength: 1 maxLength: 200}}}}}
         }}
     if recipe_only {
-        schema.properties.uses = {type: "array" minItems: 0 maxItems: 6 items: {type: "object" additionalProperties: false
-            required: ["food_id" "quantity"] properties: {food_id: {type: "integer" minimum: 1}
-                quantity: {type: "integer" minimum: 1 maximum: 100000}}}}
+        schema = {type: "object" additionalProperties: false
+            required: ["feasible" "reason" "meals"]
+            properties: {
+                feasible: {type: "boolean"}
+                reason: {type: "string" minLength: 1 maxLength: 800}
+                meals: {type: "array" minItems: 3 maxItems: 3 items: {type: "object" additionalProperties: false
+                    required: ["title" "minutes" "uses" "steps"] properties: {
+                        title: {type: "string" minLength: 1 maxLength: 240}
+                        minutes: {type: "integer" minimum: 1 maximum: 120}
+                        uses: {type: "array" minItems: 1 maxItems: 4 items: {type: "object" additionalProperties: false
+                            required: ["food_id" "quantity"] properties: {food_id: {type: "integer" minimum: 1}
+                                quantity: {type: "integer" minimum: 1 maximum: 100000}}}}
+                        steps: {type: "array" minItems: 2 maxItems: 8 items: {type: "string" minLength: 1 maxLength: 200}}}}}
+            }}
     }
-    let task = "你是一名家常菜冰箱管家。用中文安排一顿可执行的餐食，结合用户当餐 goal、已选周期 program、剩余 daily_kcal 和周期营养缺口 nutrition_remaining，优先用掉临期批次。蛋白质、纤维和维生素 C 是周期累计目标，优先选择能填补缺口的食材；不要假装每餐必须凑齐整个周期目标。方向 profile.scene 不是执行方案。只使用 input.inventory 中食材，food_id 必须来自库存，用量不可超库存；营养参考未知的食材不得纳入候选。能量参考不得超过每日剩余额度，最终会由本地校验，不得编造营养数值。熟食充分加热；profile.allergies 和 profile.avoidances 必须遵守，profile.preferences 只作偏好。烹饪用油、饮料等须在实际用餐核对时另记。不能承诺过敏安全。可满足时 feasible=true，steps 2–8 项；不能满足时 feasible=false 并说明原因。title、reason、steps 必须写成用户能看懂的中文，不得包含 JSON 字段名、布尔值、内部编号或英文状态。只输出 JSON。"
+    let task = "你是一名家常菜冰箱管家。用中文安排一天的三餐：早、中、晚，恰好三条 meals，顺序固定。结合用户 goal、已选周期 program、剩余 daily_kcal 和周期营养缺口 nutrition_remaining，优先用掉临期批次；三餐共用当天剩余额度：三条 meals 的热量之和不得超过 daily_kcal_remaining。蛋白质、纤维和维生素 C 是周期累计目标，优先选择能填补缺口的食材；不要假装每餐必须凑齐整个周期目标。方向 profile.scene 不是执行方案。只使用 input.inventory 中食材，food_id 必须来自库存，单条 meals 的用量不可超库存，同一种食材在三餐里重复出现时按总量计算；营养参考未知的食材不得纳入候选。每条 meals 给出 1–4 种食材、2–8 项做法，按早、中、晚安排，不得编造营养数值。熟食充分加热；profile.allergies 和 profile.avoidances 必须遵守，profile.preferences 只作偏好。烹饪用油、饮料等须在实际用餐核对时另记。不能承诺过敏安全。可满足时 feasible=true；不能满足时 feasible=false 并用 reason 说明原因。title、reason、steps 必须写成用户能看懂的中文，不得包含 JSON 字段名、布尔值、内部编号或英文状态。只输出 JSON。"
     if recipe_only {
-        task = "你是一名家常菜冰箱管家。用中文根据 input.inventory 的真实食材安排一顿可执行的餐食。只能使用库存给出的 food_id，uses 中 quantity 使用对应 unit 的原生数量，不能超过库存，也不能添加不存在的食材。优先选 nutrition_known=true 的食材，再考虑已知到期时间较近的食材；保质期未知时在做法中提醒用户先检查新鲜度。营养参考不足以完成整餐核算，不能估算、声称或编造热量、蛋白质、纤维、维生素 C 或周期目标达成情况。遵守 profile.allergies 和 profile.avoidances，熟食充分加热。可满足时 feasible=true，steps 2–8 项；不能满足时 feasible=false 并说明原因。title、reason、steps 必须写成用户能看懂的中文，不得包含 JSON 字段名、布尔值、内部编号或英文状态。只输出 JSON。"
+        task = "你是一名家常菜冰箱管家。用中文根据 input.inventory 的真实食材安排一天的三餐：早、中、晚，恰好三条 meals，顺序固定。只能使用库存给出的 food_id，每条 meals 的 uses 中 quantity 使用对应 unit 的原生数量，不能超过库存，也不能添加不存在的食材；同一种食材在三餐里重复出现时按总量计算。优先选 nutrition_known=true 的食材，再考虑已知到期时间较近的食材；保质期未知时在做法中提醒用户先检查新鲜度。营养参考不足以完成整餐核算，不能估算、声称或编造热量、蛋白质、纤维、维生素 C 或周期目标达成情况。遵守 profile.allergies 和 profile.avoidances，熟食充分加热。每条 meals 给出 1–4 种食材、2–8 项做法，按早、中、晚安排。可满足时 feasible=true；不能满足时 feasible=false 并用 reason 说明原因。title、reason、steps 必须写成用户能看懂的中文，不得包含 JSON 字段名、布尔值、内部编号或英文状态。只输出 JSON。"
     }
     let requested_goal = goal
     let model_input = {goal: requested_goal profile: state.profile inventory: inventory
@@ -2477,7 +2717,7 @@ fn apply_model_reply(envelope){
         }
         if !r.is_ok { ai_failure("" + r.error) return }
         if !save_ai_result(r.data.output, ai_snapshot.reason, ai_snapshot.goal) {
-            ai_failure("AI 菜单未通过格式、到期或用量校验，未替换方案。请重试。") return
+            ai_failure("AI 菜单未通过格式、到期或用量校验，未替换菜单。请重试。") return
         }
         ai_calls = ai_calls + 1
         redraw()
@@ -2495,7 +2735,7 @@ fn plan(reason){
 }
 fn retry_ai(){ plan("用户请求重试") redraw() }
 fn generate(){
-    if ai_busy { message = "方案正在生成，请稍候或停止等待。" redraw() return }
+    if ai_busy { message = "菜单正在生成，请稍候或停止等待。" redraw() return }
     if voice_phase != 0 { message = "请先结束语音输入并确认识别文字。" redraw() return }
     goal = ui.request.text().trim()
     if goal == "" { goal = "优先吃掉快过期的食材" }
@@ -2503,17 +2743,18 @@ fn generate(){
 }
 fn accept(){
     let p = choose_plan()
-    if !plan_ready(p) { message = "库存或周期状态已变化，请重新生成方案。" redraw() return }
+    let issue = menu_issue(p)
+    if issue != "" { message = "这份菜单不能接受：" + issue redraw() return }
     let before = state.to_json()
     p.accepted = true
     state.active = p.id
-    record("接受方案 #" + p.id + "：" + p.title)
-    if commit(before) { message = "已设为今晚方案，做完后点击“我吃完了”。" }
+    record("接受日菜单 #" + p.id + "：" + menu_title(p))
+    if commit(before) { message = "已接受今日菜单。库存不足的食材补上后会自动变为可执行。" }
     redraw()
 }
 fn begin_consume(){
     let p = choose_plan()
-    if p == nil || !p.accepted || p.id != state.active || !validate(p) { message = "只能扣减当前已接受且有效的方案。" redraw() return }
+    if p == nil || !p.accepted || p.id != state.active || !validate(p) { message = "只能扣减当前已接受且有效的菜单。" redraw() return }
     pending = true message = "请核对实际食用数量。最后一次确认后才会扣减。" redraw()
 }
 fn revise_amount(index, text){
@@ -2570,7 +2811,7 @@ fn prepare_consume(){
 fn confirm_consume(){
     if !pending { return }
     let p = choose_plan()
-    if p == nil || p.id != state.active || !p.accepted || !validate(p) { pending = false message = "方案已失效，未扣减库存。" redraw() return }
+    if p == nil || p.id != state.active || !p.accepted || !validate(p) { pending = false message = "菜单已失效，未扣减库存。" redraw() return }
     let revised = p.to_json().parse_json()
     revised.uses = consumption
     if !validate(revised) { message = "用量需为正整数，不能超出库存；请修改或取消。" ui.notice.set_text(message) return }
@@ -2607,7 +2848,7 @@ fn confirm_consume(){
     }
     let calories = estimate.kcal + extra
     if program == nil || calories > program_remaining_daily(program) {
-        message = "本餐约 " + calories + " kcal，超过方案今日剩余 " + program_remaining_daily(program) + " kcal。未扣库存，请调整用量。"
+        message = "本餐约 " + calories + " kcal，超过菜单今日剩余 " + program_remaining_daily(program) + " kcal。未扣库存，请调整用量。"
         ui.notice.set_text(message) return
     }
     let before = state.to_json()
@@ -2645,38 +2886,38 @@ fn step_history(delta){
     details = false redraw()
 }
 fn request_delete_plan(){
-    if pending || ai_busy { message = "请先完成当前操作，再删除方案。" redraw() return }
+    if pending || ai_busy { message = "请先完成当前操作，再删除菜单。" redraw() return }
     let p = choose_plan()
     if p == nil { return }
-    plan_removal = {id: p.id title: p.title}
+    plan_removal = {id: p.id title: menu_title(p)}
     message = "请确认删除；不会修改食材库存或已记录的用餐数据。"
     redraw()
 }
 fn cancel_delete_plan(){
     plan_removal = nil
-    message = "已取消删除，方案和库存没有变化。"
+    message = "已取消删除，菜单和库存没有变化。"
     redraw()
 }
 fn confirm_delete_plan(){
     if plan_removal == nil { return }
-    if pending || ai_busy { message = "当前操作未结束，暂不能删除方案。" redraw() return }
+    if pending || ai_busy { message = "当前操作未结束，暂不能删除菜单。" redraw() return }
     let kept = []
     let found = false
     for p in state.plans {
         if p.id == plan_removal.id { found = true }
         else { kept.push(p) }
     }
-    if !found { plan_removal = nil message = "这个方案已不在列表中。" redraw() return }
+    if !found { plan_removal = nil message = "这份菜单已不在列表中。" redraw() return }
     let before = state.to_json()
     let was_active = state.active == plan_removal.id
     state.plans = kept
     if was_active { state.active = 0 }
-    record("删除方案 #" + plan_removal.id + "：" + plan_removal.title + "（不改变库存或用餐记录）")
+    record("删除日菜单 #" + plan_removal.id + "：" + plan_removal.title + "（不改变库存或用餐记录）")
     if !commit(before) { redraw() return }
     selected = min(selected, state.plans.len() - 1)
     plan_removal = nil details = false
-    message = "方案已删除，库存和用餐记录保持不变。"
-    if was_active { message = "已删除并取消今晚方案，库存和用餐记录保持不变。" }
+    message = "菜单已删除，库存和用餐记录保持不变。"
+    if was_active { message = "已删除并取消当前菜单，库存和用餐记录保持不变。" }
     redraw()
 }
 fn check_risk(){
@@ -2699,7 +2940,7 @@ fn check_risk(){
             if !covered { key = key + f.id + ":" names = names + f.name + " " }
         }
     }
-    let invalid_active = active != nil && !validate(active)
+    let invalid_active = active != nil && !menu_ready(active)
     if invalid_active { key = "invalid:" + active.id + ":" + state.revision names = "当前菜单已失效" }
     if key == "" || key == state.risk_key { return }
     if state.plans.len() > 0 {
@@ -2713,7 +2954,7 @@ fn check_risk(){
     record("主动检查：" + notice)
     if !commit(before) { redraw() return }
     if !state.auto_generate {
-        message = notice + "请按需回首页手动生成；不会自动创建方案。"
+        message = notice + "请按需回首页手动生成；不会自动创建菜单。"
         redraw() return
     }
     let next_before = state.next_id
@@ -2721,15 +2962,15 @@ fn check_risk(){
     if ai_busy { if tab != 2 { tab = 3 } redraw() return }
     if state.next_id == next_before { redraw() return }
     if tab != 2 { tab = 3 }
-    message = names + "快到期了，已准备新候选；原方案保留到你接受。"
-    if invalid_active { message = "正式菜单已失效，已准备新候选。请检查后接受。" }
+    message = names + "快到期了，已准备新菜单；原菜单保留到你接受。"
+    if invalid_active { message = "正式菜单已失效，已准备新菜单。请检查后接受。" }
     redraw()
 }
 fn snooze(){
     let before = state.to_json()
     state.snooze = time_now() + 1800
     record("用户选择稍后提醒：30 分钟")
-    if commit(before) { message = "30 分钟内不再主动提醒，当前方案保留。" }
+    if commit(before) { message = "30 分钟内不再主动提醒，当前菜单保留。" }
     redraw()
 }
 fn toggle_pause(){ let before = state.to_json() state.paused = !state.paused record("管家暂停状态：" + state.paused) if commit(before) { if state.paused && ai_busy { cancel_ai() } } redraw() }
@@ -2743,7 +2984,7 @@ fn fast_forward(){
     message = "演示已推进 12 小时，正在检查临期风险。"
     check_risk() redraw()
 }
-fn request_demo(){ reset_pending = true message = "演示会替换这个脚本版的库存和方案，请确认。" redraw() }
+fn request_demo(){ reset_pending = true message = "演示会替换这个脚本版的库存和菜单，请确认。" redraw() }
 fn cancel_demo(){ reset_pending = false message = "已取消替换。" redraw() }
 fn install_demo(){
     stop_ai()
@@ -2758,9 +2999,13 @@ fn install_demo(){
         {id: 2 name: "鸡蛋" grams: 100 expires: today + 518400}
         {id: 3 name: "豆腐" grams: 250 expires: today + 103680}
         {id: 4 name: "蘑菇" grams: 150 expires: today + 259200}]
-        plans: [{id: 5 title: "菠菜鸡蛋饼" uses: [{food_id: 1 name: "菠菜" grams: 100} {food_id: 2 name: "鸡蛋" grams: 100}]
+        plans: [{id: 5 title: "演示日菜单" day: floor(today / 86400) meals: [
+            {slot: "早餐" title: "菠菜鸡蛋饼" uses: [{food_id: 1 name: "菠菜" grams: 80} {food_id: 2 name: "鸡蛋" grams: 60}] minutes: 15 steps: "菠菜洗净切碎，与打散的鸡蛋拌匀，少油煎至熟透。"}
+            {slot: "午餐" title: "豆腐蘑菇汤" uses: [{food_id: 3 name: "豆腐" grams: 120} {food_id: 4 name: "蘑菇" grams: 60}] minutes: 20 steps: "豆腐切块，蘑菇切片，加水煮开后小火 10 分钟。"}
+            {slot: "晚餐" title: "清炒时蔬" uses: [{food_id: 1 name: "菠菜" grams: 60} {food_id: 4 name: "蘑菇" grams: 50}] minutes: 12 steps: "菠菜与蘑菇大火快炒，少盐出锅。"}]
+            uses: [{food_id: 1 name: "菠菜" grams: 140} {food_id: 2 name: "鸡蛋" grams: 60} {food_id: 3 name: "豆腐" grams: 120} {food_id: 4 name: "蘑菇" grams: 110}]
             accepted: true consumed: false revision: 1 created: today reason: "演示的原菜单" goal: "先安排晚饭"
-            source: "明确标记的演示菜单" previous: "" minutes: 15 steps: "菠菜洗净切碎，与打散的鸡蛋拌匀，少油煎至熟透。"}]
+            source: "明确标记的演示菜单" previous: "" minutes: 45 steps: ""}]
         active: 5 next_id: 6 revision: 1 offset: 0 demo: true paused: false reminders: true snooze: 0 risk_key: ""
         handled: 0 baseline: 3 cycle_start: today log: [] model_enabled: use_ai auto_generate: state.auto_generate
         profile: {done: true scene: "日常健康" sex: "女性" age: "28" height: "165" weight: "55" avoid: "" diet: "清淡家常" special: "" activity: "轻活动" basics_done: true plan_approved: true}
@@ -2774,7 +3019,7 @@ fn install_demo(){
         daily_target: 2000 consumed_kcal: 680 meal_count: 1 last_meal: "番茄豆腐汤" last_goal: "清淡一点"}
     state = migrate_state(state)
     if !valid_state(state) { state = before.parse_json() message = "演示数据无效，未替换库存。" redraw() return }
-    record("载入演示库存与原菜单；确认后才改写正式方案")
+    record("载入演示库存与原菜单；确认后才改写正式菜单")
     if !commit(before) { redraw() return }
     selected = 0 intake_draft = nil pending = false plan_removal = nil reset_pending = false tab = 0 editing_id = 0 removal = nil
     message = "演示已就绪：去设置推进 12 小时，观察豆腐提醒与菜单重排。"
@@ -3218,7 +3463,7 @@ View{width: Fill height: Fill flow: Overlay
                             }
                             View{width: Fill height: 8}
                             navigation := View{width: Fill height: Fit flow: Down spacing: 8 on_render: || {
-                                let labels = ["⌂  首页" "◈  总览" "▣  冰箱" "✦  方案" "◔  档案" "⚙  设置"]
+                                let labels = ["⌂  首页" "◈  总览" "▣  冰箱" "✦  菜单" "◔  档案" "⚙  设置"]
                                 for i in 6 {
                                     let bg = #x00000000
                                     let tc = muted
@@ -3248,14 +3493,14 @@ View{width: Fill height: Fill flow: Overlay
                             content := View{width: Fill height: Fill on_render: || { ScrollYView{width: Fill height: Fill flow: Down spacing: 16 padding: Inset{right: 5}
                                 if ai_busy {
                                     Tint{draw_bg.color: #f0ece4
-                                        Copy{text: "AI 正在根据长期画像与真实库存安排这一餐" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                        Copy{text: "AI 正在根据长期画像与真实库存安排今日菜单" draw_text.text_style: theme.font_bold{font_size: 16}}
                                         Hint{text: "库存、临期、当下口味和长期目标会一起参与判断。"}
                                         Soft{text: "停止等待" on_click: || cancel_ai()}
                                     }
                                 }
                                 if use_ai && ai_error != "" && !ai_busy {
                                     Tint{draw_bg.color: #f4ede4
-                                        Copy{text: "这次还没生成新方案" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                        Copy{text: "这次还没生成新菜单" draw_text.text_style: theme.font_bold{font_size: 16}}
                                         Hint{text: ai_error}
                                         if ai_phase == 1 { Soft{text: "重新生成" on_click: || retry_ai()} }
                                         if ai_phase == 3 || ai_phase == 4 { Soft{text: "查看 AI 设置" on_click: || navigate(5)} }
@@ -3292,7 +3537,7 @@ View{width: Fill height: Fill flow: Overlay
                                             else { Quiet{text: "低卡" on_click: || set_goal("今天想吃低卡一点")} }
                                             if goal == "今天只想做 15 分钟快手菜" { ChosenQuiet{text: "快手" on_click: || set_goal("今天只想做 15 分钟快手菜")} }
                                             else { Quiet{text: "快手" on_click: || set_goal("今天只想做 15 分钟快手菜")} }
-                                            Action{width: 210 text: "生成这一餐  →" enabled: !ai_busy && voice_phase == 0 && (!use_ai || ai_phase != 0) on_click: || generate()}
+                                            Action{width: 210 text: "生成今日菜单  →" enabled: !ai_busy && voice_phase == 0 && (!use_ai || ai_phase != 0) on_click: || generate()}
                                         }
                                     }
                                     let p = active_plan()
@@ -3311,9 +3556,9 @@ View{width: Fill height: Fill flow: Overlay
                                             }
                                             View{width: Fill height: Fit flow: Right spacing: 10
                                                 Tint{draw_bg.color: #f1ede7
-                                                    Hint{text: "今晚建议"}
+                                                    Hint{text: "今日菜单"}
                                                     if p == nil { Copy{text: "等待生成" draw_text.text_style: theme.font_bold{font_size: 17}} }
-                                                    if p != nil { Copy{text: p.title draw_text.text_style: theme.font_bold{font_size: 17}} }
+                                                    if p != nil { Copy{text: menu_title(p) draw_text.text_style: theme.font_bold{font_size: 17}} }
                                                 }
                                                 Tint{draw_bg.color: #f5f2ed
                                                     Hint{text: "今日预算剩余"}
@@ -3338,7 +3583,7 @@ View{width: Fill height: Fill flow: Overlay
                                             Hint{text: "Agent 会在库存、时间或你的反馈变化后继续重排，而不是每次从零回答。"}
                                         }
                                     }
-                                    if p != nil { Quiet{text: "查看当前方案与做法  ›" on_click: || { for i in state.plans.len() { if state.plans[i].id == state.active { selected = i } } tab = 3 details = false redraw() }} }
+                                    if p != nil { Quiet{text: "查看今日菜单与做法  ›" on_click: || { for i in state.plans.len() { if state.plans[i].id == state.active { selected = i } } tab = 3 details = false redraw() }} }
                                 }
                                 if tab == 1 {
                                     View{width: Fill height: Fit flow: Down spacing: 4
@@ -3597,113 +3842,104 @@ View{width: Fill height: Fill flow: Overlay
                                 if tab == 3 {
                                     View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
                                         View{width: Fill height: Fit flow: Down spacing: 4
-                                            Heading{text: "AI 生成食谱方案" draw_text.text_style.font_size: 30}
-                                            if state.auto_generate { Hint{text: "自动生成已开启：库存、临期或用餐变化可创建候选，仍需你确认接受。"} }
-                                            else { Hint{text: "手动生成：库存变化和临期只更新或提醒，点击生成或备选才创建新方案。"} }
+                                            Heading{text: "今日菜单 · 早 / 中 / 晚" draw_text.text_style.font_size: 30}
+                                            if state.auto_generate { Hint{text: "自动生成已开启：库存、临期或用餐变化可生成新菜单，仍需你确认接受。"} }
+                                            else { Hint{text: "手动生成：库存变化和临期只更新或提醒，点击生成才创建新菜单。"} }
                                         }
                                         Quiet{text: "+ 再给我一个备选" enabled: !ai_busy && plan_removal == nil on_click: || generate_alternative()}
                                     }
                                     let p = choose_plan()
                                     if plan_removal != nil {
                                         Frost{padding: 20 spacing: 12
-                                            Copy{text: "确认删除这个方案？" draw_text.text_style: theme.font_bold{font_size: 20}}
+                                            Copy{text: "确认删除这份菜单？" draw_text.text_style: theme.font_bold{font_size: 20}}
                                             Copy{text: plan_removal.title}
-                                            Hint{text: "只删除方案，不恢复或扣减库存，也不删除已记录的用餐数据。确认后无法在方案列表中撤销。"}
-                                            if state.active == plan_removal.id { Hint{text: "这是当前今晚方案，删除后也会取消今晚方案。"} }
+                                            Hint{text: "只删除菜单，不恢复或扣减库存，也不删除已记录的用餐数据。"}
+                                            if state.active == plan_removal.id { Hint{text: "这是当前菜单，删除后也会取消它。"} }
                                             View{width: Fill height: Fit flow: Right spacing: 10
-                                                Soft{text: "确认删除方案" on_click: || confirm_delete_plan()}
+                                                Soft{text: "确认删除菜单" on_click: || confirm_delete_plan()}
                                                 Soft{text: "取消删除" on_click: || cancel_delete_plan()}
                                             }
                                         }
                                     }
                                     if p == nil {
                                         Frost{padding: 26
-                                            Copy{text: "还没有候选方案" draw_text.text_style: theme.font_bold{font_size: 20}}
+                                            Copy{text: "还没有日菜单" draw_text.text_style: theme.font_bold{font_size: 20}}
                                             Hint{text: message}
                                             Action{text: "回首页" on_click: || navigate(0)}
                                         }
                                     }
                                     if p != nil && !pending && plan_removal == nil {
-                                        let status = "候选 · 等你确认"
-                                        if p.accepted { status = "已接受 · 今晚按此执行" }
-                                        if p.accepted && p.id != state.active { status = "历史方案" }
-                                        if p.consumed { status = "已完成 · 已记录到档案" }
-                                        if !p.consumed && !plan_ready(p) { status = "方案已失效 · 请重新生成" }
+                                        let issue = menu_issue(p)
+                                        let status = "候选 · 等你接受"
+                                        if p.accepted { status = "已接受 · 今日菜单" }
+                                        if p.accepted && p.id != state.active { status = "历史菜单" }
+                                        if p.consumed { status = "已执行" }
+                                        if !p.consumed && !p.accepted && issue != "" { status = "暂不可接受" }
                                         View{width: Fill height: Fit flow: Right spacing: 16
                                             Frost{width: Fill height: Fit padding: 22 spacing: 13 draw_bg.color: #ffffffc2
                                                 View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
                                                     StatusDot{}
                                                     Hint{text: status}
                                                 }
-                                                Copy{text: p.title draw_text.text_style: theme.font_bold{font_size: 28}}
-                                                Hint{text: "约 " + p.minutes + " 分钟 · " + p.source}
-                                                if !p.consumed && !validate(p) {
+                                                Copy{text: menu_title(p) draw_text.text_style: theme.font_bold{font_size: 28}}
+                                                Hint{text: "约 " + p.minutes + " 分钟 · " + p.source + " · 三餐合计约 " + meal_kcal(p) + " kcal"}
+                                                if !p.consumed && issue != "" {
                                                     Tint{draw_bg.color: #f4ede4
-                                                        Copy{text: "库存或有效期已变化" draw_text.text_style: theme.font_bold{font_size: 16}}
-                                                        Hint{text: "这个方案仅供查看，不能设为今晚方案或扣减库存。"}
-                                                        if state.auto_generate { Hint{text: "自动生成已开启：请查看新候选并确认，也可以回首页手动生成。"} }
-                                                        else { Hint{text: "回首页后点击生成这一餐；不会自动生成。"} }
-                                                        Soft{text: "回首页重新生成" on_click: || navigate(0)}
+                                                        Copy{text: "这份菜单暂时不能接受" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                        Hint{text: issue}
+                                                        Hint{text: "改份量、换食材，或等档案与额度变化后自动重算。"}
                                                     }
                                                 }
                                                 Divider{}
                                                 Copy{text: recipe_display_text(p.reason)}
-                                                View{width: Fill height: Fit flow: Right spacing: 10
-                                                    if plan_numeric(p) {
-                                                        Tint{draw_bg.color: #f1ede7
-                                                            Hint{text: "库存利用率"}
-                                                            Copy{text: "" + plan_percent(p) + "%" draw_text.text_style: theme.font_bold{font_size: 20}}
-                                                        }
-                                                        Tint{draw_bg.color: #f5f2ed
-                                                            Hint{text: "本餐估算"}
-                                                            Copy{text: "约 " + meal_kcal(p) + " kcal" draw_text.text_style: theme.font_bold{font_size: 20}}
-                                                        }
-                                                    } else {
-                                                        Tint{draw_bg.color: #f4ede4
-                                                            Copy{text: "热量与营养无法核算" draw_text.text_style: theme.font_bold{font_size: 17}}
-                                                            Hint{text: "按库存原单位规划；保质期未知的食材，请先确认新鲜度。"}
-                                                        }
-                                                    }
-                                                }
-                                                Copy{text: "将使用" draw_text.text_style: theme.font_bold{font_size: 16}}
-                                                View{width: Fill height: Fit flow: Right spacing: 8
-                                                    for u in p.uses { Quiet{text: food_emoji(u.name) + " " + u.name + "  " + use_quantity(u) + use_unit_text(u)} }
-                                                }
-                                                if details {
+                                                for i in p.meals.len() {
+                                                    let meal = p.meals[i]
+                                                    let estimate = meal_nutrients(meal.uses)
                                                     Tint{draw_bg.color: #f4f0e9
-                                                        Copy{text: "做法" draw_text.text_style: theme.font_bold{font_size: 16}}
-                                                        Copy{text: recipe_display_text(p.steps)}
-                                                        if plan_numeric(p) { Hint{text: "请复核食材状态；营养数值为粗略估算，不替代医疗或营养专业建议。"} }
-                                                        else { Hint{text: "保质期未知的食材请先确认新鲜度；本餐不提供热量或营养数值。"} }
+                                                        View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                            Copy{text: meal.slot + " · " + meal.title draw_text.text_style: theme.font_bold{font_size: 18}}
+                                                            Hint{text: "约 " + estimate.kcal + " kcal · 今日剩余 " + remaining_budget() + " kcal"}
+                                                        }
+                                                        for u in meal.uses {
+                                                            Quiet{text: food_emoji(u.name) + " " + u.name + "  " + use_amount_text(u)}
+                                                        }
+                                                        View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: .5}
+                                                            Hint{text: "本餐份量 g"}
+                                                            Field{width: 140 text: "" + menu_meal_grams(meal) on_change: |text| revise_meal(i, text)}
+                                                        }
+                                                        View{width: Fill height: Fit flow: Right spacing: 8
+                                                            for j in meal.uses.len() { Quiet{text: "换掉 " + meal.uses[j].name on_click: || swap_meal_food(i, j)} }
+                                                        }
+                                                        if details { Copy{text: recipe_display_text(meal.steps)} }
                                                     }
                                                 }
                                                 if p.previous != "" {
                                                     Tint{draw_bg.color: #f4ede4
                                                         Copy{text: "Agent 已因状态变化重新规划" draw_text.text_style: theme.font_bold{font_size: 16}}
-                                                        Hint{text: "原方案 · " + p.previous}
-                                                        Copy{text: "新方案 · " + p.title}
+                                                        Hint{text: "原菜单 · " + p.previous}
                                                     }
                                                 }
                                             }
                                             Frost{width: 310 height: Fit padding: 20 spacing: 12 draw_bg.color: #f5f1ebd9
-                                                Copy{text: "采购补齐" draw_text.text_style: theme.font_bold{font_size: 18}}
-                                                Hint{text: "当前比赛版只使用已确认库存生成方案，不虚构缺失食材。第三方买菜入口已预留。"}
+                                                Copy{text: "每样食材的状态" draw_text.text_style: theme.font_bold{font_size: 18}}
+                                                Hint{text: "库存是否足够不再是接受门槛；补上缺的食材后这份菜单自动变为可执行。"}
                                                 Divider{}
-                                                Quiet{text: "生成采购清单 · 扩展能力" on_click: || { show_shopping = true redraw() }}
-                                                if show_shopping {
-                                                    Tint{draw_bg.color: #ffffffb0
-                                                        Hint{text: "可接入：美团 / 盒马 / 京东到家"}
-                                                        Copy{text: "一键下单 · 敬请期待" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                for line in menu_stock_lines(p) {
+                                                    View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                        Copy{text: line.name}
+                                                        Hint{text: line.grams + " 克 · " + line.status}
                                                     }
                                                 }
+                                                if menu_executable(p) { Hint{text: "库存够，这份菜单现在可以执行。"} }
+                                                else { Hint{text: "还差一些食材；补上后不必重新生成。"} }
                                                 Soft{text: "查看 / 收起做法" on_click: || { details = !details redraw() }}
                                                 Quiet{text: "稍后提醒" on_click: || snooze()}
                                             }
                                         }
                                         View{width: Fill height: Fit flow: Right spacing: 8
                                             Quiet{text: "‹ 上一个" enabled: selected > 0 && plan_removal == nil on_click: || step_history(-1)}
-                                            Label{width: Fill text: "方案 " + (selected + 1) + " / " + state.plans.len() padding: 0 draw_text.color: muted}
-                                            Soft{text: "删除这个方案…" enabled: !pending && !ai_busy && plan_removal == nil on_click: || request_delete_plan()}
+                                            Label{width: Fill text: "菜单 " + (selected + 1) + " / " + state.plans.len() padding: 0 draw_text.color: muted}
+                                            Soft{text: "删除这份菜单…" enabled: !pending && !ai_busy && plan_removal == nil on_click: || request_delete_plan()}
                                             Quiet{text: "下一个 ›" enabled: selected + 1 < state.plans.len() && plan_removal == nil on_click: || step_history(1)}
                                         }
                                     }
@@ -3888,12 +4124,12 @@ View{width: Fill height: Fill flow: Overlay
                                             let trigger_text = "手动生成（默认）：库存变化、临期和吃完只更新数据或提醒。"
                                             let trigger_button = "开启自动生成（可选）"
                                             if state.auto_generate {
-                                                trigger_text = "自动生成：库存变化、临期和吃完会创建新候选；不自动替换今晚方案或扣减库存。"
+                                                trigger_text = "自动生成：库存变化、临期和吃完会创建新菜单；不自动替换当前菜单或扣减库存。"
                                                 trigger_button = "关闭自动生成"
                                             }
                                             Hint{text: trigger_text}
                                             Soft{text: trigger_button on_click: || toggle_auto_generation()}
-                                            Hint{text: "此选项会保存。启用后在线 AI 可能额外计费；切换开关本身不生成方案。"}
+                                            Hint{text: "此选项会保存。启用后在线 AI 可能额外计费；切换开关本身不生成菜单。"}
                                         }
                                         Frost{width: Fill height: Fit padding: 20 spacing: 12
                                             Copy{text: "比赛演示" draw_text.text_style: theme.font_bold{font_size: 18}}
@@ -3946,9 +4182,9 @@ View{width: Fill height: Fill flow: Overlay
                                         confirm_consumption := Action{text: "确认吃完 · 扣减库存并写入档案" on_click: || confirm_consume()}
                                         Soft{text: "取消" on_click: || cancel_consume()}
                                     }
-                                    if !pending && plan_removal == nil && !p.consumed && plan_ready(p) {
-                                        if !p.accepted { Action{text: "就吃这套 · 设为今晚方案  →" enabled: !ai_busy on_click: || accept()} }
-                                        if p.accepted && p.id == state.active { Action{text: "我吃完了 · 核对实际用量" enabled: !ai_busy on_click: || prepare_consume()} }
+                                    if !pending && plan_removal == nil && !p.consumed && menu_ready(p) {
+                                        if !p.accepted { Action{text: "接受今日菜单  →" enabled: !ai_busy on_click: || accept()} }
+                                        if p.accepted && p.id == state.active && validate(p) { Action{text: "我吃完了 · 核对实际用量" enabled: !ai_busy on_click: || prepare_consume()} }
                                     }
                                 }
                             }}

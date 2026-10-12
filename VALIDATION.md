@@ -1,5 +1,44 @@
 # Migration validation
 
+## Issue #23 daily menu, 2026-10-12 — code complete, native QA not run on this machine
+
+- `bundle/main.splash` now generates one day of 早／中／晚 three meals from a
+  single generation (one `model.complete` call) or the local rule path, which
+  returns the same shape. Each meal carries its own ingredients, grams, minutes,
+  steps and per-100 g nutrition totals.
+- Acceptance checks only allergies/avoidances, complete nutrition references and
+  the current cycle's remaining daily kcal. Stock is no longer an acceptance
+  gate: every ingredient shows 库存够 or 还差 N 克, and an accepted menu becomes
+  executable by itself once the missing batches are added, with no regeneration.
+- Editing a meal's portion or swapping one ingredient recomputes the nutrition at
+  once; an edit that would break a taboo, leave a reference missing or exceed the
+  day's remaining kcal is refused and rolled back with the reason.
+- Storage stays schema 2. `state.plans` now holds day menus with a `meals` array
+  and a merged `uses` list; `migrate_menus` upgrades old single-meal plans to one
+  晚餐 meal on read, so old files keep loading. Menus are capped at the recent 20.
+- Interface wording for the meal flow now says 菜单, not 方案.
+- New QA mode `--menu-purchase` (`tools/smoke.py`, wired in `tools/qa_release.py`)
+  drives onboarding with synthetic inventory, one generation, three meals,
+  per-meal nutrition and an over-budget portion edit that must be refused.
+- Offline guards added in `tools/test_release.py`: menu symbols present and no
+  network/shopping capability in the manifest.
+
+Resetting the base: the working tree's `bundle/main.splash` had reverted to an
+older pre-Issue-#2 revision while its tools expected the later cycle work. This
+change re-anchors the app, tools and docs on `origin/main` (the coherent, merged
+revision) plus the existing 菜单 glossary/ADR edits, then adds Issue #23 on top.
+
+Not verified here: the native official-shell QA (`tools/smoke.py --menu-purchase`,
+`tools/qa_release.py --menu-purchase`) was not run. This machine has no built
+official host and no pinned `.sources`, so the bundle was not exercised in the
+unmodified shell and no live model call was made. The manifest digest was
+recomputed with the App Hub's documented bundle algorithm (per-file portable
+path, NUL, little-endian length, bytes; blake3) because the pinned
+`hub stamp bundle` binary was unavailable:
+`eead2683f8594174c877dfcd381aa193e536f2c76d2451ab97bc576f2afdb2df`. The three
+screenshots under `bundle/screenshots/` still show the prior flow and were not
+recaptured; they need refreshing before any release checkpoint.
+
 ## Overview page: long-term plan and progress, 2026-10-10 — unreleased working tree
 
 Implementation for Issue #11. A dedicated Overview tab shows the long-term plan

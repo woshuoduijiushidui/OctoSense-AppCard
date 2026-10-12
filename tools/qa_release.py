@@ -28,6 +28,8 @@ parser.add_argument("--plan-ended", action="store_true",
                     help="boot a profile whose calendar has passed every stage")
 parser.add_argument("--session-switch", action="store_true",
                     help="keep one host open across the civil day and expect the overview to advance itself")
+parser.add_argument("--menu-purchase", action="store_true",
+                    help="Issue #23 daily-menu QA: one generation, three meals, nutrition, over-limit refusal")
 args = parser.parse_args()
 profile = args.profile.resolve()
 if not profile.is_relative_to((APP / ".local-state").resolve()) or not profile.name.startswith("qa-"):
@@ -75,6 +77,8 @@ elif args.session_switch:
              "第 2 阶段 · " + stages[1]["name"] + " · 当前" in ui.text()
              and "第 1 阶段 · " + stages[0]["name"] + " · 当前" not in ui.text())
     ui.shot("11-session-stage-after.png")
+elif args.menu_purchase:
+    smoke.exercise_menu_purchase(ui)
 else:
     ui.check("first-run onboarding rendered", "首次建档  1 / 4" in ui.text())
     ui.shot("01-first-run.png")
@@ -139,12 +143,12 @@ else:
              and stages[1]["started"] - stages[0]["started"] == 7 * 86400
              and stages[2]["started"] - stages[1]["started"] == 15 * 86400
              and stages[0]["kcal_goal"] > 0 and stages[0]["consumed_kcal"] == 0)
-    ui.fill("菠菜", name="food_name")
-    ui.fill("200", name="food_grams")
-    ui.fill("3", name="food_days")
-    ui.click("预览并确认入库  →")
+    smoke.enter(ui, "食材名称", "菠菜")
+    smoke.enter(ui, "数量", "200")
+    smoke.enter(ui, "还剩几天（可留空）", "3")
+    ui.click("预览并确认  →")
     ui.check("inventory preview has not committed", ui.state()["foods"] == [])
-    ui.click("确认入库")
+    ui.click("最终确认入库")
     ui.check("explicit inventory commit persists", len(ui.state()["foods"]) == 1)
     ui.check("manual default does not silently generate", ui.state()["auto_generate"] is False and ui.state()["plans"] == [])
     ui.shot("02-confirmed-inventory.png")
