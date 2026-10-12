@@ -161,6 +161,19 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn('source: "AI 估算"', adr)
         self.assertIn("**Status**: accepted", adr)
 
+    def test_design_decision_stock_only_menu_source(self):
+        # Issue #43 chose option 1: the menu is generated from the inventory
+        # that exists at generation time, and a mock product's nutrition
+        # reference never feeds a menu. Offline guard only; qa_stock_only.py
+        # drives the behaviour natively.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        self.assertIn("只使用 input.inventory 中食材，food_id 必须来自库存", script)
+        glossary = (APP / "GLOSSARY.md").read_text(encoding="utf-8")
+        self.assertNotIn("它可以包含库存中没有的食材", glossary)
+        adr = (APP / "docs/adr/0005-菜单只用库存生成.md").read_text(encoding="utf-8")
+        self.assertIn("**Status**: accepted", adr)
+        self.assertIn("模拟商品", adr)
+
     def test_manifest_has_no_network_shopping_capability(self):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         capabilities = set(manifest["capabilities"])

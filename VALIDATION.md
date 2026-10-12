@@ -1,5 +1,37 @@
 # Migration validation
 
+## Issue #43 裁决：菜单只在生成时使用库存（承认现状）— 2026-10-12
+
+产品负责人选择 #43 的**方案 1**：承认已合并实现的严格 stock-only（#21 把它钉为
+`docs/ai-nutrition-validation.json` 的 `native_stock_only_checks`），改规格而不是改
+代码。菜单的候选只是生成时的可用库存；模拟商品目录不参与菜单生成，其每 100 g 参考
+不参与菜单核算；缺菜清单承接的因此是已生成菜单在库存变化后的差额。方案 2／3
+（菜单引用库存外候选）写入 #22 的 Out of Scope。本仓库不改代码。
+
+- GitHub #22：Problem Statement、Solution 第 1 段、User Story 9／10、
+  Implementation Decisions（菜单与日菜单、缺菜清单）、Testing Decisions 闭环、
+  Out of Scope、Further Notes 按该裁决改写；改动说明与跟进评论留在 #22。
+- `GLOSSARY.md`：「菜单」词条不再写「它可以包含库存中没有的食材」，「缺菜清单」
+  词条写明它是已生成菜单在库存变化后的差额；Related 增加 ADR-0005。
+- `README.md`／`README.zh-CN.md`：日菜单生成叙述写明候选只来自生成时的库存，
+  边界说明以生成后的库存变化定义「库存不足」，并注明模拟商品参考不参与菜单核算。
+- `docs/adr/0005-菜单只用库存生成.md`：记录裁决、代价与备选。
+- `tools/test_release.py`：新增离线守卫 `test_design_decision_stock_only_menu_source`，
+  钉住 prompt 的 stock-only 候选规则与文档词条。
+
+### 已验证
+
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`：**35 passed**（新增 1 条守卫）。
+- `bundle/` 无改动，manifest 摘要与版本不变，因此没有重新盖章（盖章只在 bundle
+  变化后做）。
+
+### 未验证
+
+- 只改了文档、规格与离线守卫，没有重跑原生 QA；无行为改动，现有 stock-only
+  原生断言（`docs/ai-nutrition-validation.json`）仍是该行为的证据。
+- 「先有想吃的菜、再决定买什么」不在本版范围内（#22 Out of Scope），需要时另开决策。
+- 发版检查点、签名与提交仍是人工决定。
+
 ## Issue #41 A4 裁决：AI 估算写回批次（基于已合并 #21）— 2026-10-12
 
 产品负责人选择**决策 1**：以已合并 PR #21（`358d61c`）为准，A4 的边界改为
