@@ -49,9 +49,21 @@ def run(command, capture=False, **kwargs):
     return result.stdout.strip() if capture else None
 
 
-def hub_source():
+def hub_source(explicit=None):
     spec = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     revision = spec["workspace"]["dependencies"]["octosense-app-hub-app"]["rev"]
+    if explicit is not None:
+        source = Path(explicit).expanduser().resolve()
+        if not (source / "Cargo.toml").is_file() or not (source / "crates/app-hub/Cargo.toml").is_file():
+            raise RuntimeError("指定的 App Hub 源码目录不完整。")
+        head = run(["git", "-c", f"safe.directory={source.as_posix()}", "-C", source,
+                    "rev-parse", "HEAD"], capture=True)
+        if head != revision:
+            raise RuntimeError("指定的 App Hub 源码不是宿主固定的提交。")
+        if run(["git", "-c", f"safe.directory={source.as_posix()}", "-C", source,
+                "status", "--porcelain"], capture=True):
+            raise RuntimeError("指定的 App Hub 源码包含本地修改。")
+        return source, revision
     cargo_home = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo"))
     matches = list((cargo_home / "git/checkouts").glob(f"octosense-app-hub-*/*/Cargo.toml"))
     for manifest in matches:
@@ -63,8 +75,8 @@ def hub_source():
     raise RuntimeError("未找到官方固定版本的 App Hub。请先在官方仓库运行 cargo fetch --locked。")
 
 
-def prepare_tools(offline=False):
-    source, revision = hub_source()
+def prepare_tools(offline=False, source_override=None, check_only=False):
+    source, revision = hub_source(source_override)
     workspace = BUILD / "hub"
     marker = BUILD / "source.json"
     fingerprint = {"revision": revision,
@@ -90,10 +102,15 @@ def prepare_tools(offline=False):
     hub = target / "release" / ("hub" + EXE)
     host = target / "release" / ("card-host" + EXE)
     installer = target / "release" / ("pantry-local-install" + EXE)
-    if not ready or not all(p.is_file() for p in (hub, host, installer)):
+    needed = (hub,) if check_only else (hub, host, installer)
+    if not ready or not all(p.is_file() for p in needed):
         command = ["cargo", "build", "--release", "--manifest-path", workspace / "Cargo.toml",
-                   "--target-dir", target, "-p", "octosense-card-host", "-p", "octosense-app-hub",
-                   "--bin", "card-host", "--bin", "hub", "--bin", "pantry-local-install"]
+                   "--target-dir", target]
+        if check_only:
+            command.extend(("-p", "octosense-app-hub", "--bin", "hub"))
+        else:
+            command.extend(("-p", "octosense-card-host", "-p", "octosense-app-hub",
+                            "--bin", "card-host", "--bin", "hub", "--bin", "pantry-local-install"))
         if offline:
             command.append("--offline")
         run(command, cwd=ROOT)
@@ -144,6 +161,7 @@ def main():
     global ROOT, BUILD
     parser = argparse.ArgumentParser(description="冰箱管家：官方 OctoSense 本地测试")
     parser.add_argument("--host-workspace", type=Path, help="独立应用必须指定已准备的完整 OctoSense 工程")
+    parser.add_argument("--app-hub-source", type=Path, help="本地 App Hub 源码；必须与宿主固定提交一致且无修改")
     parser.add_argument("--hub", type=Path, help="已编译的当前官方 hub；仅检查或独立预览，不安装/签名")
     parser.add_argument("--card-host", type=Path, help="当前官方 card-host；搭配 --hub --standalone")
     parser.add_argument("--check", action="store_true")
@@ -158,7 +176,7 @@ def main():
     parser.add_argument("--no-ai", action="store_true", help="兼容旧测试命令；单独 card-host 不提供 AI")
     args = parser.parse_args()
     if args.hub:
-        if args.prepare_local_test or args.build or args.host_workspace:
+        if args.prepare_local_test or args.build or args.host_workspace or args.app_hub_source:
             parser.error("--hub 只用于现成官方工具，不可与本地签名、宿主构建或 --host-workspace 混用")
         if not args.check and not (args.standalone and args.card_host):
             parser.error("--hub 需要 --check，或 --standalone --card-host")
@@ -174,7 +192,8 @@ def main():
             parser.error("--card-host 必须搭配 --hub --standalone")
         ROOT = host_workspace(args.host_workspace)
         BUILD = ROOT / "target" / "pantry-official-tools"
-        hub, host, installer = prepare_tools(args.offline)
+        hub, host, installer = prepare_tools(args.offline, args.app_hub_source,
+                                             check_only=args.check and not args.build)
     # Verify committed bytes. Never silently fix a stale digest at launch.
     run([hub, "check", APP / "bundle", "--allow-unsigned"])
     if args.check or args.build:
