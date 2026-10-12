@@ -98,6 +98,28 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("计划进度 ", script)
         # The date-driven view must re-render when the civil day turns over.
         self.assertIn("today != shown_day", script)
+    def test_daily_menu_shape_exists(self):
+        # Offline guard only: qa_release.py --menu-purchase drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn menu_issue(", "fn menu_ready(", "fn menu_stock_lines(",
+                       "fn menu_executable(", "fn menu_ingredients(",
+                       "fn distribute_meals(", "fn save_day_menu(",
+                       "fn revise_meal(", "fn swap_meal_food(", "fn migrate_menus(",
+                       "fn meal_label(index)"):
+            self.assertIn(marker, script)
+        self.assertIn('"库存够"', script)
+        self.assertIn('"还差 "', script)
+        self.assertIn('"早餐"', script)
+        self.assertIn('"午餐"', script)
+        self.assertIn('"晚餐"', script)
+
+    def test_manifest_has_no_network_shopping_capability(self):
+        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        capabilities = set(manifest["capabilities"])
+        self.assertTrue({"storage", "model"} <= capabilities)
+        for name in capabilities:
+            for forbidden in ("network", "http", "shop", "purchase", "payment"):
+                self.assertNotIn(forbidden, name)
 
     def test_byte_protection_and_license_files(self):
         attributes = (APP / ".gitattributes").read_text(encoding="utf-8")

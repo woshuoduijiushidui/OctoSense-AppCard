@@ -173,10 +173,11 @@ def exercise(ui):
     ui.check("关闭自动生成只改设置", ui.state()["auto_generate"] is False and
              len(ui.state()["plans"]) == plan_count)
     ui.click("⌂  首页")
-    ui.click("生成这一餐  →")
-    ui.check("手动生成候选", len(ui.state()["plans"]) == 1 and not ui.state()["plans"][0]["accepted"])
-    ui.click("就吃这套 · 设为今晚方案  →")
-    ui.check("接受方案", ui.state()["active"] == ui.state()["plans"][0]["id"])
+    ui.click("生成今日菜单  →")
+    ui.check("手动生成日菜单", len(ui.state()["plans"]) == 1 and not ui.state()["plans"][0]["accepted"]
+             and len(ui.state()["plans"][0]["meals"]) == 3)
+    ui.click("接受今日菜单  →")
+    ui.check("接受菜单", ui.state()["active"] == ui.state()["plans"][0]["id"])
     ui.click("我吃完了 · 核对实际用量")
     before = ui.state_path().read_bytes()
     ui.click("取消")
@@ -188,8 +189,8 @@ def exercise(ui):
              ui.state()["foods"][0]["quantity"] < 220)
     ui.click("+ 再给我一个备选")
     preserved = ui.state()["foods"]
-    ui.click("删除这个方案…")
-    ui.click("确认删除方案")
+    ui.click("删除这份菜单…")
+    ui.click("确认删除菜单")
     ui.check("删除候选不回滚库存", len(ui.state()["plans"]) == 1 and ui.state()["foods"] == preserved)
     ui.click("⚙  设置")
     saved_profile = ui.state_path().read_bytes()
@@ -232,19 +233,57 @@ def exercise_recipe(ui):
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")
     ui.click("⌂  首页")
-    ui.click("生成这一餐  →")
+    ui.click("生成今日菜单  →")
     plan = ui.state()["plans"][0]
-    ui.check("无营养且无单个重量可生成菜谱", plan["numeric"] is False and
-             plan["uses"][0]["unit"] == "piece" and plan["uses"][0]["grams"] == 0 and
-             "热量与营养无法核算" in ui.text())
-    ui.click("就吃这套 · 设为今晚方案  →")
-    ui.click("我吃完了 · 核对实际用量")
-    ui.click("确认吃完 · 扣减库存并写入档案")
-    state = ui.state()
-    program = next(p for p in state["programs"] if p["id"] == state["program_active"])
-    ui.check("未核算菜谱扣库存且不写入虚构热量", state["foods"] == [] and
-             state["meal_count"] == 1 and program["consumed_kcal"] == 0 and
-             program["intake"][0]["nutrition_known"] is False)
+    ui.check("无营养参考仍生成三餐形状但不能接受", plan["numeric"] is False and
+             len(plan["meals"]) == 3 and plan["uses"][0]["unit"] == "piece" and
+             plan["uses"][0]["grams"] == 0 and "暂时不能接受" in ui.text()
+             and "接受今日菜单  →" not in ui.text())
+
+
+def exercise_menu_purchase(ui):
+    """Issue #23: one generation gives 早/中/晚 three meals, each with grams and a
+    nutrition reference, and an edit that breaks the day's remaining budget is
+    refused with a reason. Synthetic inventory only."""
+    ui.click("选择", index=1)
+    ui.click("女性")
+    for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
+        enter(ui, label, value)
+    ui.click("下一步 · 选择周期方案  →")
+    ui.click("确认计划 · 去录冰箱  →")
+    for name, grams in (("鸡蛋", "2000"),):
+        enter(ui, "食材名称", name)
+        enter(ui, "数量", grams)
+        enter(ui, "还剩几天（可留空）", "5")
+        ui.click("预览并确认  →")
+        ui.click("最终确认入库")
+    ui.click("完成建档 · 开始托管  →")
+    ui.click("⚙  设置")
+    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
+    ui.click("改用本地规则")
+    ui.click("⌂  首页")
+    ui.click("生成今日菜单  →")
+    plan = ui.state()["plans"][0]
+    ui.check("one generation gives three meals", len(plan["meals"]) == 3
+             and [m["slot"] for m in plan["meals"]] == ["早餐", "午餐", "晚餐"])
+    ui.check("every meal lists ingredients with grams",
+             all(m["uses"] and all(u["grams"] > 0 for u in m["uses"]) for m in plan["meals"]))
+    page = ui.text()
+    ui.check("each meal shows a nutrition reference and the day's remainder",
+             "早餐" in page and "午餐" in page and "晚餐" in page
+             and "kcal" in page and "今日剩余" in page)
+    ui.check("every ingredient shows 库存够 or 还差 N 克",
+             "库存够" in page or "还差" in page)
+    # 越界拦截: a portion far past today's remaining budget is refused, not saved.
+    ui.fill("9999", index=0)
+    ui.check("an over-budget portion is refused with a reason", "被拦下" in ui.text())
+    ui.click("接受今日菜单  →")
+    ui.check("a menu that needs no purchase is accepted",
+             ui.state()["plans"][0]["accepted"] and ui.state()["active"] == ui.state()["plans"][0]["id"])
+    (ui.profile / "expected-state.json").write_text(
+        json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
+    (ui.profile / "checks.json").write_text(
+        json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
 
 
 def main():
@@ -253,12 +292,16 @@ def main():
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--restart", action="store_true")
     parser.add_argument("--recipe", action="store_true")
+    parser.add_argument("--menu-purchase", action="store_true",
+                        help="Issue #23 daily-menu QA: generate, three meals, nutrition, over-limit refusal")
     args = parser.parse_args()
     ui = UI(args.port, args.profile.resolve())
     if args.restart:
         expected = json.loads((ui.profile / "expected-state.json").read_text(encoding="utf-8"))
-        ui.check("重启保留画像、库存、方案、历史和 IDs", ui.state() == expected)
+        ui.check("重启保留画像、库存、菜单、历史和 IDs", ui.state() == expected)
         ui.check("重启进入首页", "今天想吃点什么？" in ui.text())
+    elif args.menu_purchase:
+        exercise_menu_purchase(ui)
     elif args.recipe:
         exercise_recipe(ui)
     else:
