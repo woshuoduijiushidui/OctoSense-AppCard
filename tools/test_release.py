@@ -144,6 +144,23 @@ class ReleaseMetadataTests(unittest.TestCase):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["capabilities"], ["storage", "model", "camera", "files"])
 
+    def test_design_decision_a4_estimates_write_back_with_provenance(self):
+        # Issue #41 settled the D5-015 conflict in favour of PR #21: an AI
+        # estimate may write back to state.foods[].nutrition, but only as a
+        # reference that carries provenance. Offline guard only; the estimate
+        # behaviour itself is driven natively by qa_ai_nutrition.py.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("known: true kcal: n.kcal",
+                       'source: "AI 估算" basis: n.basis estimated_at: time_now() model: ai_model',
+                       "for f in state.foods { if f.id == n.key { f.nutrition = ref",
+                       "consumption[n.key - 1].nutrition = ref"):
+            self.assertIn(marker, script)
+        # The decision is recorded in the vocabulary and an accepted ADR.
+        self.assertIn("**营养参考**:", (APP / "GLOSSARY.md").read_text(encoding="utf-8"))
+        adr = (APP / "docs/adr/0004-AI-估算写回批次但仅作参考.md").read_text(encoding="utf-8")
+        self.assertIn('source: "AI 估算"', adr)
+        self.assertIn("**Status**: accepted", adr)
+
     def test_manifest_has_no_network_shopping_capability(self):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         capabilities = set(manifest["capabilities"])
