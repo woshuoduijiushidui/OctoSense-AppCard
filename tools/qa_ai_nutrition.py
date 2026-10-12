@@ -2,6 +2,7 @@
 import argparse, copy, json, time, subprocess
 from pathlib import Path
 from qa_day import APP,DayUI
+from qa_recipe import menu
 from qa_online import prepare,fixture,request,wait
 
 def seed(profile, seed_file, hub):
@@ -19,7 +20,7 @@ def seed(profile, seed_file, hub):
 
 def trial(slots=(0,1,2)):
     names=['牛肉','白菜','鱼'];grams=[50,60,70]
-    return dict(feasible=True,reason='合成测试：库存可用，营养未知',meals=[dict(slot=k,title=names[k]+'餐',uses=[dict(food_id=k+1,grams=grams[k])],steps=['按实际批次称重'+names[k]+'。','将'+names[k]+'充分做熟。']) for k in slots])
+    return dict(feasible=True,reason='合成测试：库存可用，营养未知',meals=[menu([dict(food_id=k+1,grams=grams[k])],slot=k) for k in slots])
 
 
 
@@ -37,21 +38,21 @@ def estimates(items=((1,'牛肉',200,20,0,0),(2,'白菜',20,1,2,20),(3,'鱼',100
 
 def exercise(ui):
     baseline=ui.state();history=copy.deepcopy(baseline['execution_records'])
-    normal=dict(feasible=True,title='牛肉白菜餐',minutes=15,reason='合成菜单',uses=[dict(food_id=1,grams=100),dict(food_id=2,grams=80)],steps=['称重牛肉和白菜。','将牛肉和白菜充分做熟。'])
+    normal=dict(feasible=True,minutes=15,reason='合成菜单',**menu([dict(food_id=1,grams=100),dict(food_id=2,grams=80)]))
     fixture(ui,normal);estimate_fixture(ui,error='network unavailable')
     ui.click('生成这一餐  →');time.sleep(1)
-    ui.check('estimate failure preserves stock and confirmed history',ui.state()['foods']==baseline['foods'] and ui.state()['execution_records']==history and not ui.state()['plans'])
+    ui.check('estimate failure preserves stock and history while allowing unknown menu',ui.state()['foods']==baseline['foods'] and ui.state()['execution_records']==history and len(ui.state()['plans'])==1)
     req=json.loads((ui.profile/'pantry-steward/qa-nutrition-request.json').read_text(encoding='utf-8'))
     ui.check('physical unknown stock sent for automatic estimates',[(x['key'],x['name']) for x in req['input']['items']]==[(1,'牛肉'),(2,'白菜'),(3,'鱼')])
     ui.check('zero expired avoided stock excluded from estimates',len(req['input']['items'])==3)
     ui.check('estimate requests omit body profile and demand per100 units','profile' not in req['input'] and '每100g' in req['task'] and req['schema']['properties']['estimates']['items']['properties']['vitamin_c']['maximum']==1000)
     for label,edit in [('duplicate keys',lambda v:v.__setitem__(1,copy.deepcopy(v[0]))),('invalid range',lambda v:v[0].__setitem__('protein',1000)),('wrong name',lambda v:v[0].__setitem__('name','鸡肉'))]:
-        vals=estimates();edit(vals);estimate_fixture(ui,vals)
-        ui.click('重新生成');time.sleep(1)
-        ui.check(label+' atomically rejected',ui.state()['foods']==baseline['foods'] and ui.state()['execution_records']==history and not ui.state()['plans'])
-    estimate_fixture(ui,estimates());ui.click('重新生成');time.sleep(1.6)
+        count=len(ui.state()['plans']);vals=estimates();edit(vals);estimate_fixture(ui,vals)
+        ui.click('⌂  首页');ui.click('生成这一餐  →');time.sleep(1)
+        ui.check(label+' nutrition rejected without losing usable stock',ui.state()['foods']==baseline['foods'] and ui.state()['execution_records']==history and len(ui.state()['plans'])==count+1)
+    estimate_fixture(ui,estimates());ui.click('⌂  首页');ui.click('生成这一餐  →');time.sleep(1.6)
     s=ui.state();inv=request(ui)['input']['inventory']
-    ui.check('estimated stock flows into ordinary online menu',len(s['plans'])==1 and all(x['nutrition']['known'] and x['nutrition']['source']=='AI 估算' for x in inv))
+    ui.check('estimated stock flows into ordinary online menu',len(s['plans'])==5 and all(x['nutrition']['known'] and x['nutrition']['source']=='AI 估算' for x in inv))
     ui.check('estimate metadata keeps quantity and history intact',[(f['id'],f['grams']) for f in s['foods']]==[(f['id'],f['grams']) for f in baseline['foods']] and s['execution_records']==history)
     ui.check('estimates persist source time and assumptions',all(f['nutrition']['estimated_at']>0 and f['nutrition']['basis'] for f in s['foods'][:3]))
     ui.check('menu labels AI approximate estimates','AI 估算' in ui.text() and '仅作参考' in ui.text())
@@ -66,7 +67,7 @@ def exercise(ui):
     ui.click('▣  冰箱');ui.fill('牛油果',name='food_name');ui.fill('120',name='food_grams');ui.fill('2',name='food_days');ui.click('预览并确认  →');ui.click('确认入库');time.sleep(1)
     s=ui.state();f=next(f for f in s['foods'] if f['id']==stock_id)
     ui.check('new stock estimates automatically after confirmation',f['grams']==120 and f['nutrition']['source']=='AI 估算' and f['nutrition']['kcal']==160)
-    ui.check('stock estimates do not generate unwanted menus',len(s['plans'])==1 and s['execution_records'][-1]==first)
+    ui.check('stock estimates do not generate unwanted menus',len(s['plans'])==5 and s['execution_records'][-1]==first)
     # Packaging correction affects future references, not a confirmed snapshot.
     ui.click('编辑',index=0);ui.fill('300',index=3);ui.click('预览并确认  →');ui.click('确认入库');time.sleep(.6)
     s=ui.state();ui.check('package correction takes precedence over AI',s['foods'][0]['nutrition']['kcal']==300 and s['foods'][0]['nutrition']['source']=='用户填写')
@@ -113,6 +114,6 @@ if __name__=='__main__':
     if a.prepare:
         seed(profile,a.seed,a.hub)
         p=profile/'qa-bundle/main.splash';s=p.read_text(encoding='utf-8').replace('let fixture = fs.read("qa-reply.json").parse_json()', '''let file = "qa-reply.json"
-    if payload.input.to_json().search("items") >= 0 { fs.write("qa-nutrition-request.json", payload.to_json()) file = "qa-nutrition-reply.json" }
+    if has_field(payload.input, "items") { fs.write("qa-nutrition-request.json", payload.to_json()) file = "qa-nutrition-reply.json" }
     let fixture = fs.read(file).parse_json()''');p.write_bytes(s.encode('utf-8'));subprocess.run([str(a.hub),'stamp',str(p.parent)],check=True)
     else:exercise(DayUI(a.port,profile))

@@ -24,7 +24,7 @@
     "support": "https://github.com/woshuoduijiushidui/OctoSense-AppCard/issues",
     "privacy_policy_url": "https://github.com/woshuoduijiushidui/OctoSense-AppCard/blob/main/PRIVACY.md"
   },
-  "release_notes": "0.6.2开发候选：在线AI自动估算未知食材每100g营养，标注来源与假设；包装参考优先，按实际克数确认后才计摄入和扣库存，历史估算快照不改写。仅用现有库存生成菜单，无补菜采购；未发布，真实提供方成功与其他平台未验证。",
+  "release_notes": "0.6.2开发候选：修复PR审查中的字段判断和旧数据迁移；默认启动只走受版本管理的入口。菜名做法按已校验食材编号生成，拒绝缺货食材；营养估算失败仍继续一次在线配餐，实际确认与历史快照保留。未发布，真实模型成功与其他平台未验证。",
   "age_rating": "all",
   "license": "Apache-2.0"
 }

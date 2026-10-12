@@ -1,5 +1,43 @@
 # Migration validation
 
+## PR #21 review corrections, 2026-10-12
+
+Addresses the five comments by power246 on commit 84f7c0a. This supersedes
+historical free-text recipe validation and nutrition-estimate failure behavior.
+
+- Default `run.cmd` only delegates to tracked `tools/launch.py`; it never runs an
+  ignored recovery script. The optional local compatibility helper is explicitly
+  user-invoked and documented separately. Added a no-argument Windows fixture
+  proving that a present ignored recovery script cannot replace the entry point.
+- Optional fields are checked by iterating actual top-level keys, normalizing ID
+  and string key encodings. Stock names and legacy goal text cannot impersonate
+  nutrition or execution fields. Missing execution-next IDs are computed from
+  existing records, without overwriting them.
+- AI title/action enums and step ingredient IDs are validated and rendered from
+  allocated stock; unallocated IDs and arbitrary ingredient prose are rejected.
+  Unconfirmed old free-text menus are cleared; consumed menus and independent
+  execution snapshots remain intact. No local recipe generator was added.
+- Failed, malformed or timed-out nutrition estimates keep unknown references and
+  continue once to online menu generation. Stale replies are rejected before
+  queueing, preventing an old response from clobbering the current one. Explicit
+  cancellation and changed state still invalidate results.
+- Preserved unused original background artwork at `design/sunlit-pantry-bg.png`
+  outside the bundle, keeping size headroom. The UI uses its existing shader;
+  historical screenshots and legal notices remain unchanged.
+
+Validation on isolated synthetic profiles with the official hidden native host:
+**29 review-specific checks**, including a real process restart, plus **21 stock
+checks** and **30 nutrition checks**. **19 automated tests passed**, including
+both launch failure/help guards and the default-launch regression. Native
+captures inspected; successful logs contain no script errors. Provider fixtures
+are private copied bundles; none is distributed or used with real inventory.
+
+Official source gate passed with the expected unsigned-source warning. Digest:
+`efb77a17781ac5a706e0e71f27a35b357d5210faf6571f6c4e1e1797a99526bb`; bundle **6,863,810 bytes** (limit 8,388,608).
+No keys generated, no real model calls, no user data edits, no release signing,
+publication or review-thread messages. Live provider quality/accuracy, other
+platforms and release installation remain unverified.
+
 ## Automatic online nutrition estimates and usable unknown stock, 2026-10-11
 
 This supersedes the historical requirement for users to fill nutrition labels.

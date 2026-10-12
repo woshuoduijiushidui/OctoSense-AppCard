@@ -297,6 +297,7 @@ fn health_week_percent(){
     if state.health.meals_per_day <= 0 { return 0 }
     min(100, floor(health_week_meals() * 100 / (state.health.meals_per_day * 7)))
 }
+fn has_field(value, name){ let wanted = name.to_json() for key item in value { if key.to_json() == wanted { return true } } false }
 fn ai_inventory(){
     let inventory = []
     for f in state.foods {
@@ -312,7 +313,7 @@ fn unknown_foods(uses){
     let text = ""
     for u in uses {
         let n = nutrient_reference(u.name, u.food_id)
-        if u.to_json().search("nutrition") >= 0 { n = u.nutrition }
+        if has_field(u, "nutrition") { n = u.nutrition }
         if !n.known { if text != "" { text = text + "、" } text = text + u.name }
     }
     text
@@ -320,12 +321,12 @@ fn unknown_foods(uses){
 fn incomplete_meals(program){
     let count = 0
     for e in program.intake {
-        if e.to_json().search("nutrition_complete") >= 0 && !e.nutrition_complete { count = count + 1 }
+        if has_field(e, "nutrition_complete") && !e.nutrition_complete { count = count + 1 }
     }
     count
 }
 fn recorded_energy(e){
-    if e.to_json().search("nutrition_complete") >= 0 && !e.nutrition_complete {
+    if has_field(e, "nutrition_complete") && !e.nutrition_complete {
         if e.kcal > 0 { return "营养未完整估算（已知部分 " + e.kcal + " kcal）" }
         return "营养未估算"
     }
@@ -337,7 +338,7 @@ fn menu_energy(p){
 }
 fn nutrient_reference(name, food_id){
     for f in state.foods {
-        if f.id == food_id && f.to_json().search("nutrition") >= 0 {
+        if f.id == food_id && has_field(f, "nutrition") {
             let n = f.nutrition.to_json().parse_json() n.known = true return n
         }
     }
@@ -355,7 +356,7 @@ fn meal_nutrients(uses){
     let complete = true
     for u in uses {
         let n = nutrient_reference(u.name, u.food_id)
-        if u.to_json().search("nutrition") >= 0 { n = u.nutrition }
+        if has_field(u, "nutrition") { n = u.nutrition }
         if !n.known { complete = false }
         if n.known {
             kcal = kcal + u.grams * n.kcal / 100
@@ -431,7 +432,7 @@ fn valid_state(value){
         }
         for f in value.foods {
             if f.name.len() == 0 || f.name.len() > 40 || !(f.id > 0) || !(f.grams >= 0) || f.grams > 100000 || !(f.expires > 0) { return false }
-            if f.to_json().search("nutrition") >= 0 {
+            if has_field(f, "nutrition") {
                 if !(f.nutrition.kcal > 0) || f.nutrition.kcal > 900 || f.nutrition.protein < 0 || f.nutrition.protein > 100 || f.nutrition.fiber < 0 || f.nutrition.fiber > 100 || f.nutrition.vitamin_c < 0 || f.nutrition.vitamin_c > 1000 { return false }
             }
         }
@@ -450,29 +451,32 @@ fn valid_state(value){
 }
 fn migrate_state(value){
     // Check keys before V1 migration for older embedded runtimes.
-    let json = value.to_json()
-    if json.search("profile") < 0 {
+    if !has_field(value, "profile") {
         value.profile = {done: false scene: "" sex: "" age: "" height: "" weight: "" avoid: "" diet: "" special: "" activity: "轻活动" basics_done: false plan_approved: false}
     }
-    let profile_json = value.profile.to_json()
-    if profile_json.search("basics_done") < 0 { value.profile.basics_done = value.profile.age != "" }
-    if profile_json.search("plan_approved") < 0 { value.profile.plan_approved = value.profile.done }
-    if profile_json.search("special") < 0 { value.profile.special = "" }
-    if profile_json.search("activity") < 0 { value.profile.activity = "轻活动" }
-    if json.search("programs") < 0 {
+    if !has_field(value.profile, "basics_done") { value.profile.basics_done = value.profile.age != "" }
+    if !has_field(value.profile, "plan_approved") { value.profile.plan_approved = value.profile.done }
+    if !has_field(value.profile, "special") { value.profile.special = "" }
+    if !has_field(value.profile, "activity") { value.profile.activity = "轻活动" }
+    if !has_field(value, "programs") {
         value.programs = [] value.program_active = 0 value.program_next = 1 value.program_history = []
         // A previously approved generic scene has no numeric cycle. Keep the inventory,
         // but ask the user to review and activate one concrete program before planning.
         value.profile.plan_approved = false
     }
-    if json.search("program_history") < 0 { value.program_history = [] }
-    if json.search("program_next") < 0 { value.program_next = 1 }
-    if json.search("program_active") < 0 { value.program_active = 0 }
-    if json.search("execution_records") < 0 { value.execution_records = [] value.execution_next = 1 }
-    for p in value.programs {
-        if p.to_json().search("kind") < 0 { p.kind = "health" p.meals = [] }
+    if !has_field(value, "program_history") { value.program_history = [] }
+    if !has_field(value, "program_next") { value.program_next = 1 }
+    if !has_field(value, "program_active") { value.program_active = 0 }
+    if !has_field(value, "execution_records") { value.execution_records = [] }
+    if !has_field(value, "execution_next") {
+        value.execution_next = 1
+        for e in value.execution_records { value.execution_next = max(value.execution_next, e.id + 1) }
     }
-    if json.search("health") < 0 {
+    for p in value.programs {
+        if !has_field(p, "kind") { p.kind = "health" }
+        if !has_field(p, "meals") { p.meals = [] }
+    }
+    if !has_field(value, "health") {
         value.health = {start: 0 day: 0 meals_per_day: 2 meals_week: 0 meals_today: 0
             protein_week: 0 fiber_week: 0 protein_goal: 0 fiber_goal: 0 calcium_goal: 0 iron_goal: 0}
         let age = 0
@@ -489,22 +493,28 @@ fn migrate_state(value){
         }
         if value.profile.done { value.health.start = time_now() value.health.day = floor(time_now() / 86400) }
     }
-    if json.search("daily_target") < 0 { value.daily_target = 2000 }
-    if json.search("consumed_kcal") < 0 { value.consumed_kcal = 0 }
-    if json.search("meal_count") < 0 { value.meal_count = 0 }
-    if json.search("last_meal") < 0 { value.last_meal = "" }
-    if json.search("last_goal") < 0 { value.last_goal = "" }
+    if !has_field(value, "daily_target") { value.daily_target = 2000 }
+    if !has_field(value, "consumed_kcal") { value.consumed_kcal = 0 }
+    if !has_field(value, "meal_count") { value.meal_count = 0 }
+    if !has_field(value, "last_meal") { value.last_meal = "" }
+    if !has_field(value, "last_goal") { value.last_goal = "" }
     value.model_enabled = true // Online-only generation also migrates former local-rule profiles.
-    if json.search("auto_generate") < 0 { value.auto_generate = false }
+    if !has_field(value, "auto_generate") { value.auto_generate = false }
     for p in value.programs {
         let reset = false
         for m in p.meals {
             let confirmed = false
             for e in value.execution_records { if e.program_id == p.id && e.slot == m.slot { confirmed = true } }
-            if !confirmed && m.to_json().search("missing") >= 0 && m.missing.len() > 0 { reset = true }
+            if !confirmed && (!has_field(m, "recipe_version") || m.recipe_version != 2) { reset = true }
         }
         if reset { p.meals = [] }
     }
+    let retained = []
+    for p in value.plans {
+        if p.consumed || (has_field(p, "recipe_version") && p.recipe_version == 2) { retained.push(p) }
+        else { if value.active == p.id { value.active = 0 } }
+    }
+    value.plans = retained
     value
 }
 fn ensure_extended_state(){
@@ -613,7 +623,7 @@ fn generate_alternative(){
 fn coming_soon(){ message = "第三方买菜平台的一键下单入口已预留，本次比赛版不执行外部购买。" redraw() }
 fn meal_kcal(p){
     if p == nil { return 0 }
-    if p.to_json().search("recorded_kcal") >= 0 { return p.recorded_kcal }
+    if has_field(p, "recorded_kcal") { return p.recorded_kcal }
     let estimate = meal_nutrients(p.uses)
     if !estimate.complete { return 0 }
     estimate.kcal
@@ -800,7 +810,7 @@ fn preview_food(){
         }
         preview.nutrition = {kcal: k protein: p fiber: f vitamin_c: v source: "用户填写"}
         for old in state.foods {
-            if old.id == editing_id && old.name == name && old.to_json().search("nutrition") >= 0 {
+            if old.id == editing_id && old.name == name && has_field(old, "nutrition") {
                 if old.nutrition.kcal == k && old.nutrition.protein == p && old.nutrition.fiber == f && old.nutrition.vitamin_c == v { preview.nutrition = old.nutrition.to_json().parse_json() }
             }
         }
@@ -831,7 +841,7 @@ fn edit_food(id){
         if f.id == id {
             editing_id = id draft_name = f.name draft_grams = "" + f.grams draft_days = "" + max(0, remaining(f))
             clear_nutrition_draft()
-            if f.to_json().search("nutrition") >= 0 {
+            if has_field(f, "nutrition") {
                 show_nutrition_input = true
                 draft_kcal = "" + f.nutrition.kcal draft_protein = "" + f.nutrition.protein
                 draft_fiber = "" + f.nutrition.fiber draft_vitamin_c = "" + f.nutrition.vitamin_c
@@ -945,8 +955,10 @@ fn ai_watchdog(){
         message = ai_error redraw()
     }
     if ai_busy && time_now() >= model_deadline {
+        let estimating = has_field(ai_snapshot, "nutrition_flow")
         stop_ai()
-        ai_failure("AI 生成超时，已停止等待。迟到的结果不会写入，可稍后重试。")
+        if estimating { apply_nutrition_reply({is_ok: false error: "营养估算超时"}) }
+        else { ai_failure("AI 生成超时，已停止等待。迟到的结果不会写入，可稍后重试。") }
     }
     if voice_phase == 1 && time_now() >= voice_deadline {
         voice_sequence = voice_sequence + 1 voice_phase = 0 voice_deadline = 0
@@ -1044,17 +1056,11 @@ fn save_ai_result(output, reason, requested_goal){
             if name == "" { return false }
             uses.push({food_id: u.food_id name: name grams: u.grams})
         }
-        let steps = ""
-        for i in output.steps.len() {
-            let text = output.steps[i].trim()
-            if text.len() == 0 || text.len() > 600 { return false }
-            if steps != "" { steps = steps + "\n" }
-            steps = steps + (i + 1) + ". " + text
-        }
-        let p = {id: state.next_id title: output.title uses: uses accepted: false consumed: false
+        let recipe = parse_recipe(output, uses)
+        if recipe == nil { return false }
+        let p = {id: state.next_id title: recipe.title uses: uses accepted: false consumed: false
             revision: state.revision created: time_now() reason: output.reason goal: requested_goal
-            source: "在线 AI" previous: "" minutes: output.minutes steps: steps}
-        if !stock_recipe_text_ok(p.title, p.steps, p.uses) { return false }
+            source: "在线 AI" previous: "" minutes: output.minutes steps: recipe.steps recipe_version: 2}
         let previous = active_plan()
         if previous != nil { p.previous = previous.title }
         if !validate(p) || !numeric_budget_ok(p.uses) { return false }
@@ -1078,7 +1084,10 @@ fn online_ready(){
 }
 fn request_online_model(payload, token){
     try { host_request_id = host.request("model.complete", payload, |r| model_received(token, r)) }
-    catch { ai_failure("在线 AI 请求未能发送，请检查宿主模型服务后重试。") }
+    catch {
+        if has_field(ai_snapshot, "nutrition_flow") { apply_nutrition_reply({is_ok: false error: "营养估算请求未能发送"}) }
+        else { ai_failure("在线 AI 请求未能发送，请检查宿主模型服务后重试。") }
+    }
 }
 fn online_plan(reason){
     if ai_busy { return }
@@ -1100,13 +1109,13 @@ fn online_plan_ready(reason){
         required: ["feasible" "title" "minutes" "reason" "uses" "steps"]
         properties: {
             feasible: {type: "boolean"}
-            title: {type: "string" minLength: 1 maxLength: 80}
+            title: {type: "string" enum: recipe_titles()}
             minutes: {type: "integer" minimum: 1 maximum: 120}
             reason: {type: "string" minLength: 1 maxLength: 400}
             uses: {type: "array" minItems: 0 maxItems: 6 items: {type: "object" additionalProperties: false
                 required: ["food_id" "grams"] properties: {food_id: {type: "integer" minimum: 1}
                     grams: {type: "integer" minimum: 1 maximum: 100000}}}}
-            steps: {type: "array" minItems: 0 maxItems: 8 items: {type: "string" minLength: 1 maxLength: 200}}
+            steps: recipe_steps_schema()
         }}
     let requested_goal = goal
     let revision = state.revision
@@ -1120,7 +1129,7 @@ fn online_plan_ready(reason){
     message = "正在根据目标与真实库存安排菜单，通常需要几秒到一分钟。"
     redraw()
     request_online_model({
-        task: "你是一名家常菜冰箱管家。用中文安排一顿可执行的餐食，结合goal、program及剩余额度和营养目标，优先临期批次；周期累计营养目标不需每餐凑齐。profile.scene不是执行方案。只使用 input.inventory 中食材，food_id 必须来自库存，用量不可超库存；nutrition.known=false仅表示营养参考未知，仍是可用库存，必须允许用于菜谱，不能据此说没有库存。营养中的AI估算为近似参考，不声称测量值或精确达标；未估算部分不当成零。熟食充分加热；profile.avoid 必须遵守。烹饪用油、饮料等须在实际用餐核对时另记。不能承诺过敏安全。可满足时 feasible=true，steps 2–8 项；不能满足时 feasible=false 并说明原因。只输出 JSON。"
+        task: "用中文按input.goal、program、daily_kcal_remaining和nutrition_remaining安排一餐，优先临期，遵守profile.avoid。只输出schema的JSON。uses仅限inventory现有food_id，克数不能超量。title只能选烹调方式枚举；steps为2–8项结构化操作，action选枚举，food_ids只引用本餐uses，minutes为参考时间。禁止自由文本食材、补菜或采购。nutrition.known=false仍是可用库存，不当作零；已有营养参考部分不得超每日余额，AI数据不声称精确达标。周期目标无需每餐凑齐。可满足时feasible=true；否则false并解释。用油饮料吃后另记，熟食需充分熟透，不保证过敏安全。"
         input: {goal: requested_goal profile: state.profile program: program daily_kcal_remaining: program_remaining_daily(program)
             nutrition_remaining: {protein_g: max(0, program.protein_goal - program.consumed_protein)
                 fiber_g: max(0, program.fiber_goal - program.consumed_fiber)
@@ -1130,12 +1139,13 @@ fn online_plan_ready(reason){
     }, token)
 }
 fn model_received(token, r){
+    if token != ai_sequence || !ai_busy { return }
     model_reply = {token: token reply: r}
 }
 fn apply_model_reply(envelope){
         if envelope.token != ai_sequence || !ai_busy { return }
         let r = envelope.reply
-        if ai_snapshot.to_json().search("nutrition_flow") >= 0 { apply_nutrition_reply(r) return }
+        if has_field(ai_snapshot, "nutrition_flow") { apply_nutrition_reply(r) return }
         ai_busy = false ai_sequence = ai_sequence + 1
         let current = active_program()
         if (!state.auto_generate && automatic_reason(ai_snapshot.reason)) || plan_removal != nil || current == nil || current.id != ai_snapshot.program_id || current.consumed_kcal != ai_snapshot.consumed_kcal || state.revision != ai_snapshot.revision || state.offset != ai_snapshot.offset || goal != ai_snapshot.goal || state.paused || !use_ai || pending {
@@ -1202,7 +1212,7 @@ fn init_actual_labels(){
 }
 fn actual_nutrition(u){
     let n = nutrient_reference(u.name, u.food_id)
-    if u.to_json().search("nutrition") >= 0 { n = u.nutrition }
+    if has_field(u, "nutrition") { n = u.nutrition }
     if u.food_id == 0 { return n }
     if u.label_kcal.trim() == "" && u.label_protein.trim() == "" && u.label_fiber.trim() == "" && u.label_vitamin.trim() == "" { return n }
     if u.label_kcal.trim() == "" || u.label_protein.trim() == "" || u.label_fiber.trim() == "" || u.label_vitamin.trim() == "" { return {known: false} }
@@ -1264,7 +1274,7 @@ fn finalize_actual(recommendation, plan_id){
         if draft.food_id == 0 { n = draft.nutrition }
         else {
             origin = "确认库存"
-            for food in state.foods { if food.id == draft.food_id && food.to_json().search("origin") >= 0 { origin = food.origin } }
+            for food in state.foods { if food.id == draft.food_id && has_field(food, "origin") { origin = food.origin } }
         }
         actual.push({food_id: draft.food_id name: draft.name grams: draft.grams nutrition: n origin: origin})
     }
@@ -1527,10 +1537,10 @@ fn trial_schema(){
             meals: {type: "array" minItems: 0 maxItems: 3 items: {type: "object" additionalProperties: false
                 required: ["slot" "title" "uses" "steps"] properties: {
                     slot: {type: "integer" minimum: 0 maximum: 2}
-                    title: {type: "string" minLength: 1 maxLength: 80}
+                    title: {type: "string" enum: recipe_titles()}
                     uses: {type: "array" minItems: 1 maxItems: 6 items: {type: "object" additionalProperties: false
                         required: ["food_id" "grams"] properties: {food_id: {type: "integer" minimum: 1} grams: {type: "integer" minimum: 1 maximum: 100000}}}}
-                    steps: {type: "array" minItems: 2 maxItems: 8 items: {type: "string" minLength: 1 maxLength: 200}}
+                    steps: recipe_steps_schema()
                 }}}
         }}
 }
@@ -1563,7 +1573,7 @@ fn generate_trial_ready(){
     ai_busy = true ai_error = "" model_deadline = time_now() + 95
     message = "在线 AI 正在安排未确认的三餐，已确认餐次和实际记录保留。" redraw()
     request_online_model({
-        task: "用中文为1天轻食体验安排三餐，只输出JSON。仅为input.slots各生成一餐，slot为0早餐1午餐2晚餐；已确认餐次不可重排。只使用input.inventory中现有食材，禁止补菜、缺菜、采购建议或库存外食材。uses只能使用inventory的food_id，三餐合计克数不得超过每批库存；title和steps中出现的食材必须来自该餐uses，不得把没有分配到该餐的食材写进菜名或做法。遵守profile忌口偏好与goal，优先利用临期批次。每餐至少一项uses，steps为2到8项做法。nutrition.known=false仅表示营养参考未知，仍是可用库存，允许用于三餐，不能据此说库存为空。AI估算为近似参考，不声称精确达标；未估算部分不当成零，已有参考部分合计热量不能超过daily_kcal_remaining。只在实际数量、忌口或到期等约束无法满足时feasible=false并解释。用油饮料实际吃后另记。体验不替代完整营养处方，不能承诺过敏安全。"
+        task: "用中文按input.slots为1天体验安排三餐，只输出schema的JSON。slot为0早餐1午餐2晚餐，仅生成未确认餐次。遵守profile和goal，优先临期。uses仅限inventory现有food_id，所有待生成餐合计克数不超批次库存。title只选烹调方式枚举，steps为2–8项结构化操作，action选枚举，food_ids只引用该餐uses，minutes为参考时间。禁止自由文本食材、补菜或采购。每餐至少一项uses；nutrition.known=false仍是可用库存，不当作零；已有参考部分合计不超daily_kcal_remaining。估算不声称精确达标；无法满足数量、忌口、到期约束时feasible=false并解释。用油饮料吃后另记；熟食充分加热，体验不是完整营养处方，不保证过敏安全。"
         input: {slots: slots confirmed: confirmed profile: state.profile program: p goal: goal
             daily_kcal_remaining: program_remaining_daily(p) inventory: inventory}
         schema: trial_schema() class: "fast"
@@ -1571,7 +1581,7 @@ fn generate_trial_ready(){
 }
 fn parse_trial_meal(item, slot, reserved){
     if item.slot != slot || item.title.len() == 0 || item.title.len() > 240 || item.uses.len() == 0 || item.uses.len() > 6 { return nil }
-    if item.to_json().search("missing") >= 0 { return nil }
+    if has_field(item, "missing") { return nil }
     if item.steps.len() < 2 || item.steps.len() > 8 { return nil }
     let uses = []
     for u in item.uses {
@@ -1586,28 +1596,44 @@ fn parse_trial_meal(item, slot, reserved){
         reserved["" + u.food_id] = total
         uses.push({food_id: u.food_id name: found.name grams: u.grams})
     }
-    let steps = ""
-    for i in item.steps.len() {
-        let text = item.steps[i].trim()
-        if text.len() == 0 || text.len() > 600 { return nil }
-        if steps != "" { steps = steps + "\n" }
-        steps = steps + (i + 1) + ". " + text
-    }
-    if !stock_recipe_text_ok(item.title, steps, uses) { return nil }
-    return {slot: slot title: item.title uses: uses missing: [] steps: steps source: "在线 AI"}
+    let recipe = parse_recipe(item, uses)
+    if recipe == nil { return nil }
+    return {slot: slot title: recipe.title uses: uses missing: [] steps: recipe.steps source: "在线 AI" recipe_version: 2}
 }
-fn stock_recipe_text_ok(title, steps, uses){
-    let names = ["豆腐" "菠菜" "鸡蛋" "蘑菇"]
-    for f in state.foods { names.push(f.name) }
-    let text = title + "\n" + steps
-    for name in names {
-        if name != "" && text.search(name) >= 0 {
-            let allocated = false
-            for u in uses { if u.name.search(name) >= 0 { allocated = true } }
-            if !allocated { return false }
+fn recipe_titles(){ ["清蒸" "水煮" "炖煮" "干煎" "烘烤" "拌制" "拼盘"] }
+fn recipe_actions(){ ["清洗" "切块" "切片" "充分蒸熟" "充分煮熟" "炖至熟透" "干煎至熟" "烤至熟透" "混合" "装盘"] }
+fn recipe_steps_schema(){
+    {type: "array" minItems: 0 maxItems: 8 items: {type: "object" additionalProperties: false
+        required: ["action" "food_ids" "minutes"] properties: {
+            action: {type: "string" enum: recipe_actions()}
+            food_ids: {type: "array" minItems: 1 maxItems: 6 uniqueItems: true items: {type: "integer" minimum: 1}}
+            minutes: {type: "integer" minimum: 0 maximum: 120}
+        }}}
+}
+fn parse_recipe(item, uses){
+    let title_ok = false
+    for style in recipe_titles() { if item.title == style { title_ok = true } }
+    if !title_ok || item.steps.len() < 2 || item.steps.len() > 8 { return nil }
+    let names = "" let steps = "" let seen = {}
+    for u in uses { if names != "" { names = names + "、" } names = names + u.name }
+    for i in item.steps.len() {
+        let step = item.steps[i] let action_ok = false
+        for action in recipe_actions() { if step.action == action { action_ok = true } }
+        if !action_ok || step.food_ids.len() < 1 || step.food_ids.len() > 6 || !(step.minutes >= 0) || step.minutes > 120 || step.minutes != floor(step.minutes) { return nil }
+        let food_names = "" let ids = {}
+        for id in step.food_ids {
+            let name = ""
+            for u in uses { if u.food_id == id { name = u.name } }
+            if name == "" || has_field(ids, "" + id) { return nil }
+            ids["" + id] = true seen["" + id] = true
+            if food_names != "" { food_names = food_names + "、" } food_names = food_names + name
         }
+        if steps != "" { steps = steps + "\n" }
+        steps = steps + (i + 1) + ". " + step.action + "：" + food_names
+        if step.minutes > 0 { steps = steps + "（参考 " + step.minutes + " 分钟，熟食需确认熟透）" }
     }
-    return true
+    for u in uses { if !has_field(seen, "" + u.food_id) { return nil } }
+    {title: item.title + " · " + names steps: steps}
 }
 fn trial_meal_calories(m){
     meal_nutrients(m.uses).kcal
@@ -1677,16 +1703,16 @@ fn add_actual_external(){
 fn nutrition_label(n){
     if !n.known { return "营养待估算" }
     let source = "已有营养参考"
-    if n.to_json().search("source") >= 0 { source = n.source }
+    if has_field(n, "source") { source = n.source }
     let text = source + " · 每100g约 " + n.kcal + " kcal，蛋白质 " + n.protein + "g，纤维 " + n.fiber + "g，维C " + n.vitamin_c + "mg"
-    if n.to_json().search("basis") >= 0 { text = text + " · " + n.basis }
+    if has_field(n, "basis") { text = text + " · " + n.basis }
     text
 }
 fn ai_estimate_label(uses){
     for u in uses {
         let n = nutrient_reference(u.name, u.food_id)
-        if u.to_json().search("nutrition") >= 0 { n = u.nutrition }
-        if n.to_json().search("source") >= 0 && n.source == "AI 估算" { return "（含 AI 估算，仅作参考）" }
+        if has_field(u, "nutrition") { n = u.nutrition }
+        if has_field(n, "source") && n.source == "AI 估算" { return "（含 AI 估算，仅作参考）" }
     }
     ""
 }
@@ -1720,7 +1746,7 @@ fn estimate_nutrition(items, flow){
     ai_busy = true ai_error = "" model_deadline = time_now() + 95
     message = "在线 AI 正在自动估算营养；库存数量和实际记录保持不变。" redraw()
     let numeric = {type: "number" minimum: 0 maximum: 100}
-    request_online_model({task: "根据食物名称估算每100g营养，只输出JSON。input.items每项必须对应一个结果，key与name保持原样。热量kcal、蛋白质protein和纤维fiber单位g、vitamin_c单位mg。单一食材默认可食部分生重，熟食按常见熟重；名称不足以判断时known=false，四项数值填0，basis说明无法估算的原因。known=true时basis简短说明生熟、品种或常见做法假设。只提供通用近似估算，不冒充包装实测、数据库查询或医疗建议，不保证精确。不使用用户身体资料，不生成菜单、采购或库存变更。"
+    request_online_model({task: "根据食物名称估算每100g营养，只输出JSON。input.items每项必须对应一个结果，key与name保持原样。热量kcal单位kcal，蛋白质protein和纤维fiber单位g、vitamin_c单位mg。单一食材默认可食部分生重，熟食按常见熟重；名称不足以判断时known=false，四项数值填0，basis说明无法估算的原因。known=true时basis简短说明生熟、品种或常见做法假设。只提供通用近似估算，不冒充包装实测、数据库查询或医疗建议，不保证精确。不使用用户身体资料，不生成菜单、采购或库存变更。"
         input: {items: items} class: "fast"
         schema: {type: "object" additionalProperties: false required: ["estimates"] properties: {
             estimates: {type: "array" minItems: 1 maxItems: 60 items: {type: "object" additionalProperties: false
@@ -1785,6 +1811,8 @@ fn validate_nutrition_estimates(output, items){
 }
 fn nutrition_failure(text, flow){
     ai_error = text message = text
+    if flow == "menu" { online_plan_ready(retry_reason) return }
+    if flow == "trial" { generate_trial_ready() return }
     if flow == "actual" { message = text + " 可重试估算，或按营养未知确认实际克数。" }
     redraw()
 }

@@ -83,6 +83,25 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("Launch failed.", result.stdout)
 
+    @unittest.skipUnless(os.name == "nt", "Windows batch launcher")
+    def test_default_entrypoint_ignores_untracked_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "run.cmd").write_bytes((launch.APP / "run.cmd").read_bytes())
+            (root / ".local-state").mkdir()
+            (root / ".local-state/recovery-launch.cmd").write_bytes(b"@echo PRIVATE_OVERRIDE\r\n@exit /b 0\r\n")
+            # Intercept Python only inside this isolated fixture, so the default
+            # branch can be tested without launching a host or preparing keys.
+            (root / "python.cmd").write_bytes(b"@echo OFFICIAL_LAUNCH %*\r\n@exit /b 0\r\n")
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ.get("PATH", ""))
+            result = subprocess.run(f'cmd.exe /d /s /c ""{root / "run.cmd"}""',
+                                    input="", capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", cwd=root, env=env, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("OFFICIAL_LAUNCH", result.stdout)
+            self.assertIn("tools\\launch.py", result.stdout)
+            self.assertNotIn("PRIVATE_OVERRIDE", result.stdout)
+
     def test_key_generation_requires_explicit_consent(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(launch, "key_dir", return_value=Path(directory) / "keys"), patch.object(launch, "run") as call:
@@ -108,7 +127,7 @@ class LaunchTests(unittest.TestCase):
     def test_generation_defaults_and_automatic_guards(self):
         source = (launch.APP / "bundle/main.splash").read_text(encoding="utf-8")
         self.assertIn("model_enabled: true auto_generate: false", source)
-        self.assertIn('if json.search("auto_generate") < 0 { value.auto_generate = false }', source)
+        self.assertIn('if !has_field(value, "auto_generate") { value.auto_generate = false }', source)
         self.assertIn('if !state.auto_generate && automatic_reason(reason) { return }', source)
         for reason in ("库存变化", "库存移除", "用餐后再规划"):
             call = next(line for line in source.splitlines() if f'plan("{reason}")' in line)

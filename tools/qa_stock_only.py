@@ -5,6 +5,7 @@ import json
 import time
 from pathlib import Path
 from qa_day import APP, DayUI
+from qa_recipe import menu
 from qa_online import fixture, request, prepare, wait
 
 
@@ -25,7 +26,7 @@ def seed(profile, seed_file, hub):
 
 
 def output(slots=(0,1,2),grams=30):
-    return dict(feasible=True,reason='合成测试响应',meals=[dict(slot=slot,title='豆腐餐',uses=[dict(food_id=1,grams=grams)],steps=['按推荐数量称重豆腐。','将豆腐充分做熟。']) for slot in slots])
+    return dict(feasible=True,reason='合成测试响应',meals=[menu([dict(food_id=1,grams=grams)],slot=slot) for slot in slots])
 
 
 def exercise(ui):
