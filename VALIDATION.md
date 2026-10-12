@@ -1,6 +1,6 @@
 # Migration validation
 
-## Overview page: long-term plan and progress, 2026-10-10 — unreleased 0.6.2 working tree
+## Overview page: long-term plan and progress, 2026-10-10 — unreleased working tree
 
 Implementation for Issue #11. A dedicated Overview tab shows the long-term plan
 and its progress.
@@ -23,22 +23,29 @@ passed every stage, the Overview says the plan has ended and offers "选择下�
 truth for progress; the persisted `meals_per_day` field keeps its historical
 default and is no longer read for progress, so an old value cannot change the
 formula, and the unused `choose_meals_per_day` setter whose text promised a
-configurable meal count was deleted.
+configurable meal count was deleted. `ai_watchdog` also re-renders the app when
+the civil day turns over (`shown_day` compared with `health_day()`), so an
+Overview left open across midnight shows the new stage and targets without a
+click or restart.
 - Storage schema stays 1; no new stored field.
 - `tools/qa_release.py` now exercises the Overview against a real host and adds
-  `--stage-switch` and `--plan-ended` modes with generated fixtures whose clock
-  offset has passed the first stage or the whole plan; `tools/test_release.py`
-  guards the new symbols. Bilingual READMEs and `CYCLE-PLANS.md` describe the
-  page and the progress rule.
+  `--stage-switch`, `--plan-ended` and `--session-switch` modes with generated
+  fixtures whose clock offset has passed the first stage, the whole plan, or the
+  civil midnight; `tools/test_release.py` guards the new symbols. Bilingual
+  READMEs and `CYCLE-PLANS.md` describe the page and the progress rule.
 
-### Native run, 2026-10-10 — unreleased 0.6.2 working tree
+### Native run, 2026-10-10 — historical 0.6.2 bundle
 
-- Restamped the editable bundle with the pinned official App Hub
+These results were captured on the 0.6.2 bundle (capabilities storage+model)
+before the Issue #2 capabilities landed. They are history and do **not**
+describe the current commit.
+
+- Restamped that editable bundle with the pinned official App Hub
   `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
-  `bundle_blake3 = e0a1700c75cc2d8e9a4d587c9953e14b3e79c7235f6184d3bf5e14e9c4fc98b9`.
+  `bundle_blake3 = 34666994381141739f4918c1ab8bbed31627a6c5fe16b13a377fa21b197107b7`.
   `hub check bundle --allow-unsigned` then **PASSED** with only the expected
   unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
-  hosts). The manifest version stayed 0.6.2.
+  hosts).
 - Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
   with task-owned `--app-data` under `.local-state/qa-issue11`:
   `tools/qa_release.py --port 18571 --profile .local-state/qa-issue11` —
@@ -75,14 +82,35 @@ configurable meal count was deleted.
   into one plan progress (1/66), which is what the implementation does and what
   the acceptance criterion calls 汇总.
 
+### Current bundle verification, 2026-10-11 — pending a capabilities host
+
+- The current bundle is 0.8.0 and declares `storage, model, camera, files`.
+  Restamped with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 0fe1939edb8186990d8e4b9ffb12bc426c626f6fdfcdb3c18d51ce497e52cbdb`.
+- The pinned host cannot run it: `hub check` and `card-host` refuse with
+  `unknown capability "files"`; stripping `files`/`camera` then gets
+  `app pantry-steward needs a host implementing app_policy.device_consent@1`.
+  The Issue #11 native results above therefore belong to the 0.6.2 bundle and
+  were not re-run on this commit.
+- `tools/qa_release.py --session-switch` was added for the day turn-over fix. It
+  keeps one host open across the civil midnight and expects the Overview to
+  advance itself with no click and no restart. It is ready but could not be
+  executed here for the host-capability reason above; it needs a host that
+  implements the Issue #2 `camera`/`files` capabilities.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'` — **23 passed**
+  (offline guards on the current tree).
+
 ### Still unverified
 
 - The full `tools/smoke.py` regression was not run: on the standalone
   `card-host` the AI-provider status check (`宿主服务可用`) fails because that host
   intentionally has no model service. It needs the full desktop host.
 - A stage switch was verified by advancing the synthetic clock offset, not by
-  waiting real days. `tools/launch.py --check` against a full host workspace,
-  live provider calls, non-Windows platforms, signing and submission remain
+  waiting real days. Re-running the native checks and the new `--session-switch`
+  day turn-over case needs a host that implements the current `camera`/`files`
+  capabilities; `tools/launch.py --check` against a full host workspace, live
+  provider calls, non-Windows platforms, signing and submission remain
   unverified human checkpoints.
 - The four `bundle/screenshots/*.png` release assets were not re-captured, so
   they still show the old five-item navigation; regenerate them with the full

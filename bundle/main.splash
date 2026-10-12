@@ -41,6 +41,8 @@ let pending = false
 let plan_removal = nil
 let reset_pending = false
 let booted = false
+// Civil day last rendered, so a day turn-over can re-render the date-driven view.
+let shown_day = 0
 let storage_blocked = false
 let editing_id = 0
 let removal = nil
@@ -1351,6 +1353,7 @@ fn load(){
     if state.plans.len() > 0 { selected = state.plans.len() - 1 }
     use_ai = state.model_enabled == true
     booted = true
+    shown_day = health_day()
     redraw()
     read_ai_config()
     probe_vision()
@@ -2220,6 +2223,11 @@ fn ai_watchdog(){
         voice_sequence = voice_sequence + 1 voice_phase = 0 voice_deadline = 0
         message = "语音识别超时，迟到的结果不会填入。请检查网络后重试。" redraw()
     }
+    // The Overview reads the current stage from today's date. When the civil day
+    // turns over while the app stays open, re-render so the new stage and its
+    // targets appear without a click or restart.
+    let today = health_day()
+    if booted && today != shown_day { shown_day = today redraw() }
 }
 fn voice_received(token, action, r){ voice_reply = {token: token action: action reply: r} }
 fn apply_voice_reply(envelope){

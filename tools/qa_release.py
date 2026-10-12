@@ -26,6 +26,8 @@ parser.add_argument("--stage-switch", action="store_true",
                     help="boot a profile whose calendar has already reached the next stage")
 parser.add_argument("--plan-ended", action="store_true",
                     help="boot a profile whose calendar has passed every stage")
+parser.add_argument("--session-switch", action="store_true",
+                    help="keep one host open across the civil day and expect the overview to advance itself")
 args = parser.parse_args()
 profile = args.profile.resolve()
 if not profile.is_relative_to((APP / ".local-state").resolve()) or not profile.name.startswith("qa-"):
@@ -57,6 +59,22 @@ elif args.plan_ended:
     ui.click("◔  档案")
     ui.check("the archive tab agrees the plan has ended",
              "当前计划 · 已结束" in ui.text() and "所有阶段已结束" in ui.text())
+elif args.session_switch:
+    # No click after the first frame: the civil day turns over while the
+    # Overview stays open, so only the day watchdog can redraw it onto stage 2.
+    stages = ui.state()["stages"]
+    ui.click("◈  总览")
+    ui.scroll(-2000)
+    ui.check("the session starts on its first stage",
+             "第 1 阶段 · " + stages[0]["name"] + " · 当前" in ui.text())
+    ui.shot("11-session-stage-before.png")
+    app_now = time.time() + ui.state()["offset"]
+    remaining = (int(app_now // 86400) + 1) * 86400 - app_now
+    time.sleep(max(0.0, remaining) + 3)
+    ui.check("the day turn-over redraws the overview onto the next stage",
+             "第 2 阶段 · " + stages[1]["name"] + " · 当前" in ui.text()
+             and "第 1 阶段 · " + stages[0]["name"] + " · 当前" not in ui.text())
+    ui.shot("11-session-stage-after.png")
 else:
     ui.check("first-run onboarding rendered", "首次建档  1 / 4" in ui.text())
     ui.shot("01-first-run.png")
@@ -241,3 +259,38 @@ else:
     (ended_profile / "pantry-steward").mkdir(parents=True, exist_ok=True)
     (ended_profile / "pantry-steward/pantry.json").write_text(json.dumps(ended, ensure_ascii=False), encoding="utf-8")
     (ended_profile / "expected-state.json").write_text(json.dumps(ended, ensure_ascii=False), encoding="utf-8")
+    # Issue #11 same-session day turn-over: stage 1 ends at the civil midnight
+    # about a minute after this fixture is written, so the Overview must advance
+    # itself while it stays open, with no click and no restart.
+    session = json.loads(json.dumps(ui.state()))
+    now = int(time.time())
+    offset = (86400 - (now % 86400)) - 60
+    if offset < 0:
+        offset = offset + 86400
+    app_day = (now + offset) // 86400
+    template = session["stages"][0]
+
+    def session_stage(identifier, name, days, started):
+        stage = json.loads(json.dumps(template))
+        stage.update({"id": identifier, "name": name, "days": days, "started": started,
+                      "kcal_goal": template["daily_kcal"] * days,
+                      "protein_goal": template["protein_goal"] // template["days"] * days,
+                      "fiber_goal": template["fiber_goal"] // template["days"] * days,
+                      "vitamin_c_goal": template["vitamin_c_goal"] // template["days"] * days,
+                      "consumed_kcal": 0, "consumed_protein": 0, "consumed_fiber": 0,
+                      "consumed_vitamin_c": 0, "intake": []})
+        return stage
+
+    session["stages"] = [session_stage(900, "1天起步 · 会话", 1, app_day * 86400),
+                         session_stage(901, "7天起步 · 会话", 7, (app_day + 1) * 86400)]
+    session["stage_next"] = 902
+    session["offset"] = offset
+    session["cycle_start"] = now + offset
+    session["health"]["day"] = app_day
+    session["health"]["meals_today"] = 0
+    session["reminders"] = False
+    session["daily_target"] = session["stages"][0]["daily_kcal"]
+    session_profile = ui.profile.parent / (ui.profile.name + "-session")
+    (session_profile / "pantry-steward").mkdir(parents=True, exist_ok=True)
+    (session_profile / "pantry-steward/pantry.json").write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
+    (session_profile / "expected-state.json").write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")

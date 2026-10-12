@@ -96,6 +96,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn('"◈  总览"', script)
         self.assertIn("每餐进度 ", script)
         self.assertIn("计划进度 ", script)
+        # The date-driven view must re-render when the civil day turns over.
+        self.assertIn("today != shown_day", script)
 
     def test_byte_protection_and_license_files(self):
         attributes = (APP / ".gitattributes").read_text(encoding="utf-8")
