@@ -35,7 +35,7 @@ unmodified shell and no live model call was made. The manifest digest was
 recomputed with the App Hub's documented bundle algorithm (per-file portable
 path, NUL, little-endian length, bytes; blake3) because the pinned
 `hub stamp bundle` binary was unavailable:
-`894f61a842e63c7bb39c8081789bb94592f16f4a2a0d5586ffd7e22f04095cf7`. The three
+`ce83ddd9166cad24695fa7371f2ae71a77ac857e58d1e678b6d153789a98ff11`. The three
 screenshots under `bundle/screenshots/` still show the prior flow and were not
 recaptured; they need refreshing before any release checkpoint.
 

@@ -64,34 +64,20 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn("__HUB_REVISION__", workflow)
         self.assertNotIn("hub stamp", workflow)
 
-    def test_six_cycle_candidates_and_regeneration_exist(self):
-        # Offline guard only: the native smoke test exercises the real behaviour.
+    def test_daily_menu_shape_exists(self):
+        # Offline guard only: qa_release.py --menu-purchase drives the real behaviour.
         script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
-        self.assertIn("let cycle_days = [1 3 7 15 21 30]", script)
-        self.assertIn("fn make_cycle_candidates", script)
-        self.assertIn("fn regenerate_cycle", script)
-        for key in ('"balance"', '"protein"', '"fiber"', '"trim"'):
-            self.assertIn(key, script)
-
-    def test_composed_plan_separates_candidates_from_stages(self):
-        # Offline guard only: qa_release.py composes and confirms for real.
-        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
-        self.assertIn("stages: [] stage_next: 1 plan_history: []", script)
-        self.assertIn("fn make_stage(candidate, started){", script)
-        for marker in ("fn draft_add(", "fn draft_move(", "fn draft_remove(",
-                       "fn draft_replace(", "fn draft_total_days(){", "fn stage_range(",
-                       "fn confirm_health_plan(){", "plan_draft.len() >= 12"):
+        for marker in ("fn menu_issue(", "fn menu_ready(", "fn menu_stock_lines(",
+                       "fn menu_executable(", "fn menu_ingredients(",
+                       "fn distribute_meals(", "fn save_day_menu(",
+                       "fn revise_meal(", "fn swap_meal_food(", "fn migrate_menus(",
+                       "fn meal_label(index)"):
             self.assertIn(marker, script)
-
-    def test_future_stage_editing_locks_started_stages(self):
-        # Offline guard only: qa_release.py performs the edits against a real host.
-        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
-        self.assertIn("fn stage_locked(", script)
-        for marker in ("fn stage_lock_hint(", "fn relayout_stages(", "fn stage_move(",
-                       "fn stage_remove(", "fn stage_replace(", "fn plan_done_meals(){",
-                       "fn plan_planned_meals(){", "fn plan_progress_percent(){"):
-            self.assertIn(marker, script)
-        self.assertIn("按日历锁定，不是故障", script)
+        self.assertIn('"库存够"', script)
+        self.assertIn('"还差 "', script)
+        self.assertIn('"早餐"', script)
+        self.assertIn('"午餐"', script)
+        self.assertIn('"晚餐"', script)
 
     def test_overview_long_term_plan_and_progress(self):
         # Offline guard only: qa_release.py exercises the page against a real host.
