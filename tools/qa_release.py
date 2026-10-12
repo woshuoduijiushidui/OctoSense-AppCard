@@ -40,7 +40,7 @@ else:
     programs = ui.state()["programs"]
     ui.check("six cycles with three candidates require confirmation",
              sorted({p["days"] for p in programs}) == [1, 3, 7, 15, 21, 30]
-             and len(programs) == 18 and ui.state()["program_active"] == 0)
+             and len(programs) == 18 and ui.state()["stages"] == [])
     ui.click("15 天")
     ui.check("switching cycles shows that cycle's candidates", "候选方案 · 15 天 · 日常健康" in ui.text())
     ui.click("7 天")
@@ -52,10 +52,44 @@ else:
              and {(p["id"], p["variant"]) for p in after if p["days"] == 7}
                  != {(p["id"], p["variant"]) for p in programs if p["days"] == 7}
              and {p["id"] for p in after if p["days"] != 7} == {p["id"] for p in programs if p["days"] != 7}
-             and ui.state()["program_active"] == 0)
+             and ui.state()["stages"] == [])
     ui.shot("04-regenerated.png")
-    ui.click("确认选中方案 · 去录冰箱  →")
-    ui.check("explicit cycle is active", ui.state()["program_active"] != 0)
+    # Issue #9 acceptance: reorder, remove and replace stay in the draft only.
+    ui.click("7 天")
+    ui.click("＋ 加入计划")
+    ui.click("＋ 加入计划")
+    ui.click("上移")
+    ui.scroll(-2000)
+    ui.check("reorder keeps both stages and their total", "总天数 14 天" in ui.text())
+    ui.click("移除")
+    ui.scroll(-2000)
+    ui.check("remove drops one stage", "总天数 7 天" in ui.text())
+    ui.click("替换")
+    ui.click("30 天")
+    ui.click("用这份替换第 1 阶段")
+    ui.scroll(-2000)
+    ui.check("replace swaps in another cycle's candidate", "总天数 30 天" in ui.text())
+    ui.click("清空草稿")
+    # Issue #9: candidates are composed before confirmation, capped at 12 stages.
+    for _ in range(12):
+        ui.click("＋ 加入计划")
+    ui.check("twelve-stage cap is an explicit visible prompt",
+             "已达 12 阶段上限" in ui.text())
+    ui.click("清空草稿")
+    ui.check("clearing the draft leaves candidates unconfirmed", ui.state()["stages"] == [])
+    ui.click("7 天")
+    ui.click("＋ 加入计划")
+    ui.click("15 天")
+    ui.click("＋ 加入计划")
+    ui.scroll(700)
+    ui.check("compose page sums stage cycles", "总天数 22 天" in ui.text())
+    ui.shot("05-compose.png")
+    ui.click("确认计划 · 去录冰箱  →")
+    stages = ui.state()["stages"]
+    ui.check("confirmation snapshots ordered stages with meeting dates",
+             len(stages) == 2 and stages[0]["days"] == 7 and stages[1]["days"] == 15
+             and stages[1]["started"] - stages[0]["started"] == 7 * 86400
+             and stages[0]["kcal_goal"] > 0 and stages[0]["consumed_kcal"] == 0)
     ui.fill("菠菜", name="food_name")
     ui.fill("200", name="food_grams")
     ui.fill("3", name="food_days")
