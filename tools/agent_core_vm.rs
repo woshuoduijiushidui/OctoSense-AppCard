@@ -8,7 +8,59 @@ fn main() {
     let start = source.find("fn agent_empty_session(day)").unwrap();
     let end = source.find("fn canonical_unit(unit)").unwrap();
     let helpers = &source[start..end];
-    let prelude = "use mod.std.assert\nuse mod.math.floor\nuse mod.math.max\nlet agent_session = nil\nlet agent_memory = nil\nlet state = {}\nlet fs = {}\nlet fake_day = 100\nfn today_day(){ fake_day }\nfn time_now(){ 8640000 }\n";
+    let prelude = r#"
+        use mod.std.assert
+        use mod.math.floor
+        use mod.math.max
+        let agent_session = nil
+        let agent_memory = nil
+        let agent_open = false
+        let agent_origin_tab = 0
+        let agent_input = ""
+        let agent_phase = "idle"
+        let agent_sequence = 0
+        let agent_deadline = 0
+        let agent_current_id = 0
+        let agent_call_snapshot = nil
+        let agent_batch = nil
+        let agent_reply = nil
+        let agent_error = ""
+        let state = {profile: {done: true scene: "日常健康" sex: "女" age: "30" height: "165"
+            weight: "60" activity: "轻活动" allergies: "" avoidances: "" preferences: "" special: ""}
+            foods: [] plans: [] revision: 1 profile_revision: 1}
+        let disk = {session: "" memory: "" fail: false}
+        let fs = {
+            exists: |path| { if path == "agent-session.json" { disk.session != "" } else { disk.memory != "" } }
+            read: |path| { if path == "agent-session.json" { disk.session } else { disk.memory } }
+            write: |path, value| {
+                if disk.fail { return "failed" }
+                if path == "agent-session.json" { disk.session = value }
+                else { disk.memory = value }
+                nil
+            }
+        }
+        let host = {}
+        let fake_day = 100
+        let fake_time = 8640000
+        let booted = true
+        let onboarding_step = 4
+        let tab = 0
+        let recognition_phase = ""
+        let intake_draft = nil
+        let editing_id = 0
+        let removal = nil
+        let pending = false
+        let plan_removal = nil
+        let reset_pending = false
+        let show_shopping = false
+        let ai_busy = false
+        let voice_phase = 0
+        let storage_blocked = false
+        let use_ai = true
+        fn today_day(){ fake_day }
+        fn time_now(){ fake_time }
+        fn redraw(){ }
+    "#;
     let cases: &[(&str, &str)] = &[
         ("session_restart_and_local", r#"
             let s = agent_empty_session(100)
@@ -23,17 +75,6 @@ fn main() {
             true
         "#),
         ("session_file_and_failed_write", r#"
-            let disk = {session: "" memory: "" fail: false}
-            fs = {
-                exists: |path| { if path == "agent-session.json" { disk.session != "" } else { disk.memory != "" } }
-                read: |path| { if path == "agent-session.json" { disk.session } else { disk.memory } }
-                write: |path, value| {
-                    if disk.fail { return "failed" }
-                    if path == "agent-session.json" { disk.session = value }
-                    else { disk.memory = value }
-                    nil
-                }
-            }
             agent_load_session()
             assert(agent_append("user", "少放辣") == 1)
             agent_session = nil
@@ -197,6 +238,178 @@ fn main() {
             assert(agent_memory_after_confirm(m, "米饭", "今晚想吃米饭", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "少放辣", "模型建议少放辣", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "少放辣", "少放辣", true, false, 100) == nil)
+            true
+        "#),
+        ("text_entry_and_contract", r#"
+            agent_load_session()
+            for i in 3 {
+                tab = i
+                assert(agent_entry_allowed())
+                agent_open_panel()
+                assert(agent_open && agent_origin_tab == i)
+                if i == 0 { assert(agent_append("user", "同一会话") == 1) }
+                assert(agent_snapshot(1, "同一会话").entry == agent_entry_context(i))
+                agent_close_panel()
+                assert(!agent_open && agent_session.messages.len() == 1)
+            }
+            tab = 3
+            assert(!agent_entry_allowed())
+            tab = 0 onboarding_step = 3
+            assert(!agent_entry_allowed())
+            onboarding_step = 4 pending = true
+            assert(!agent_entry_allowed())
+            pending = false intake_draft = {rows: []}
+            assert(!agent_entry_allowed())
+            intake_draft = nil tab = 2 show_shopping = true
+            assert(!agent_entry_allowed())
+            tab = 0
+            assert(agent_entry_allowed())
+            agent_input = "先看首页"
+            assert(agent_append("user", "先看首页") == 2)
+            assert(agent_snapshot_matches(agent_snapshot(2, "先看首页")))
+            assert(agent_task().len() < 4096)
+            assert(agent_schema().to_json().len() < 8192)
+            assert(agent_valid_envelope({reply: "好的" tool_name: "none" tool_args: {} memory_candidate: ""}))
+            assert(!agent_valid_envelope({reply: "" tool_name: "none" tool_args: {} memory_candidate: ""}))
+            assert(!agent_valid_envelope({reply: "好的" tool_name: "unknown" tool_args: {} memory_candidate: ""}))
+            assert(!agent_valid_envelope({reply: "好的" tool_name: "none" tool_args: {x: 1} memory_candidate: ""}))
+            assert(!agent_valid_envelope({reply: "好的" tool_name: "none" tool_args: {} memory_candidate: "偏好"}))
+            let long = ""
+            for i in 1201 { long = long + "中" }
+            assert(!agent_valid_envelope({reply: long tool_name: "none" tool_args: {} memory_candidate: ""}))
+            let oversized = ""
+            for i in 6000 { oversized = oversized + "中" }
+            assert(!agent_valid_envelope({reply: "好的" tool_name: "none" tool_args: {}
+                memory_candidate: "" extra: oversized}))
+            let max_reply = ""
+            let max_memory = ""
+            for i in 1200 { max_reply = max_reply + "中" }
+            for i in 120 { max_memory = max_memory + "中" }
+            assert(agent_input_bytes({reply: max_reply tool_name: "propose_menu_generate"
+                tool_args: {} memory_candidate: max_memory}) < 16384)
+            true
+        "#),
+        ("text_one_model_call_and_retry", r#"
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push({name: name args: args}) callback = cb 1 }}
+            agent_open_panel()
+            agent_input = "  冰箱里有什么  "
+            agent_send()
+            assert(agent_phase == "answering" && calls.len() == 1)
+            assert(calls[0].name == "model.complete" && calls[0].args.class == "strong")
+            assert(calls[0].args.input.current_user_message == "  冰箱里有什么  ")
+            assert(calls[0].args.input.recent_messages.len() == 0)
+            agent_close_panel()
+            tab = 2
+            agent_open_panel()
+            assert(agent_phase == "answering" && agent_session.messages.len() == 1)
+            callback({is_ok: true data: {output: {reply: "目前没有已确认的库存。" tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_phase == "idle" && agent_session.messages.len() == 2)
+            assert(agent_session.messages[1].text == "目前没有已确认的库存。")
+            assert(agent_input == "" && agent_current_id == 0)
+            agent_close_panel()
+            tab = 1
+            agent_open_panel()
+            assert(agent_session.messages.len() == 2 && agent_origin_tab == 1)
+            true
+        "#),
+        ("text_compaction_then_one_answer", r#"
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(args) callback = cb 1 }}
+            agent_open_panel()
+            for i in 14 { assert(agent_append("user", "旧消息") > 0) }
+            agent_input = "当前原文"
+            agent_send()
+            assert(agent_phase == "compacting" && calls.len() == 1 && calls[0].class == "fast")
+            callback({is_ok: true data: {output: {summary: "此前讨论了库存"}}})
+            agent_watchdog()
+            assert(agent_phase == "answering" && calls.len() == 2 && calls[1].class == "strong")
+            assert(agent_session.summary_through_id > 0 && agent_session.messages.len() == 15)
+            assert(calls[1].input.current_user_message == "当前原文")
+            assert(calls[1].input.recent_messages.len() <= 8)
+            callback({is_ok: true data: {output: {reply: "我会按当前原文回答。" tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_session.messages.len() == 16 && agent_phase == "idle")
+            true
+        "#),
+        ("text_compaction_failure_stops_answer", r#"
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(args) callback = cb 1 }}
+            agent_open_panel()
+            for i in 14 { assert(agent_append("user", "旧消息") > 0) }
+            agent_input = "当前原文"
+            agent_send()
+            assert(calls.len() == 1 && calls[0].class == "fast")
+            callback({is_ok: false error: "no provider"})
+            agent_watchdog()
+            assert(calls.len() == 1 && agent_phase == "idle")
+            assert(agent_session.summary_through_id == 0 && agent_session.messages.len() == 15)
+            assert(agent_input == "当前原文" && agent_current_id == 15)
+            true
+        "#),
+        ("text_invalid_provider_and_stale_reply", r#"
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(args) callback = cb 1 }}
+            agent_open_panel()
+            agent_input = "请回答"
+            agent_send()
+            callback({is_ok: true data: {output: {reply: "" tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_phase == "idle" && agent_session.messages.len() == 1 && agent_input == "请回答")
+            agent_send()
+            assert(calls.len() == 2 && agent_session.messages.len() == 1)
+            callback({is_ok: true data: {output: {reply: "改好了" tool_name: "propose_inventory_edit" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_session.messages.len() == 1 && agent_current_id == 1)
+            agent_send()
+            callback({is_ok: false error: "no provider"})
+            agent_watchdog()
+            assert(agent_session.messages.len() == 1 && agent_input == "请回答")
+            agent_send()
+            let late = callback
+            fake_time = fake_time + 96
+            agent_watchdog()
+            assert(agent_phase == "idle" && agent_session.messages.len() == 1)
+            late({is_ok: true data: {output: {reply: "迟到" tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_session.messages.len() == 1)
+            true
+        "#),
+        ("text_snapshot_changes", r#"
+            agent_open_panel()
+            agent_input = "当前消息"
+            assert(agent_append("user", "当前消息") == 1)
+            let snapshot = agent_snapshot(1, "当前消息")
+            assert(agent_snapshot_matches(snapshot))
+            state.revision = 2
+            assert(!agent_snapshot_matches(snapshot))
+            state.revision = 1 state.profile_revision = 2
+            assert(!agent_snapshot_matches(snapshot))
+            state.profile_revision = 1 state.plans.push({id: 1 title: "新方案"})
+            assert(!agent_snapshot_matches(snapshot))
+            state.plans = [] fake_day = 101
+            assert(!agent_snapshot_matches(snapshot))
+            fake_day = 100 agent_input = "修改了输入"
+            assert(!agent_snapshot_matches(snapshot))
+            agent_input = "当前消息" agent_session.next_message_id = 3
+            assert(!agent_snapshot_matches(snapshot))
+            agent_session.next_message_id = 2 pending = true
+            assert(!agent_snapshot_matches(snapshot))
+            true
+        "#),
+        ("text_day_rollover", r#"
+            agent_open_panel()
+            agent_input = "昨天的问题"
+            assert(agent_append("user", "昨天的问题") == 1)
+            fake_day = 101
+            agent_watchdog()
+            assert(agent_session.day == 101 && agent_session.messages.len() == 0)
+            assert(agent_input == "" && agent_current_id == 0)
             true
         "#),
     ];

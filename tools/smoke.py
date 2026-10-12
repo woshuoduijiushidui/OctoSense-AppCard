@@ -119,9 +119,13 @@ def exercise(ui):
     ui.click("确认选中方案 · 去录冰箱  →")
     for entry in ("拍照识别", "导入小票"):
         ui.click(entry)
-        ui.check(entry + " 官方宿主回退手动录入",
-                 "当前宿主暂不支持图片识别，请使用手动录入" in ui.text()
-                 and "选择已有图片" not in ui.text())
+        if "选择已有图片" in ui.text():
+            ui.check(entry + " 可用时先进入待核对草稿",
+                     "识别后仍需逐项核对" in ui.text())
+            ui.click("取消，返回手动录入")
+        else:
+            ui.check(entry + " 不可用时回退手动录入",
+                     "当前宿主暂不支持图片识别，请使用手动录入" in ui.text())
     enter(ui, "食材名称", "豆腐")
     enter(ui, "数量", "abc")
     enter(ui, "还剩几天（可留空）", "2")

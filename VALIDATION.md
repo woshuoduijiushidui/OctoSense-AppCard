@@ -877,3 +877,46 @@ hidden test windows were closed through their own remote endpoint.
 Publisher identity and privacy text remain unapproved; the existing listing
 keeps the author's pending identity. Local test-key creation was explicitly
 approved by the user. Production signing and submission were not authorized.
+
+## Issue #3 M2 local validation, 2026-10-12
+
+- The global text panel and Agent request path live in `bundle/main.splash`.
+  The panel is limited to home, inventory, and menu. M2 permits only a
+  `none + {}` reply; proposal tools have no executable card or business write.
+- The production Script VM harness passed 18 cases covering shared day session,
+  one strong request, optional fast compaction, retry after provider failure,
+  timeout, invalid output, stale reply, and local snapshot changes.
+- `python -X utf8 -m unittest discover -s tools -p "test_*.py"`: 20 passed.
+  The full suite needed local Windows temporary-directory access; the default
+  sandbox's temporary-directory ACL does not permit those tests.
+- `python -X utf8 tools/launch.py --host-workspace
+  D:/projects/GOSIMAPP/OctoSense --check --offline`: PASSED. The editable source
+  bundle has the expected unsigned warning.
+- The bundle was restamped to digest
+  `906f9ce1c5f4cae7731c3ef5f5c8519a0c83dd73ad94e13135dc2d2b3f0f22f6`.
+  Using pre-existing local test keys, the source snapshot was signed, published,
+  and installed through the official App Hub into the task-owned
+  `target/m2-official-profile`; no new keys were generated.
+- The unmodified official OctoSense desktop built with `cargo build --release
+  --locked -p octosense --offline` and opened the installed Pantry Card. The
+  local legacy App Hub mirror needs `OCTOSENSE_HUB_CATALOG=legacy`; the Pantry
+  launcher now sets it for this task-owned mirror.
+- Native UI with a synthetic four-batch profile: home, inventory, and menu
+  each exposed `问管家`; all three reused one day session. The profile page and
+  inventory intake draft hid the entry. Canceling that draft restored the
+  entry without changing inventory. The panel rendered multiline input,
+  microphone, send, close, and the saved message. The microphone reported
+  recognition unavailable. A no-provider send stored one user message,
+  retained the input, showed a retryable error, and did not append an assistant
+  reply. After closing and reopening the desktop, the same-day user message
+  appeared again. Host logs contained no `[E]`, callback, or render errors.
+- A fresh isolated official-host profile passed 27 native UI/data checks in
+  `tools/smoke.py`, covering onboarding, both available image entry choices
+  and their review gate, manual inventory, menu acceptance, consumption,
+  deletion, profile editing, and navigation. The old smoke assertion assumed
+  image capability was unavailable; it now checks the actual available or
+  unavailable path. A subsequent desktop restart passed both persistence
+  checks for profile, inventory, menu, history, IDs, and home navigation.
+- Real provider multi-turn/compaction calls were not run. The separate Issue
+  #4 stage and Issue #5 final menu revisions/lock contract are absent from
+  this checkout, so their snapshot fields and the final M2 exit remain open.

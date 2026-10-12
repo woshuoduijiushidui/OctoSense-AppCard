@@ -67,6 +67,17 @@ let voice_deadline = 0
 let voice_reply = nil
 let agent_session = nil
 let agent_memory = nil
+let agent_open = false
+let agent_origin_tab = 0
+let agent_input = ""
+let agent_phase = "idle"
+let agent_sequence = 0
+let agent_deadline = 0
+let agent_current_id = 0
+let agent_call_snapshot = nil
+let agent_batch = nil
+let agent_reply = nil
+let agent_error = ""
 let onboarding_step = 0
 let profile_edit_backup = nil
 let profile_sex = "不透露"
@@ -696,6 +707,187 @@ fn agent_context_plan(projection, session, current_id, current_text){
     }
     {status: "ready" input: input}
 }
+fn agent_entry_allowed(){
+    booted && !storage_blocked && onboarding_step == 4 && state.profile.done &&
+        (tab == 0 || tab == 1 || tab == 2) && recognition_phase == "" &&
+        intake_draft == nil && editing_id == 0 && removal == nil &&
+        !pending && plan_removal == nil && !reset_pending && (!show_shopping || tab != 2)
+}
+fn agent_entry_context(index){
+    if index == 1 { return "inventory" }
+    if index == 2 { return "menu" }
+    "home"
+}
+fn agent_open_panel(){
+    if !agent_entry_allowed() { return }
+    agent_ensure_today()
+    agent_origin_tab = tab
+    agent_open = true
+    redraw()
+}
+fn agent_close_panel(){ agent_open = false redraw() }
+fn agent_microphone(){
+    agent_error = "当前宿主尚未提供语音识别，请输入文字。"
+    redraw()
+}
+fn agent_task(){
+    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存和对话；当前用户明确指令优先于软记忆。过敏和忌口是硬限制，普通偏好与软记忆是软条件。没有 current_stage 或 daily_menu 时，不要猜阶段、今日三餐、菜单锁定或摄入结果；已锁定菜单不得建议变更。库存批次必须按 food_id 区分，歧义时在 reply 追问，不猜数量或批次。不修改档案；涉及过敏、忌口、体重或目标的修改请指引用户到档案页。当前阶段尚无可核对的工具处理，tool_name 必须是 none，tool_args 必须是空对象，memory_candidate 必须是空字符串。可以回答普通问题，但不要声称已经修改、加入、删除、确认或记录任何业务数据。只输出符合 schema 的 JSON 对象，reply 使用可独立阅读的中文。"
+}
+fn agent_schema(){
+    {type: "object" properties: {
+        reply: {type: "string" minLength: 1 maxLength: 1200}
+        tool_name: {type: "string" enum: ["none" "propose_inventory_add" "propose_inventory_edit"
+            "propose_inventory_remove" "propose_menu_generate" "propose_menu_adjust" "handoff_consumption"]}
+        tool_args: {type: "object" additionalProperties: false}
+        memory_candidate: {type: "string" maxLength: 120}}
+        required: ["reply" "tool_name" "tool_args" "memory_candidate"] additionalProperties: false}
+}
+fn agent_valid_envelope(output){
+    try {
+        if !output.is_object() || agent_input_bytes(output) > 16 * 1024 ||
+            !output.reply.is_string() || output.reply.trim() == "" ||
+            output.reply.to_chars().len() > 1200 || !output.tool_name.is_string() ||
+            !output.tool_args.is_object() || !output.memory_candidate.is_string() ||
+            output.memory_candidate.to_chars().len() > 120 { return false }
+        let known = false
+        for name in ["none" "propose_inventory_add" "propose_inventory_edit"
+            "propose_inventory_remove" "propose_menu_generate" "propose_menu_adjust" "handoff_consumption"] {
+            if output.tool_name == name { known = true }
+        }
+        if !known { return false }
+        if output.tool_name == "none" {
+            return output.tool_args.to_json() == "{}" && output.memory_candidate == ""
+        }
+        true
+    } catch { false }
+}
+fn agent_snapshot(current_id, text){
+    {day: today_day() profile_revision: state.profile_revision inventory_revision: state.revision
+        business_state: state.to_json() message_id: current_id message_text: text
+        next_message_id: agent_session.next_message_id entry: agent_entry_context(tab)}
+}
+fn agent_snapshot_matches(snapshot){
+    if snapshot == nil || snapshot.day != today_day() || agent_session == nil ||
+        agent_session.day != snapshot.day || state.profile_revision != snapshot.profile_revision ||
+        state.revision != snapshot.inventory_revision || state.to_json() != snapshot.business_state ||
+        agent_session.next_message_id != snapshot.next_message_id || agent_input != snapshot.message_text ||
+        pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || removal != nil ||
+        reset_pending || (show_shopping && tab == 2) || recognition_phase != "" || ai_busy || voice_phase != 0 ||
+        storage_blocked || !use_ai { return false }
+    for item in agent_session.messages {
+        if item.id == snapshot.message_id && item.kind == "user" && item.text == snapshot.message_text { return true }
+    }
+    false
+}
+fn agent_fail(reason){
+    agent_sequence = agent_sequence + 1
+    agent_phase = "idle" agent_deadline = 0 agent_call_snapshot = nil agent_batch = nil
+    agent_error = reason
+    redraw()
+}
+fn agent_advance_turn(){
+    if !agent_snapshot_matches(agent_call_snapshot) {
+        agent_fail("本地状态或输入已变化，请核对文字后重试。") return
+    }
+    let projection = agent_projection_base(agent_call_snapshot.entry)
+    let next = agent_context_plan(projection, agent_session,
+        agent_call_snapshot.message_id, agent_call_snapshot.message_text)
+    if next.status == "too_large" {
+        agent_fail("本轮上下文超过安全长度，请缩短输入或整理库存后重试。") return
+    }
+    let token = agent_sequence
+    agent_deadline = time_now() + 95
+    if next.status == "compact" {
+        agent_phase = "compacting" agent_batch = next.batch
+        try {
+            host.request("model.complete", {task: agent_compaction_task()
+                input: {summary: agent_batch.summary messages: agent_batch.messages}
+                schema: agent_compaction_schema() class: "fast"},
+                |r| { agent_reply = {token: token mode: "compacting" reply: r} })
+        } catch { agent_fail("整理上下文失败，请重试。") }
+    } else {
+        agent_phase = "answering" agent_batch = nil
+        try {
+            host.request("model.complete", {task: agent_task() input: next.input
+                schema: agent_schema() class: "strong"},
+                |r| { agent_reply = {token: token mode: "answering" reply: r} })
+        } catch { agent_fail("暂时无法连接模型，请重试。") }
+    }
+    redraw()
+}
+fn agent_send(){
+    if !agent_open || !agent_entry_allowed() || agent_phase != "idle" ||
+        ai_busy || recognition_phase != "" || voice_phase != 0 || storage_blocked || !use_ai {
+        agent_error = "请先结束当前操作并启用在线 AI，再发送。" redraw() return
+    }
+    agent_ensure_today()
+    let text = agent_input
+    if text.trim() == "" || text.to_chars().len() > 1500 {
+        agent_error = "请输入 1 到 1500 字。" redraw() return
+    }
+    let reuse = false
+    if agent_current_id > 0 {
+        for item in agent_session.messages {
+            if item.id == agent_current_id && item.kind == "user" && item.text == text { reuse = true }
+        }
+    }
+    if !reuse {
+        agent_current_id = agent_append("user", text)
+        if agent_current_id == 0 { agent_error = "保存消息失败，请重试。" redraw() return }
+    }
+    agent_input = text
+    agent_error = ""
+    agent_sequence = agent_sequence + 1
+    agent_call_snapshot = agent_snapshot(agent_current_id, text)
+    agent_advance_turn()
+}
+fn agent_received(envelope){
+    if envelope == nil || envelope.token != agent_sequence || agent_call_snapshot == nil ||
+        envelope.mode != agent_phase || (agent_phase != "compacting" && agent_phase != "answering") { return }
+    if time_now() >= agent_deadline || !agent_snapshot_matches(agent_call_snapshot) {
+        agent_fail("等待期间状态已变化或请求已超时，请核对文字后重试。") return
+    }
+    let output = nil
+    try { if envelope.reply.is_ok { output = envelope.reply.data.output } } catch { }
+    if output == nil {
+        agent_fail("本轮请求失败，请检查宿主 AI 配置或稍后重试。") return
+    }
+    if agent_phase == "compacting" {
+        let next = agent_apply_summary(agent_session, output, agent_batch.through_id)
+        if next == nil || !agent_store_session(next) {
+            agent_fail("整理上下文失败，请重试。") return
+        }
+        agent_advance_turn()
+        return
+    }
+    if !agent_valid_envelope(output) {
+        agent_fail("回复格式无效，请重试；本轮没有修改数据。") return
+    }
+    if output.tool_name != "none" {
+        agent_fail("这项操作尚不能核对，请改用现有页面或重新提问。") return
+    }
+    if agent_append("assistant", output.reply) == 0 {
+        agent_fail("保存回复失败，请重试。") return
+    }
+    agent_sequence = agent_sequence + 1
+    agent_phase = "idle" agent_deadline = 0 agent_call_snapshot = nil agent_batch = nil
+    agent_current_id = 0 agent_input = "" agent_error = ""
+    redraw()
+}
+fn agent_watchdog(){
+    if agent_reply != nil {
+        let received = agent_reply agent_reply = nil
+        agent_received(received)
+    }
+    if agent_phase != "idle" && agent_deadline > 0 && time_now() >= agent_deadline {
+        agent_fail("等待超时，请重试；本轮没有修改数据。")
+    }
+    if agent_open && agent_session != nil && agent_session.day != today_day() {
+        agent_fail("已进入新的一天，请重新发送。")
+        agent_ensure_today() agent_current_id = 0 agent_input = ""
+        redraw()
+    }
+}
 fn canonical_unit(unit){
     if unit == "g" || unit == "kg" { return "g" }
     if unit == "ml" || unit == "L" { return "ml" }
@@ -1079,6 +1271,7 @@ fn navigate(index){
     if pending { message = "请先确认或取消本次扣减。" redraw() return }
     if plan_removal != nil { message = "请先确认或取消删除方案。" redraw() return }
     if voice_phase != 0 { message = "请先结束本次语音输入。" redraw() return }
+    agent_open = false
     tab = index
     details = false
     reset_pending = false
@@ -1512,6 +1705,7 @@ fn probe_vision(){
     catch { vision_phase = 2 }
 }
 fn begin_recognition(mode){
+    if agent_phase != "idle" { message = "请先等待 Agent 回复或整理完成。" redraw() return }
     if vision_phase != 1 {
         message = "当前宿主暂不支持图片识别，请使用手动录入"
         redraw() return
@@ -1974,6 +2168,7 @@ fn ai_watchdog(){
         voice_sequence = voice_sequence + 1 voice_phase = 0 voice_deadline = 0
         message = "语音识别超时，迟到的结果不会填入。请检查网络后重试。" redraw()
     }
+    agent_watchdog()
 }
 fn voice_received(token, action, r){ voice_reply = {token: token action: action reply: r} }
 fn apply_voice_reply(envelope){
@@ -2226,6 +2421,7 @@ fn apply_model_reply(envelope){
         redraw()
 }
 fn plan(reason){
+    if agent_phase != "idle" { message = "请先等待 Agent 回复或整理完成。" return }
     if !state.auto_generate && automatic_reason(reason) { return }
     if storage_blocked { message = "库存文件异常，已停止生成和写入。请先备份修复。" return }
     if state.paused { message = "管家已暂停，请在设置里恢复。" return }
@@ -2424,7 +2620,7 @@ fn confirm_delete_plan(){
 }
 fn check_risk(){
     if onboarding_step != 4 { return }
-    if !booted || storage_blocked || pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || ai_busy || voice_phase != 0 || (use_ai && (ai_phase == 0 || ai_phase == 3)) { return }
+    if !booted || storage_blocked || pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || ai_busy || agent_phase != "idle" || voice_phase != 0 || (use_ai && (ai_phase == 0 || ai_phase == 3)) { return }
     if now() - state.cycle_start >= 604800 {
         let before = state.to_json()
         state.cycle_start = now() state.handled = 0 state.baseline = risk_count()
@@ -2546,7 +2742,7 @@ View{width: Fill height: Fill flow: Overlay
     SolidView{width: Fill height: Fill draw_bg.color: #xffffff18}
     View{width: Fill height: Fill padding: 0
         GlassCard{
-            app_body := View{width: Fill height: Fill on_render: || {
+            app_body := View{width: Fill height: Fill flow: Overlay on_render: || {
                 if recognition_phase != "" {
                     View{width: Fill height: Fill flow: Down align: Align{x: .5 y: .5} padding: 24
                         Frost{width: 720 height: Fit padding: 24 spacing: 14 new_batch: true
@@ -2924,6 +3120,7 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                 }
                                 Quiet{text: "+  更新冰箱" on_click: || navigate(1)}
+                                if agent_entry_allowed() { Quiet{text: "问管家" on_click: || agent_open_panel()} }
                             }
                             content := View{width: Fill height: Fill on_render: || { ScrollYView{width: Fill height: Fill flow: Down spacing: 16 padding: Inset{right: 5}
                                 if ai_busy {
@@ -3487,6 +3684,47 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                 }
                             }}
+                        }
+                    }
+                    if agent_open && agent_entry_allowed() {
+                        SolidView{width: Fill height: Fill draw_bg.color: #x23211f66}
+                        View{width: Fill height: Fill flow: Right
+                            View{width: Fill height: Fill}
+                            Frost{width: 440 height: Fill padding: 20 spacing: 12 draw_bg.color: #xf8f5f0fa
+                                View{width: Fill height: Fit flow: Right align: Align{y: .5}
+                                    View{width: Fill height: Fit flow: Down spacing: 3
+                                        Heading{text: "问管家" draw_text.text_style.font_size: 25}
+                                        Hint{text: "今天的对话会在本机保存"}
+                                    }
+                                    Quiet{text: "关闭" on_click: || agent_close_panel()}
+                                }
+                                Divider{}
+                                ScrollYView{width: Fill height: Fill flow: Down spacing: 10
+                                    for item in agent_session.messages {
+                                        let sender = "我"
+                                        if item.kind == "assistant" { sender = "管家" }
+                                        if item.kind == "local" { sender = "状态" }
+                                        Tint{padding: 12 spacing: 5 draw_bg.color: #xffffffd9
+                                            Hint{text: sender}
+                                            Copy{text: item.text}
+                                        }
+                                    }
+                                }
+                                if agent_phase == "compacting" {
+                                    Hint{text: "Agent 正在整理本次对话…页面中的聊天记录不会被删除"}
+                                }
+                                if agent_phase == "answering" { Hint{text: "管家正在回复…"} }
+                                if voice_phase == 1 || voice_phase == 2 { Hint{text: "正在录音…"} }
+                                if voice_phase == 3 { Hint{text: "正在转写…"} }
+                                if agent_error != "" { Hint{text: agent_error} }
+                                Field{height: 110 is_multiline: true text: agent_input
+                                    empty_text: "输入问题或说出今天的需求（最多 1500 字）"
+                                    on_change: |text| { agent_input = text }}
+                                View{width: Fill height: Fit flow: Right spacing: 8
+                                    Soft{text: "麦克风" enabled: agent_phase == "idle" on_click: || agent_microphone()}
+                                    Action{text: "发送" enabled: agent_phase == "idle" on_click: || agent_send()}
+                                }
+                            }
                         }
                     }
                 }

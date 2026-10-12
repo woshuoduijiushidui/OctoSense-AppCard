@@ -22,6 +22,13 @@ CASES = (
     "bounded_compaction_segments",
     "memory_confirmation_and_expiry",
     "memory_rules_and_limit",
+    "text_entry_and_contract",
+    "text_one_model_call_and_retry",
+    "text_compaction_then_one_answer",
+    "text_compaction_failure_stops_answer",
+    "text_invalid_provider_and_stale_reply",
+    "text_snapshot_changes",
+    "text_day_rollover",
 )
 
 
