@@ -18,6 +18,15 @@ The prior `main` screenshots were kept under `bundle/screenshots/` at
 `af85d81f`; the PR review pairs them by screen while noting that the fixture
 data and capture times differ.
 
+Issue #2's four-way quantity distinction is not complete in this PR. The app
+records confirmed stock, planned recipe use, and confirmed consumption, but
+does not record or display pending-receipt quantities. Its purchase button is
+still a placeholder. The simulated-order work in Issue #5 must retain each
+pending food, quantity, and unit separately from actual stock, then add only
+the quantities the user confirms as received. Issue #2 should remain open
+until that integration is verified; this report does not count pending receipt
+as passed.
+
 During PR preparation, the pinned App Hub bundle check passed again and all
 19 Pantry Python tests passed. The sandboxed run initially hit Windows
 `PermissionError` in Python temporary directories; rerunning the same tests
