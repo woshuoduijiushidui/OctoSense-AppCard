@@ -12,7 +12,7 @@ Only Windows is targeted. On 2026-10-11 the 0.8.0 bundle passed the pinned App H
 
 ## What it does
 
-Confirm a dietary profile and a 7/21/30-day cycle; preview inventory batches; generate a local-rule or official model.complete candidate; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Daily/cycle values are prototype estimates. Archive a cycle without deleting stock.
+Confirm a dietary profile and 1/3/7/15/21/30-day cycles with three comparable candidates each (the 1-day cycle is the short trial); regenerate one cycle's candidates without touching a confirmed plan. Confirm a single candidate as a one-stage plan, or add candidates of different cycles in order (repeats allowed, e.g. 7+7) and reorder, remove or replace stages before confirming; the compose page shows the summed total days and each stage's date range and targets, up to 12 stages. Then preview inventory batches; generate a local-rule or official model.complete candidate; review recipe steps and quantities; accept it; separately confirm actual consumption before deducting inventory and recording intake. Each confirmed stage snapshots its candidate's targets, so later edits to a candidate do not change it. Daily/cycle values are prototype estimates. Archive a plan without deleting stock.
 
 The profile separates allergies, avoidances, and preferences. Intake creates editable batches before confirmation and accepts g/kg, ml/L, pieces, or simple packages with a user-confirmed conversion. Inventory retains separate batches and freshness states. Image recognition is enabled only after a positive `model.vision_capability` probe from the locally modified host; users fill uncertain fields before confirming.
 

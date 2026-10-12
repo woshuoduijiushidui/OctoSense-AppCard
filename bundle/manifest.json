@@ -16,7 +16,7 @@
   },
   "id": "pantry-steward",
   "integrity": {
-    "bundle_blake3": "e19f4ea7bbd9bfc0e2b1d6e8b814999e8c866b704c2abe7865841e021c616fa1"
+    "bundle_blake3": "fc84b3692315117d9adee8d7325e2034405f3fa653450f155619352c83dcad20"
   },
   "name": "冰箱管家",
   "requires": [
