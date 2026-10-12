@@ -8,7 +8,7 @@ let state = {schema: 2 foods: [] plans: [] active: 0 next_id: 1 revision: 0
     health: {start: 0 day: 0 meals_per_day: 2 meals_week: 0 meals_today: 0
         protein_week: 0 fiber_week: 0 protein_goal: 0 fiber_goal: 0 calcium_goal: 0 iron_goal: 0}
     daily_target: 2000 consumed_kcal: 0 meal_count: 0 last_meal: "" last_goal: ""
-    cart: []}
+    cart: [] orders: []}
 let tab = 0
 let message = "先记库存，再安排今晚菜单。"
 let draft_name = ""
@@ -1044,6 +1044,63 @@ fn market_replace_with(product_index){
     commit(before)
     redraw()
 }
+// Issue #27: a 模拟订单 is the confirmed record of the 购物车. It is user input
+// kept in state.orders so it survives a restart, and submitting it must not
+// touch 库存、进度 or 实际执行记录, nor produce a real payment.
+fn market_order_next_id(){
+    let next = 1
+    for order in state.orders { if order.id >= next { next = order.id + 1 } }
+    next
+}
+// Only rows with a picked 模拟商品 can be ordered; an unmatched row has nothing
+// to buy and stays in the cart for the user to replace. An over-stock row is
+// ordered at the on-sale maximum, never more than 可售数量.
+fn market_order_lines(){
+    let out = []
+    let products = market_products()
+    for line in state.cart {
+        if !market_line_dropped(line) {
+            let index = market_product_index(line.product)
+            if index >= 0 {
+                let product = products[index]
+                let quantity = min(line.quantity, product.stock)
+                if quantity > 0 {
+                    out.push({name: line.name product: line.product quantity: quantity
+                        unit: product.unit price_cents: product.price_cents})
+                }
+            }
+        }
+    }
+    out
+}
+fn market_order_total(lines){
+    let total = 0
+    for line in lines { total = total + line.quantity * line.price_cents }
+    total
+}
+fn market_order_line_total(line){ line.quantity * line.price_cents }
+fn market_order_open_confirm(){ market.confirming = true redraw() }
+fn market_order_cancel_confirm(){ market.confirming = false redraw() }
+// Writing the order is the only step; it deliberately skips foods, stages,
+// intake, meal_count and progress.
+fn market_submit_order(){
+    if market == nil || market.confirming == false { return }
+    let lines = market_order_lines()
+    if lines.len() == 0 {
+        market.confirming = false
+        message = "购物车里没有可下单的商品，请先补齐或替换。"
+        redraw()
+        return
+    }
+    let before = state.to_json()
+    state.orders.push({id: market_order_next_id() day: today_day() status: "待收货"
+        total_cents: market_order_total(lines) lines: lines})
+    record("模拟订单提交 · " + lines.len() + " 样")
+    market.confirming = false
+    market.tab = 2 market.selected = -1 market.replacing = -1
+    if commit(before) { message = "模拟订单已提交；不产生真实支付，也不改变库存。" }
+    redraw()
+}
 // Replacement is offered by 品类 and 规格: a keyword hint puts same-category
 // products first, then the spec closest to the gap; 过敏与忌口 are excluded.
 fn market_category_hint(name){
@@ -1106,7 +1163,7 @@ fn market_short_count(p){
     for line in market_lines(p) { count = count + 1 }
     count
 }
-fn open_market(){ market = {tab: 0 selected: -1 replacing: -1} market_fill_cart() redraw() }
+fn open_market(){ market = {tab: 0 selected: -1 replacing: -1 confirming: false} market_fill_cart() redraw() }
 fn close_market(){ market = nil redraw() }
 fn market_tab(index){ market.tab = index market.selected = -1 market.replacing = -1 redraw() }
 fn market_open_product(index){ market.selected = index redraw() }
@@ -1361,6 +1418,16 @@ fn valid_state(value){
             if !(line.quantity >= 0) || line.quantity > 999 || line.quantity != floor(line.quantity) { return false }
             if line.to_json().search("\"dropped\"") >= 0 && line.dropped != true && line.dropped != false { return false }
         }
+        if value.orders.len() > 40 { return false }
+        for order in value.orders {
+            if !(order.id > 0) || order.id != floor(order.id) || order.status != "待收货" { return false }
+            if !(order.total_cents >= 0) || order.lines.len() == 0 || order.lines.len() > 80 { return false }
+            for line in order.lines {
+                if line.name.len() == 0 || line.name.len() > 40 || line.product.len() == 0 || line.product.len() > 40 { return false }
+                if !(line.quantity > 0) || line.quantity > 999 || line.quantity != floor(line.quantity) { return false }
+                if !(line.price_cents >= 0) { return false }
+            }
+        }
         let fields = value.active + value.snooze + value.handled + value.baseline + value.cycle_start + value.log.len()
         let options = value.demo && value.paused && value.reminders
         value.risk_key.len()
@@ -1449,6 +1516,7 @@ fn migrate_menus(value){
 }
 fn migrate_state(value){
     if value.to_json().search("\"cart\"") < 0 { value.cart = [] }
+    if value.to_json().search("\"orders\"") < 0 { value.orders = [] }
     if value.schema == 2 { return migrate_menus(migrate_candidates(value)) }
     if value.schema != 1 { return value }
     // The embedded OctoSense desktop can use an older script runtime where
@@ -3889,7 +3957,7 @@ View{width: Fill height: Fill flow: Overlay
                                                     Tint{draw_bg.color: #xf5f2ed Hint{text: "维生素 C"} Copy{text: product.vitamin_c + " mg" draw_text.text_style: theme.font_bold{font_size: 15}}}
                                                 }
                                                 Hint{text: "参考保质期 " + product.shelf_days + " 天（演示数据）"}
-                                                Hint{text: "模拟商品只用于演示，不来自网络，也不是你的库存；挑选与增减在购物车完成，提交模拟订单在后续步骤完成。"}
+                                                Hint{text: "模拟商品只用于演示，不来自网络，也不是你的库存；挑选与增减在购物车完成，确认后提交模拟订单。"}
                                             }
                                         }
                                         if market.selected < 0 {
@@ -4006,18 +4074,56 @@ View{width: Fill height: Fill flow: Overlay
                                                     Copy{width: Fill text: "共 " + cart_items + " 样 · 模拟总价"}
                                                     Copy{text: market_price(market_cart_total()) draw_text.text_style: theme.font_bold{font_size: 22}}
                                                 }
-                                                if cart_flags > 0 { Hint{text: cart_flags + " 行需要处理：无匹配或可售不足。提交模拟订单在后续步骤完成。"} }
-                                                else { Hint{text: "全部按缺菜清单对好了；提交模拟订单在后续步骤完成。"} }
+                                                if cart_flags > 0 { Hint{text: cart_flags + " 行需要处理：无匹配或可售不足；无匹配的行没有商品可下单，会留在购物车里等你替换。"} }
+                                                else { Hint{text: "全部按缺菜清单对好了，可以提交模拟订单。"} }
+                                                if cart_items > 0 && market.confirming == false {
+                                                    Action{text: "提交模拟订单  →" on_click: || market_order_open_confirm()}
+                                                }
+                                                if market.confirming {
+                                                    Tint{draw_bg.color: #xf4ede4
+                                                        Copy{text: "确认提交模拟订单？" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                                        Hint{text: "提交后生成一条 待收货 的模拟订单；不产生真实支付，也不改变库存、进度或实际执行记录。"}
+                                                        Action{text: "确认提交订单" on_click: || market_submit_order()}
+                                                        Soft{text: "取消" on_click: || market_order_cancel_confirm()}
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                     if market.tab == 2 {
                                         Heading{text: "模拟订单" draw_text.text_style.font_size: 30}
-                                        Frost{padding: 20 spacing: 10 draw_bg.color: #xffffffc2
-                                            Copy{text: "还没有模拟订单" draw_text.text_style: theme.font_bold{font_size: 17}}
-                                            Hint{text: "确认购物车后提交模拟订单、查看订单状态与确认收货，在后续步骤实现。"}
-                                            Hint{text: "模拟下单不产生真实支付，也不会改变冰箱库存。"}
+                                        if state.orders.len() == 0 {
+                                            Frost{padding: 20 spacing: 10 draw_bg.color: #xffffffc2
+                                                Copy{text: "还没有模拟订单" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                                Hint{text: "确认购物车后点 提交模拟订单；提交后这里会显示订单与其状态。"}
+                                                Hint{text: "模拟下单不产生真实支付，也不会改变冰箱库存。"}
+                                            }
                                         }
+                                        for i in state.orders.len() {
+                                            let order = state.orders[i]
+                                            Frost{padding: 20 spacing: 10 draw_bg.color: #xffffffc2
+                                                View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: .5}
+                                                    Copy{text: "模拟订单 #" + order.id + " · " + month_day(order.day) draw_text.text_style: theme.font_bold{font_size: 18}}
+                                                    RoundedView{show_bg: true width: Fit height: Fit padding: Inset{left: 10 right: 10 top: 3 bottom: 3}
+                                                        draw_bg +: {color: #xf3ded8 border_radius: 9}
+                                                        Label{text: order.status padding: 0 draw_text +: {color: #x8a5a2b text_style.font_size: 11}}}
+                                                }
+                                                Hint{text: "共 " + order.lines.len() + " 样 · 模拟总价 " + market_price(order.total_cents)}
+                                                Divider{}
+                                                for j in order.lines.len() {
+                                                    let line = order.lines[j]
+                                                    View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                        View{width: Fill height: Fit flow: Down spacing: 2
+                                                            Copy{text: line.name + " · " + line.product draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                            Hint{text: market_price(line.price_cents) + " / " + line.unit}
+                                                        }
+                                                        Copy{width: 150 text: line.quantity + " " + line.unit + " · " + market_price(market_order_line_total(line)) draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                    }
+                                                }
+                                                Hint{text: "下单不等于货到手：这一步只生成待收货记录；确认收货在后续步骤实现。"}
+                                            }
+                                        }
+                                        Hint{text: "模拟下单：不产生真实支付，提交订单不改变冰箱库存、进度或实际执行记录。"}
                                     }
                                 }
                                 RoundedView{show_bg: true width: Fill height: Fit padding: Inset{left: 12 right: 12 top: 8 bottom: 8}

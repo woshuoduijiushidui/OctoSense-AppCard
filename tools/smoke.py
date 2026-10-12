@@ -551,6 +551,100 @@ def exercise_market_cart_restart(ui):
              "菠菜" in cart and "秋葵" in cart)
 
 
+def exercise_market_order(ui):
+    """Issue #27: a 模拟订单 is submitted only after the user confirms the cart, and
+    then shows its 待收货 status. Submitting it leaves 库存、进度 and 实际执行记录
+    untouched, the page says no real payment, and the order survives a restart.
+    Synthetic inventory only."""
+    ui.click("选择", index=1)
+    ui.click("女性")
+    for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
+        enter(ui, label, value)
+    ui.click("下一步 · 选择周期方案  →")
+    ui.scroll(700)
+    ui.click("确认计划 · 去录冰箱  →")
+    # 菠菜 orders fine; 蘑菇 needs 15 盒 but only 14 are on sale; 秋葵 has no product.
+    for name, quantity in (("菠菜", "400"), ("蘑菇", "3000"), ("秋葵", "200")):
+        ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
+        enter(ui, "食材名称", name)
+        enter(ui, "数量", quantity)
+        if name == "秋葵":
+            ui.click("填写 / 收起包装营养参考")
+            enter(ui, "每100g热量 kcal", "30")
+            enter(ui, "每100g蛋白质 g", "2")
+            enter(ui, "每100g膳食纤维 g", "3")
+            enter(ui, "每100g维生素C mg", "20")
+        ui.click("预览并确认  →")
+        ui.click("最终确认入库")
+    ui.click("完成建档 · 开始托管  →")
+    ui.click("⚙  设置")
+    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
+    ui.click("改用本地规则")
+    ui.click("⌂  首页")
+    ui.click("生成今日菜单  →")
+    ui.click("▣  冰箱")
+    for _ in range(3):
+        ui.click("展开 / 收起")
+        ui.click("丢弃/移除")
+        ui.click("确认移除")
+    ui.check("the synthetic fridge is empty before 一键补齐", ui.state()["foods"] == [])
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.click("一键补齐 · 去模拟买菜  →")
+    ui.click("▧  购物车")
+    ui.scroll(900)
+    ui.check("the cart offers 提交模拟订单", "提交模拟订单" in ui.text())
+    before_foods = list(ui.state()["foods"])
+    before_stage = json.dumps(ui.state()["stages"][0], ensure_ascii=False)
+    before_meals = ui.state()["meal_count"]
+    ui.click("提交模拟订单  →")
+    ui.scroll(500)
+    ui.check("submitting first asks for confirmation, with no order yet",
+             "确认提交模拟订单？" in ui.text() and ui.state()["orders"] == [])
+    ui.click("取消")
+    ui.check("cancelling the confirmation writes no order", ui.state()["orders"] == [])
+    ui.click("提交模拟订单  →")
+    ui.click("确认提交订单")
+    ui.scroll(-2000)
+    order = ui.state()["orders"][0]
+    ui.check("only after confirmation is a 模拟订单 created",
+             len(ui.state()["orders"]) == 1 and order["status"] == "待收货")
+    page = ui.text()
+    ui.check("the order and its status are shown after submitting",
+             "模拟订单 #" + str(order["id"]) in page and "待收货" in page)
+    ui.check("the order page says no real purchase or payment", "不产生真实支付" in page)
+    ui.check("the order keeps the on-sale maximum and leaves the unmatched row out",
+             [line["name"] for line in order["lines"]] == ["菠菜", "蘑菇"]
+             and [line["quantity"] for line in order["lines"]] == [2, 14]
+             and "秋葵" not in page)
+    ui.check("submitting changes no 库存", ui.state()["foods"] == before_foods)
+    ui.check("submitting changes no 进度 and writes no 实际执行记录",
+             json.dumps(ui.state()["stages"][0], ensure_ascii=False) == before_stage
+             and ui.state()["meal_count"] == before_meals
+             and ui.state()["stages"][0]["intake"] == [])
+    ui.shot("issue-27-order.png")
+    (ui.profile / "expected-state.json").write_text(
+        json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
+    (ui.profile / "checks.json").write_text(
+        json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
+
+
+def exercise_market_order_restart(ui):
+    """Issue #27: the submitted 模拟订单 survives a host restart with its status."""
+    expected = json.loads((ui.profile / "expected-state.json").read_text(encoding="utf-8"))
+    ui.check("restart keeps the persisted order exactly", ui.state() == expected)
+    ui.check("restart resumes on the butler dashboard", "今天想吃点什么？" in ui.text())
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.click("一键补齐 · 去模拟买菜  →")
+    ui.click("▦  订单")
+    page = ui.text()
+    order = expected["orders"][0]
+    ui.check("the restored order keeps its lines, status and no-payment note",
+             "模拟订单 #" + str(order["id"]) in page and "待收货" in page
+             and "菠菜" in page and "蘑菇" in page and "不产生真实支付" in page)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18442)
@@ -565,6 +659,10 @@ def main():
                         help="Issue #26 购物车: auto-fill, pack rounding, flags, 增减/删除/替换, total, persistence")
     parser.add_argument("--market-cart-restart", action="store_true",
                         help="Issue #26: the persisted 购物车 survives a restart")
+    parser.add_argument("--market-order", action="store_true",
+                        help="Issue #27 模拟订单: confirm-then-submit, 待收货 status, stock/progress untouched, persistence")
+    parser.add_argument("--market-order-restart", action="store_true",
+                        help="Issue #27: the submitted 模拟订单 survives a restart")
     args = parser.parse_args()
     ui = UI(args.port, args.profile.resolve())
     if args.restart:
@@ -579,6 +677,10 @@ def main():
         exercise_market_cart(ui)
     elif args.market_cart_restart:
         exercise_market_cart_restart(ui)
+    elif args.market_order:
+        exercise_market_order(ui)
+    elif args.market_order_restart:
+        exercise_market_order_restart(ui)
     elif args.recipe:
         exercise_recipe(ui)
     else:

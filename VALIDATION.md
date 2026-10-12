@@ -1,5 +1,80 @@
 # Migration validation
 
+## Issue #27 模拟订单：确认、状态、不改变库存 — 2026-10-14
+
+- `bundle/main.splash`: a 模拟订单 is user input kept in `state.orders` (like
+  `state.cart`; the 缺菜清单 stays derived, ADR 0003). Each order is
+  `{id, day, status, total_cents, lines}` where each line is
+  `{name, product, quantity, unit, price_cents}`. `migrate_state` seeds
+  `orders: []` for older files and `valid_state` bounds and type-checks it on
+  load, so a restart keeps the submitted orders exactly. Schema stays 2.
+- `bundle/main.splash`: the 购物车 tab shows `提交模拟订单  →`, and the order is
+  written only by `market_submit_order`, which refuses to run unless
+  `market.confirming` is true. `提交模拟订单  →` opens a `确认提交模拟订单？`
+  panel with `确认提交订单`/`取消`; `取消` writes nothing. This is the only gate,
+  so no order exists before the user confirms.
+- `bundle/main.splash`: `market_order_lines` includes only non-dropped cart rows
+  whose 模拟商品 is picked; a `无匹配` row has nothing to buy and stays in the
+  cart, and a `可售不足` row is ordered at the product's `stock` (never more than
+  可售数量). `market_order_total`/`market_order_line_total` use the simulated
+  unit prices. The write skips `foods`, `stages`, `intake`, `meal_count` and
+  progress entirely.
+- `bundle/main.splash`: the 订单 tab lists each order as
+  `模拟订单 #id · <下单日>`, a `待收货` badge, `共 N 样 · 模拟总价`, the lines and
+  the note `下单不等于货到手…`. The footer states the 模拟下单 no-real-payment
+  rule on every region page.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market-order` (confirm-then-
+  submit, status, stock/progress untouched, on-sale cap, unmatched row excluded)
+  and `--market-order-restart` QA modes; both write the usual
+  `expected-state.json`/`checks.json`.
+- `tools/test_release.py`: offline guard
+  `test_market_order_requires_confirmation_and_changes_no_stock` (markers,
+  confirm/status/no-payment labels, orders in state, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `cd69dfec7ecf8aa843f22a62c8398d071e1bf81cbbc5b6f9d50245ca1981ed88`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-14 — bundle files of this commit, manifest patched in a test copy
+
+- Same pinned reference `card-host.exe` (655114c) and the same task-owned test
+  copy as Issue #25/#26: `.local-state/qa-order/bundle` with `manifest.json`
+  patched in that copy only (drop `files`, `requires`, `host_api`), admitted
+  with `card-host --stamp --allow-unsigned` at 1200x800. No committed bundle
+  file differed. `hub check bundle --allow-unsigned` on the real bundle rejects
+  only the pre-existing `files` capability and accepts the new digest.
+- Command: `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-order/qa-order --market-order` — **10/10 checks passed**: the
+  cart offers `提交模拟订单`; clicking it first shows `确认提交模拟订单？` with
+  `state.orders` still empty; `取消` writes no order; `确认提交订单` writes exactly
+  one `待收货` order and the 订单 page shows `模拟订单 #1` and its status; the page
+  says no real purchase or payment; the 可售不足 row is ordered at the 14-box
+  on-sale maximum while the 无匹配 row is left out; and `foods`, the stage JSON
+  (`intake` empty, counters unchanged) and `meal_count` are byte-identical before
+  and after submitting.
+- Relaunched the same host/profile and ran `--market-order-restart`: **3/3**
+  (state identical, dashboard restored, the order keeps its lines, `待收货`
+  status and no-payment note).
+- Regression on the same bundle copy: `--market-cart` **13/13**, `--market`
+  **12/12**, `--menu-purchase` **13/13**, so the Issue #23–#26 flows still pass.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **29 passed**.
+- Screenshot `docs/qa/issue-27-order.png` is a real 1200x800 capture of the same
+  run (order #1: 菠菜 2 把, 蘑菇 14 盒, 模拟总价 ¥96.40, 待收货).
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- The committed manifest still cannot be admitted by the locally available
+  reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
+  work), so the bundle was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- 确认收货 (Issue #28) is not implemented; the order page and its note say so.
+- Pre-existing, unrelated: the generic `qa_release.py` default flow (no mode
+  flag) stops at `ui.fill(text, index)` on the onboarding page because it passes
+  six positional values while that page renders five `TextInput`s. It fails the
+  same way on the unmodified Issue #26 bundle, so it is not a regression of this
+  work and was left untouched.
+
 ## Issue #26 待核对购物车：匹配、无法匹配的处理、增减与总价 — 2026-10-14
 
 - `bundle/main.splash`: the 购物车 is now user input stored in `state.cart`

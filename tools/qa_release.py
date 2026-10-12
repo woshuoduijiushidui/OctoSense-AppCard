@@ -36,6 +36,10 @@ parser.add_argument("--market-cart", action="store_true",
                     help="Issue #26 购物车: auto-fill, pack rounding, flags, 增减/删除/替换, total, persistence")
 parser.add_argument("--market-cart-restart", action="store_true",
                     help="Issue #26: the persisted 购物车 survives a restart")
+parser.add_argument("--market-order", action="store_true",
+                    help="Issue #27 模拟订单: confirm-then-submit, 待收货 status, stock/progress untouched")
+parser.add_argument("--market-order-restart", action="store_true",
+                    help="Issue #27: the submitted 模拟订单 survives a restart")
 args = parser.parse_args()
 profile = args.profile.resolve()
 if not profile.is_relative_to((APP / ".local-state").resolve()) or not profile.name.startswith("qa-"):
@@ -91,6 +95,10 @@ elif args.market_cart:
     smoke.exercise_market_cart(ui)
 elif args.market_cart_restart:
     smoke.exercise_market_cart_restart(ui)
+elif args.market_order:
+    smoke.exercise_market_order(ui)
+elif args.market_order_restart:
+    smoke.exercise_market_order_restart(ui)
 else:
     ui.check("first-run onboarding rendered", "首次建档  1 / 4" in ui.text())
     ui.shot("01-first-run.png")
