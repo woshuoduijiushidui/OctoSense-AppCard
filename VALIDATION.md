@@ -15,11 +15,16 @@ visible without a manual refresh and a restart re-derives the same numbers.
 Issue #24 checks, and `UI.scroll` added (the three meals no longer fit one
 screen). `tools/test_release.py` guards the new symbols offline.
 - Committed manifest digest restamped with the pinned App Hub
-`655114c4943cd2490daaefa2173e7b5aaa20669f`: `113d0151be4f09ff0857fe890a306344b974f49f7082621d7e4f27d155401e7e`.
+`655114c4943cd2490daaefa2173e7b5aaa20669f`: `c25dc206a332269e444781692f517b5569076a8c70bf022f72ffdd8080a92bbf`.
 - The README pair carried unresolved `<<<<<<< HEAD` / `>>>>>>> f0a7de7`
 conflict markers from the #23 branch (the #11 Overview paragraph on one side,
 the three-meal menu on the other). Both paragraphs are kept now and the markers
 are gone.
+- The four `bundle/screenshots/` PNGs were recaptured from the same hidden
+Card-runtime run (1200x800, synthetic inventory) and replace the stale pre-#23
+captures: 01 首页, 02 三餐日菜单 with the 缺菜清单, 03 the 缺菜清单 showing
+还差 941 克 with its editable field, 04 the 冰箱 batch list. The listing
+description now says so instead of "旧截图展示手动流程".
 
 ### Base blockers found and fixed (the app did not evaluate at all)
 
@@ -75,8 +80,9 @@ task-owned `--app-data` under `.local-state/qa-issue24`, then
 The committed manifest cannot be admitted by the locally available reference
 host (see above), so the bundle was not run under the full OctoSense shell, no
 live `model.complete` menu was generated, 忌口-excluded batches were not exercised
-through the UI (they share `plan_eligible` with expiry), and screenshots under
-`bundle/screenshots/` still show the prior flow and were not recaptured. The
+through the UI (they share `plan_eligible` with expiry). The screenshots are
+hidden Card-runtime captures of synthetic data, not full-shell captures, because
+the committed manifest cannot be admitted locally (see above). The
 pre-existing `tools/smoke.py exercise()` and the default `tools/qa_release.py`
 main path remain stale for the post-#8/#23 flow and were not run.
 
