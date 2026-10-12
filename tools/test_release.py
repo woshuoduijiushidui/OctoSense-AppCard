@@ -121,6 +121,59 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn('"午餐"', script)
         self.assertIn('"晚餐"', script)
 
+    def test_design_decisions_a6_b1_b2(self):
+        # Issue #22 decisions taken against the Issue #5 design doc, on top of the
+        # AI nutrition estimation that main already ships: A6 one automatic
+        # correction, B1 cross-batch allocation, B2 一键补齐 behind menu
+        # acceptance. Offline guard only; qa_release.py drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn draw_split(", "fn draw_piece(", "fn allocate_uses(",
+                       "fn merge_draws(", "let ai_correction", "let ai_validation_error"):
+            self.assertIn(marker, script)
+        # A6: one re-ask, carrying the concrete error; no second correction.
+        self.assertIn("if !ai_snapshot.experience && ai_correction < 1", script)
+        self.assertIn('task = task + "上一次输出未通过本地校验：" + ai_validation_error', script)
+        self.assertNotIn("ai_feedback", script)
+        # B1: validation and consumption share the one allocation; the consume
+        # operation never lists the same batch twice.
+        self.assertIn("allocate_uses(p, p.uses).fits", script)
+        self.assertIn("let uses = merge_draws(actual_draws)", script)
+        # B2: the entry is gated, and open_market refuses an unaccepted menu.
+        self.assertIn("接受这份菜单后即可一键补齐", script)
+        self.assertIn("请先接受这份菜单，再一键补齐", script)
+        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["capabilities"], ["storage", "model", "camera", "files"])
+
+    def test_design_decision_a4_estimates_write_back_with_provenance(self):
+        # Issue #41 settled the D5-015 conflict in favour of PR #21: an AI
+        # estimate may write back to state.foods[].nutrition, but only as a
+        # reference that carries provenance. Offline guard only; the estimate
+        # behaviour itself is driven natively by qa_ai_nutrition.py.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("known: true kcal: n.kcal",
+                       'source: "AI 估算" basis: n.basis estimated_at: time_now() model: ai_model',
+                       "for f in state.foods { if f.id == n.key { f.nutrition = ref",
+                       "consumption[n.key - 1].nutrition = ref"):
+            self.assertIn(marker, script)
+        # The decision is recorded in the vocabulary and an accepted ADR.
+        self.assertIn("**营养参考**:", (APP / "GLOSSARY.md").read_text(encoding="utf-8"))
+        adr = (APP / "docs/adr/0004-AI-估算写回批次但仅作参考.md").read_text(encoding="utf-8")
+        self.assertIn('source: "AI 估算"', adr)
+        self.assertIn("**Status**: accepted", adr)
+
+    def test_design_decision_stock_only_menu_source(self):
+        # Issue #43 chose option 1: the menu is generated from the inventory
+        # that exists at generation time, and a mock product's nutrition
+        # reference never feeds a menu. Offline guard only; qa_stock_only.py
+        # drives the behaviour natively.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        self.assertIn("只使用 input.inventory 中食材，food_id 必须来自库存", script)
+        glossary = (APP / "GLOSSARY.md").read_text(encoding="utf-8")
+        self.assertNotIn("它可以包含库存中没有的食材", glossary)
+        adr = (APP / "docs/adr/0005-菜单只用库存生成.md").read_text(encoding="utf-8")
+        self.assertIn("**Status**: accepted", adr)
+        self.assertIn("模拟商品", adr)
+
     def test_manifest_has_no_network_shopping_capability(self):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         capabilities = set(manifest["capabilities"])

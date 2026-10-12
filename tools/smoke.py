@@ -357,6 +357,18 @@ def exercise_menu_purchase(ui):
         json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
 
 
+def accept_menu_if_needed(ui):
+    """Issue #22 decision B2: 一键补齐 is gated on an accepted menu. The accept
+    action only exists while the current menu is still a candidate; a restart run
+    finds it already accepted and must not look for the button. Accepting scrolls
+    to the bottom bar, so scroll back to the top for the 缺菜清单 side panel."""
+    plan = ui.state()["plans"][0]
+    if not plan.get("accepted"):
+        ui.click("接受今日菜单  →")
+        assert ui.state()["plans"][0]["accepted"]
+        ui.scroll(-2500)
+
+
 def exercise_market(ui):
     """Issue #25: 一键补齐 opens the in-app 模拟买菜 region in the same window,
     carrying the derived 缺菜清单 (ADR 0003), with its own 商品/购物车/订单
@@ -405,7 +417,10 @@ def exercise_market(ui):
     ui.check("the synthetic fridge is empty before 一键补齐", ui.state()["foods"] == [])
     ui.click("✦  菜单")
     ui.scroll(-2500)
-    ui.check("the 缺菜清单 offers 一键补齐", "一键补齐" in ui.text())
+    ui.check("一键补齐 waits until the menu is accepted",
+             "接受这份菜单后即可一键补齐" in ui.text())
+    accept_menu_if_needed(ui)
+    ui.check("an accepted menu offers 一键补齐", "一键补齐 · 去模拟买菜  →" in ui.text())
     ui.click("一键补齐 · 去模拟买菜  →")
     page = ui.text()
     ui.check("一键补齐 opens the 模拟买菜 region in the same window",
@@ -489,6 +504,7 @@ def exercise_market_cart(ui):
     ui.check("the synthetic fridge is empty before 一键补齐", ui.state()["foods"] == [])
     ui.click("✦  菜单")
     ui.scroll(-2500)
+    accept_menu_if_needed(ui)
     ui.click("一键补齐 · 去模拟买菜  →")
     ui.click("▧  购物车")
     cart = ui.text()
@@ -526,6 +542,7 @@ def exercise_market_cart(ui):
     ui.click("← 返回管家")
     ui.click("✦  菜单")
     ui.scroll(-2500)
+    accept_menu_if_needed(ui)
     ui.click("一键补齐 · 去模拟买菜  →")
     ui.click("▧  购物车")
     reopened = ui.text()
@@ -546,6 +563,7 @@ def exercise_market_cart_restart(ui):
     ui.check("restart resumes on the butler dashboard", "今天想吃点什么？" in ui.text())
     ui.click("✦  菜单")
     ui.scroll(-2500)
+    accept_menu_if_needed(ui)
     ui.click("一键补齐 · 去模拟买菜  →")
     ui.click("▧  购物车")
     cart = ui.text()
@@ -594,6 +612,7 @@ def exercise_market_order(ui):
     ui.check("the synthetic fridge is empty before 一键补齐", ui.state()["foods"] == [])
     ui.click("✦  菜单")
     ui.scroll(-2500)
+    accept_menu_if_needed(ui)
     ui.click("一键补齐 · 去模拟买菜  →")
     ui.click("▧  购物车")
     ui.scroll(900)
@@ -640,6 +659,7 @@ def exercise_market_order_restart(ui):
     ui.check("restart resumes on the butler dashboard", "今天想吃点什么？" in ui.text())
     ui.click("✦  菜单")
     ui.scroll(-2500)
+    accept_menu_if_needed(ui)
     ui.click("一键补齐 · 去模拟买菜  →")
     ui.click("▦  订单")
     page = ui.text()
@@ -702,6 +722,7 @@ Synthetic inventory only."""
              len(kept) == 1 and kept[0]["canonical_quantity"] == 100)
     ui.click("✦  菜单")
     ui.scroll(-2500)
+    accept_menu_if_needed(ui)
     ui.click("一键补齐 · 去模拟买菜  →")
     ui.click("▧  购物车")
     ui.scroll(900)
@@ -776,6 +797,7 @@ def exercise_market_receive_restart(ui):
     ui.check("the received 蘑菇 batch is still in the fridge", "蘑菇 · 2 批" in fridge)
     ui.click("✦  菜单")
     ui.scroll(-2500)
+    accept_menu_if_needed(ui)
     ui.click("一键补齐 · 去模拟买菜  →")
     ui.click("▦  订单")
     ui.check("the restored order is 已收货 and no longer offers 确认收货",
