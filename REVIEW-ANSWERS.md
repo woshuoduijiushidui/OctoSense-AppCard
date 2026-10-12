@@ -7,7 +7,7 @@ manual fallback passed 26 UI/data checks and restart checks. The user reported
 that the live MiniMax image flow passed in the foreground; per-step logs were
 not independently captured. Sealed release and Store publication are unverified.
 
-1. **Claims.** The app confirms a dietary profile and a 1/3/7/15/21/30-day cycle (three profile-derived candidates per cycle, regenerable one cycle at a time),
+1. **Claims.** The app confirms a dietary profile and 7/21/30-day cycle,
    previews manual food-batch intake, groups exact-name batches without losing
    per-batch actions, proposes local-rule or official model candidates, and
    deducts inventory only after a separate consumption confirmation. Quantity

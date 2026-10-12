@@ -1,5 +1,122 @@
 # Migration validation
 
+## Overview page: long-term plan and progress, 2026-10-10 — unreleased working tree
+
+Implementation for Issue #11. A dedicated Overview tab shows the long-term plan
+and its progress.
+
+- `bundle/main.splash`: the nav gains `◈  总览` between 首页 and 冰箱 (the later
+tabs and their `navigate` calls were renumbered). `meals_per_day()` fixes the
+daily meal count at 3 (早/中/晚); `stage_done_meals`, `stage_planned_meals`
+(`days × 3`) and `stage_progress_percent` compute a stage's progress, and
+`plan_done_meals` / `plan_planned_meals` / `plan_progress_percent` roll the
+per-stage counts up, so a future stage with no confirmed meal cannot move the
+confirmed numerator. `stage_today_intake` lists the meals confirmed today. The
+Overview shows the plan (stages, total days, plan progress, per-stage progress),
+the current stage's kcal and protein target against actuals, and today's
+per-meal progress with its meals. Only `confirm_consume` appends to a stage's
+`intake`, so generating or accepting a menu never changes progress.
+`ensure_extended_state` now refreshes `state.daily_target` from `current_stage`,
+so a date-driven stage switch shows the new stage's target; when the calendar has
+passed every stage, the Overview says the plan has ended and offers "选择下一份
+计划…" instead of showing a stale stage. `meals_per_day()` is the single source of
+truth for progress; the persisted `meals_per_day` field keeps its historical
+default and is no longer read for progress, so an old value cannot change the
+formula, and the unused `choose_meals_per_day` setter whose text promised a
+configurable meal count was deleted. `ai_watchdog` also re-renders the app when
+the civil day turns over (`shown_day` compared with `health_day()`), so an
+Overview left open across midnight shows the new stage and targets without a
+click or restart.
+- Storage schema stays 1; no new stored field.
+- `tools/qa_release.py` now exercises the Overview against a real host and adds
+  `--stage-switch`, `--plan-ended` and `--session-switch` modes with generated
+  fixtures whose clock offset has passed the first stage, the whole plan, or the
+  civil midnight; `tools/test_release.py` guards the new symbols. Bilingual
+  READMEs and `CYCLE-PLANS.md` describe the page and the progress rule.
+
+### Native run, 2026-10-10 — historical 0.6.2 bundle
+
+These results were captured on the 0.6.2 bundle (capabilities storage+model)
+before the Issue #2 capabilities landed. They are history and do **not**
+describe the current commit.
+
+- Restamped that editable bundle with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 34666994381141739f4918c1ab8bbed31627a6c5fe16b13a377fa21b197107b7`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts).
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-issue11`:
+  `tools/qa_release.py --port 18571 --profile .local-state/qa-issue11` —
+  **28/28 checks passed**, including the Overview tab, plan progress
+  `1 / 66` (= 1 of (7+15)×3), per-stage `1 / 21` and `0 / 45`, per-meal `1 / 3`,
+  the current stage's kcal/protein target against actuals, no progress change
+  after generating and accepting a menu, and progress rising to `2 / 66` and
+  `2 / 3` only after a confirmed meal. `--restart` then preserved the exact
+  synthetic state.
+- Stage switch: the main run wrote a fixture profile
+  `.local-state/qa-issue11-stage` whose synthetic clock offset had passed the
+  7-day first stage. A second hidden host at port 18572 plus
+  `tools/qa_release.py --stage-switch` — **2/2 checks passed**: the 15-day stage
+  became current and its kcal/protein target replaced the first stage's, and a
+  restart preserved the fixture unchanged.
+- Ended plan: a third fixture `.local-state/qa-issue11-ended` passed every stage.
+  A hidden host at port 18573 plus `tools/qa_release.py --plan-ended` — **2/2
+  checks passed**: the Overview says the plan has ended and marks no stage as
+  current, and the 档案 tab shows the same ended summary instead of a stale
+  "当前阶段".
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures: `docs/qa/issue-11-overview.png` (1/66, stage 1 current),
+  `docs/qa/issue-11-progress.png` (2/66, today 2/3) and
+  `docs/qa/issue-11-stage-switch.png` (the 15-day stage current). These are
+  hidden Card-runtime captures of synthetic data at 1200x800.
+- Bundle total is 7,839,683 bytes, under the 8 MiB package guard.
+- An independent two-axis review (Standards + Spec) of the commit found no
+  blocker. Acting on it: `stage_progress_percent` / `plan_progress_percent` reuse
+  the existing `goal_percent`; the stored `meals_per_day` defaults were left
+  untouched; `choose_meals_per_day` was deleted; the dead `program == nil`
+  Overview branch was removed; and the ended-plan state was added and covered by
+  a native check, with `program_expired()` shared so the 档案 tab agrees.
+  The reviewers read "计划进度为各阶段之和" as rolling the per-stage meal counts
+  into one plan progress (1/66), which is what the implementation does and what
+  the acceptance criterion calls 汇总.
+
+### Current bundle verification, 2026-10-11 — pending a capabilities host
+
+- The current bundle is 0.8.0 and declares `storage, model, camera, files`.
+  Restamped with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 0fe1939edb8186990d8e4b9ffb12bc426c626f6fdfcdb3c18d51ce497e52cbdb`.
+- The pinned host cannot run it: `hub check` and `card-host` refuse with
+  `unknown capability "files"`; stripping `files`/`camera` then gets
+  `app pantry-steward needs a host implementing app_policy.device_consent@1`.
+  The Issue #11 native results above therefore belong to the 0.6.2 bundle and
+  were not re-run on this commit.
+- `tools/qa_release.py --session-switch` was added for the day turn-over fix. It
+  keeps one host open across the civil midnight and expects the Overview to
+  advance itself with no click and no restart. It is ready but could not be
+  executed here for the host-capability reason above; it needs a host that
+  implements the Issue #2 `camera`/`files` capabilities.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'` — **23 passed**
+  (offline guards on the current tree).
+
+### Still unverified
+
+- The full `tools/smoke.py` regression was not run: on the standalone
+  `card-host` the AI-provider status check (`宿主服务可用`) fails because that host
+  intentionally has no model service. It needs the full desktop host.
+- A stage switch was verified by advancing the synthetic clock offset, not by
+  waiting real days. Re-running the native checks and the new `--session-switch`
+  day turn-over case needs a host that implements the current `camera`/`files`
+  capabilities; `tools/launch.py --check` against a full host workspace, live
+  provider calls, non-Windows platforms, signing and submission remain
+  unverified human checkpoints.
+- The four `bundle/screenshots/*.png` release assets were not re-captured, so
+  they still show the old five-item navigation; regenerate them with the full
+  desktop host at the release checkpoint. No tag, release, new Issue or
+  submission was performed.
+
 ## Stage locking and future-stage editing, 2026-10-10 — unreleased 0.6.2 working tree
 
 Implementation for Issue #10. A confirmed plan can be edited only in front of
@@ -32,18 +149,16 @@ its started date.
   the plan totals fall from 52 to 22 days. `tools/test_release.py` guards the
   new symbols. Bilingual READMEs and `CYCLE-PLANS.md` describe the flow.
 
-### Native status, c0af5e07 — restacked, gate pending a "files"-capable host
+### Native run, 2026-10-10 — unreleased 0.6.2 working tree
 
-- Restamped the rebased bundle with the pinned official App Hub
+- Restamped the editable bundle with the pinned official App Hub
   `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
-  `bundle_blake3 = c0af5e07b8c6178d6c2fbda9213e3b103c526687961d987edaf7ccbd06156cb1`. The packaged bundle is 4,921,250 bytes.
-- The pinned hub refuses this digest because the Issue-2 base requests
-  capability `"files"` (`requests unknown capability "files"`), and the
-  standalone `card-host` refuses it the same way. `hub check` and the native
-  suite have therefore **not** been re-run on this digest; they are historical.
-- Historical native run (pre-restack bundle, manifest capabilities storage +
-  model only): hidden official `card-host.exe` standalone at 1200x800 with
-  task-owned `--app-data` under `.local-state/qa-issue10`,
+  `bundle_blake3 = f7a75404fb6fc48e4fcd7d12e5cd63a6d94417caf3df6e27a958b0afd61770a6`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts).
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-issue10`:
   `tools/qa_release.py --port 18528 --profile .local-state/qa-issue10` —
   **21/21 checks passed**, then `--restart` preserved the exact synthetic state.
   New checks: the started stage locks by calendar with a readable reason;
@@ -52,11 +167,16 @@ its started date.
   locked stage stays byte-identical; a confirmed meal records on the started
   stage and survives a later edit to a future stage; the plan totals recalculate
   (52 -> 22 days) with the confirmed count unchanged.
-- No real inventory, keys, provider calls or AI credentials were used. Real
-  captures: `docs/qa/issue-10-stage-lock.png` and
-  `docs/qa/issue-10-future-edited.png` (hidden Card-runtime captures of
-  synthetic data). The Issue-2 base already ships compressed bundle screenshots,
-  so the Issue #10 PNG recompression is no longer needed.
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures: `docs/qa/issue-10-stage-lock.png` (three stages, the current
+  one locked with its calendar reason, the next editable) and
+  `docs/qa/issue-10-future-edited.png` (progress 1/44 after a future-stage
+  removal). These are hidden Card-runtime captures of synthetic data.
+- The bundle had only 8,639 bytes under the 8 MiB package guard once the new
+  code was added, so the five bundled PNGs (`assets/sunlit-pantry-bg.png` and
+  the four `screenshots/*.png`) were recompressed losslessly with Pillow
+  (`optimize=True`). Pixels are identical (verified by decoding before/after);
+  bundle total is now 7,831,339 bytes.
 
 ### Still unverified
 
@@ -114,7 +234,7 @@ records, and a plan is an ordered list of stage snapshots.
   migration, stage-bound menus) were applied and verified against the Issue #9
   bundle alone. Restamped it with the pinned official App Hub
   `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
-  `bundle_blake3 = c0af5e07b8c6178d6c2fbda9213e3b103c526687961d987edaf7ccbd06156cb1`.
+  `bundle_blake3 = 791b647235eb090b1c5a4c26dd275bca0b0288d3a95de5f820b426b0affc49bb`.
   `hub check bundle --allow-unsigned` then **PASSED** with only the expected
   unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
   hosts).

@@ -3,6 +3,7 @@ import importlib.util
 import argparse
 import json
 from pathlib import Path
+import time
 
 APP = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("smoke", APP / "tools/smoke.py")
@@ -21,6 +22,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=18528)
 parser.add_argument("--profile", type=Path, required=True, help="task-owned synthetic directory under .local-state/")
 parser.add_argument("--restart", action="store_true")
+parser.add_argument("--stage-switch", action="store_true",
+                    help="boot a profile whose calendar has already reached the next stage")
+parser.add_argument("--plan-ended", action="store_true",
+                    help="boot a profile whose calendar has passed every stage")
+parser.add_argument("--session-switch", action="store_true",
+                    help="keep one host open across the civil day and expect the overview to advance itself")
 args = parser.parse_args()
 profile = args.profile.resolve()
 if not profile.is_relative_to((APP / ".local-state").resolve()) or not profile.name.startswith("qa-"):
@@ -29,6 +36,45 @@ ui = PreviewUI(args.port, profile)
 if args.restart:
     expected = json.loads((ui.profile / "expected-state.json").read_text(encoding="utf-8"))
     ui.check("restart preserves exact synthetic state", ui.state() == expected)
+elif args.stage_switch:
+    # The fixture advances the clock past the first stage's end, so the current
+    # stage must be the second one and the overview must show its targets.
+    stages = ui.state()["stages"]
+    current = stages[1]
+    ui.click("◈  总览")
+    ui.scroll(700)
+    overview = ui.text()
+    ui.check("after its start date the next stage becomes current",
+             "当前阶段 · " + current["name"] in overview)
+    ui.check("the switch shows the new stage's targets, not the old one's",
+             str(current["protein_goal"]) + " g" in overview
+             and str(stages[0]["protein_goal"]) + " g" not in overview)
+    ui.shot("10-stage-switch.png")
+elif args.plan_ended:
+    ui.click("◈  总览")
+    ui.scroll(700)
+    ui.check("an ended plan is not presented as a current stage",
+             "这一份计划已结束" in ui.text() and "· 当前" not in ui.text()
+             and "选择下一份计划…" in ui.text())
+    ui.click("◔  档案")
+    ui.check("the archive tab agrees the plan has ended",
+             "当前计划 · 已结束" in ui.text() and "所有阶段已结束" in ui.text())
+elif args.session_switch:
+    # No click after the first frame: the civil day turns over while the
+    # Overview stays open, so only the day watchdog can redraw it onto stage 2.
+    stages = ui.state()["stages"]
+    ui.click("◈  总览")
+    ui.scroll(-2000)
+    ui.check("the session starts on its first stage",
+             "第 1 阶段 · " + stages[0]["name"] + " · 当前" in ui.text())
+    ui.shot("11-session-stage-before.png")
+    app_now = time.time() + ui.state()["offset"]
+    remaining = (int(app_now // 86400) + 1) * 86400 - app_now
+    time.sleep(max(0.0, remaining) + 3)
+    ui.check("the day turn-over redraws the overview onto the next stage",
+             "第 2 阶段 · " + stages[1]["name"] + " · 当前" in ui.text()
+             and "第 1 阶段 · " + stages[0]["name"] + " · 当前" not in ui.text())
+    ui.shot("11-session-stage-after.png")
 else:
     ui.check("first-run onboarding rendered", "首次建档  1 / 4" in ui.text())
     ui.shot("01-first-run.png")
@@ -150,5 +196,101 @@ else:
     ui.check("plan totals are recalculated after the edit",
              "总天数 22 天" in ui.text() and "已确认 1 / " in ui.text())
     ui.shot("07-future-edited.png")
+    # ---- Issue #11: the overview page, long-term plan and progress.
+    stages = ui.state()["stages"]
+    ui.click("◈  总览")
+    ui.scroll(-2000)
+    ui.check("overview shows the long-term plan and every stage",
+             "长期计划" in ui.text() and stages[0]["name"] in ui.text()
+             and stages[1]["name"] in ui.text())
+    ui.check("plan progress counts confirmed meals over days x 3 meals",
+             "计划进度 1% · 已确认 1 / 66 餐" in ui.text()
+             and "进度 4%" in ui.text() and "0 / 45 餐" in ui.text())
+    ui.scroll(700)
+    ui.check("today shows per-meal progress out of three",
+             "每餐进度 · 已确认 1 / 3 餐" in ui.text())
+    ui.check("the current stage compares kcal and protein targets with actuals",
+             "当前阶段 · " + stages[0]["name"] in ui.text()
+             and "热量" in ui.text() and str(stages[0]["kcal_goal"]) + " kcal" in ui.text()
+             and "蛋白质" in ui.text() and str(stages[0]["protein_goal"]) + " g" in ui.text())
+    ui.shot("08-overview.png")
+    # Generating and confirming a menu must not move progress; only a confirmed
+    # meal does.
+    ui.click("⌂  首页")
+    ui.click("生成这一餐  →")
+    ui.click("就吃这套 · 设为今晚方案  →")
+    ui.click("◈  总览")
+    ui.scroll(-2000)
+    ui.check("generating and confirming a menu leaves progress unchanged",
+             "计划进度 1% · 已确认 1 / 66 餐" in ui.text()
+             and len(ui.state()["stages"][0]["intake"]) == 1)
+    ui.click("✦  方案")
+    ui.click("我吃完了 · 核对实际用量")
+    ui.click(name="confirm_consumption")
+    ui.click("◈  总览")
+    ui.scroll(-2000)
+    ui.check("confirming a meal increases per-stage and plan progress",
+             "计划进度 3% · 已确认 2 / 66 餐" in ui.text()
+             and "进度 9%" in ui.text()
+             and len(ui.state()["stages"][0]["intake"]) == 2)
+    ui.scroll(700)
+    ui.check("today per-meal progress advances to two of three",
+             "每餐进度 · 已确认 2 / 3 餐" in ui.text())
+    ui.shot("09-progress.png")
     (ui.profile / "expected-state.json").write_text(json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
     (ui.profile / "checks.json").write_text(json.dumps(ui.checks), encoding="utf-8")
+    # Issue #11 stage switch: simulate the calendar passing the first stage so a
+    # second host boot can assert the overview shows the new stage's targets.
+    advanced = json.loads(json.dumps(ui.state()))
+    advanced["offset"] = advanced["offset"] + 8 * 86400
+    advanced["cycle_start"] = int(time.time()) + advanced["offset"]
+    advanced["reminders"] = False
+    advanced["daily_target"] = advanced["stages"][1]["daily_kcal"]
+    stage_profile = ui.profile.parent / (ui.profile.name + "-stage")
+    (stage_profile / "pantry-steward").mkdir(parents=True, exist_ok=True)
+    (stage_profile / "pantry-steward/pantry.json").write_text(json.dumps(advanced, ensure_ascii=False), encoding="utf-8")
+    (stage_profile / "expected-state.json").write_text(json.dumps(advanced, ensure_ascii=False), encoding="utf-8")
+    # Issue #11 ended plan: the calendar has passed the whole plan, so no stage is
+    # current and the page must say so instead of showing a stale stage.
+    ended = json.loads(json.dumps(advanced))
+    ended["offset"] = ended["offset"] + 30 * 86400
+    ended["cycle_start"] = int(time.time()) + ended["offset"]
+    ended_profile = ui.profile.parent / (ui.profile.name + "-ended")
+    (ended_profile / "pantry-steward").mkdir(parents=True, exist_ok=True)
+    (ended_profile / "pantry-steward/pantry.json").write_text(json.dumps(ended, ensure_ascii=False), encoding="utf-8")
+    (ended_profile / "expected-state.json").write_text(json.dumps(ended, ensure_ascii=False), encoding="utf-8")
+    # Issue #11 same-session day turn-over: stage 1 ends at the civil midnight
+    # about a minute after this fixture is written, so the Overview must advance
+    # itself while it stays open, with no click and no restart.
+    session = json.loads(json.dumps(ui.state()))
+    now = int(time.time())
+    offset = (86400 - (now % 86400)) - 60
+    if offset < 0:
+        offset = offset + 86400
+    app_day = (now + offset) // 86400
+    template = session["stages"][0]
+
+    def session_stage(identifier, name, days, started):
+        stage = json.loads(json.dumps(template))
+        stage.update({"id": identifier, "name": name, "days": days, "started": started,
+                      "kcal_goal": template["daily_kcal"] * days,
+                      "protein_goal": template["protein_goal"] // template["days"] * days,
+                      "fiber_goal": template["fiber_goal"] // template["days"] * days,
+                      "vitamin_c_goal": template["vitamin_c_goal"] // template["days"] * days,
+                      "consumed_kcal": 0, "consumed_protein": 0, "consumed_fiber": 0,
+                      "consumed_vitamin_c": 0, "intake": []})
+        return stage
+
+    session["stages"] = [session_stage(900, "1天起步 · 会话", 1, app_day * 86400),
+                         session_stage(901, "7天起步 · 会话", 7, (app_day + 1) * 86400)]
+    session["stage_next"] = 902
+    session["offset"] = offset
+    session["cycle_start"] = now + offset
+    session["health"]["day"] = app_day
+    session["health"]["meals_today"] = 0
+    session["reminders"] = False
+    session["daily_target"] = session["stages"][0]["daily_kcal"]
+    session_profile = ui.profile.parent / (ui.profile.name + "-session")
+    (session_profile / "pantry-steward").mkdir(parents=True, exist_ok=True)
+    (session_profile / "pantry-steward/pantry.json").write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
+    (session_profile / "expected-state.json").write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
