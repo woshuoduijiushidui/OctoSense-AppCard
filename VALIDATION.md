@@ -1,5 +1,25 @@
 # Migration validation
 
+## Issue #8 six-cycle candidates, merged onto the #2 rework
+
+`bundle/main.splash` was reworked by Issue #2 while Issue #8 added the six-cycle
+candidate picker, so this merge re-applies #8's feature onto #2's script instead
+of a line merge:
+
+- Cycles 1/3/7/15/21/30 with three profile-derived candidates each; each shows
+  name, goal, execution trait, daily and cycle totals, and the difference from
+  the cycle baseline. A seeded line-up means `重新生成本周期候选` replaces only the
+  viewed cycle's unconfirmed candidates.
+- The candidate/config migration is factored into `migrate_candidates`, applied
+  to both freshly converted schema-1 states and current schema-2 states. It adds
+  `cycle_seed` and rebuilds old-format candidates by shape (`variant` field), so
+  user text (preferences, food names) cannot be mistaken for a field name.
+- Verified live in the hidden official host after the merge: the cycle page
+  renders the six lengths, switching cycles and regenerating the viewed cycle
+  keep a confirmed plan and the other cycles untouched, and re-saving the profile
+  from a non-default cycle returns the page and marker to 7 days. `hub check
+  bundle --allow-unsigned` PASSED.
+
 ## Issue #2 foreground verification, 2026-10-11 — user reported pass
 
 After installing digest `ba2d1a2bf588bd48a74c9c6112cfa706146375649c45cdff0fad5e2449498ff5`,
