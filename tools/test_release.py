@@ -6,7 +6,7 @@ import unittest
 
 APP = Path(__file__).resolve().parents[1]
 BUNDLE = APP / "bundle"
-REPOSITORY = "https://github.com/woshuoduijiushidui/OctoSense-AppCard"
+REPOSITORY = "https://github.com/woshuoduijiushidui/pantry-steward"
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -29,6 +29,14 @@ class ReleaseMetadataTests(unittest.TestCase):
             path = (BUNDLE / name).resolve()
             self.assertTrue(path.is_relative_to(BUNDLE.resolve()))
             self.assertTrue(path.is_file(), name)
+
+    def test_no_stale_repository_name_in_published_metadata(self):
+        # The repository was renamed to pantry-steward. A stale link is a dead
+        # end for users and would disagree with REPOSITORY above, so guard it.
+        for name in ("README.md", "README.zh-CN.md", "PRIVACY.md", "SUPPORT.md",
+                     "SUBMISSION.md", "AGENTS.md"):
+            self.assertNotIn("OctoSense-AppCard", (APP / name).read_text(encoding="utf-8"), name)
+        self.assertNotIn("OctoSense-AppCard", (BUNDLE / "listing.json").read_text(encoding="utf-8"))
 
     def test_package_size_and_no_private_configuration(self):
         files = [path for path in BUNDLE.rglob("*") if path.is_file()]

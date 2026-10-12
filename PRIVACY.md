@@ -14,4 +14,4 @@
 
 本地记录与备份保留到用户删除相应应用数据。删除前请先备份需要的信息；如需彻底删除，还需自行处理已导出的副本。线上请求的保留、删除方式和处理位置以提供方政策为准，本应用无法保证删除提供方已接收的信息。应用不内置统计或额外上传入口。
 
-问题反馈：https://github.com/woshuoduijiushidui/OctoSense-AppCard/issues 。反馈时不要附 API Key、完整饮食档案或未经脱敏的库存数据。
+问题反馈：https://github.com/woshuoduijiushidui/pantry-steward/issues 。反馈时不要附 API Key、完整饮食档案或未经脱敏的库存数据。

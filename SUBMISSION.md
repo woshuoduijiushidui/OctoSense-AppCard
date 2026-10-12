@@ -1,11 +1,11 @@
 # 0.8.0 本地提交准备 / Publication checkpoint
 
-当前 `bundle/` 是 Issue #2 的 **0.8.0 未发布源码候选**，仅面向 Windows。固定版本 App Hub 包检查、19 项 Python 测试、隔离完整宿主的本地测试签名安装，以及官方宿主手动回退检查已通过。本地改版宿主已验证能力探测、共用选择界面及取消不写库；用户报告真实 MiniMax 图片、摄像头及重试前台验收通过，但未留存逐步独立日志。四张原截图及现有视频属于先前 0.7.0 手动流程；新版合成数据界面截图仅说明界面变化。新视频不属于本次 PR。详见 [VALIDATION.md](VALIDATION.md)。这些本地检查不等于正式封存包、上架或比赛资格。
+当前 `bundle/` 是 Issue #2 的 **0.8.0 未发布源码候选**，仅面向 Windows。固定版本 App Hub 包检查、31 项 Python 测试、隔离完整宿主的本地测试签名安装，以及官方宿主手动回退检查已通过；#29 交付检查点已用宿主固定的官方 App Hub `8347a489141c0e24cab564883db7c4592935a8b2` 重新盖章，提交后的 bundle 校验 `PASSED`，仅余预期的未签名提示。本地改版宿主已验证能力探测、共用选择界面及取消不写库；用户报告真实 MiniMax 图片、摄像头及重试前台验收通过，但未留存逐步独立日志。`bundle/screenshots/` 四张截图为当前 0.8.0 用合成数据在隐藏参考宿主中重拍；现有视频属于先前 0.7.0 手动流程，新视频不属于本次 PR。见 [VALIDATION.md](VALIDATION.md)。这些本地检查不等于正式封存包、上架或比赛资格。
 
 发布前仍须完成：
 
 1. 正式发布前复核用户报告的真实图片提供方、相机、已有图片、取消与重启前台验收，以及当前截图的适用范围；本地测试签名身份已获本人许可并用于隔离安装。新录屏由其他任务处理。
-2. 审核工作流、发布者身份、签名／封存流程、当前公开支持与隐私链接。现有 `publisher-toolchain.json` 和发布工作流仍固定早期 0.6.2 的 App Hub 提交 `655114c4943cd2490daaefa2173e7b5aaa20669f`，与本次源码检查使用的宿主固定提交不同，不能直接作为 0.8.0 发布证明；listing 隐私链接也仍指向 `main/PRIVACY.md`，远端页面须与最终候选一致。
+2. 审核工作流、发布者身份、签名／封存流程。打包清单及公开隐私、支持页面的链接已随仓库改名为 `pantry-steward` 更新（见 VALIDATION.md #29）。现有 `publisher-toolchain.json` 和发布工作流仍固定早期 0.6.2 的 App Hub 提交 `655114c4943cd2490daaefa2173e7b5aaa20669f`，该提交不认识 `files` 能力，不能直接作为 0.8.0 发布证明；发布前须改用发布当日的官方固定版本（本次校验使用宿主固定的 `8347a489141c0e24cab564883db7c4592935a8b2`）并重新核对产物。
 3. 取得本人对提交、推送、`v0.8.0` 标签、发布、App Hub 新 Issue 的分别适用授权；运行最新版发布流程并核对产物 SHA256、publisher-unpack／publisher-verify 和实际工作流／Release URL。
 4. 单独确认比赛截止后的改进版本是否被接受；源码完成不自动改变比赛规则。旧版 [0.6.1 / #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) 的标签及审核记录不变。
 
@@ -19,8 +19,8 @@
 - 旧提交：[0.6.1 / #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99)，其标签及审核记录不变。
 - 发布者姓名、Windows-only 声明及向宿主模型提供方发送规划输入的隐私说明：用户已确认。
 - 背景图 sunlit-pantry-bg.png：作者于 2026-10-08 确认是本人原创，已记录 NOTICE；不声称独立权属鉴定。
-- 支持：https://github.com/woshuoduijiushidui/OctoSense-AppCard/issues
-- 隐私：https://github.com/woshuoduijiushidui/OctoSense-AppCard/blob/main/PRIVACY.md
+- 支持：https://github.com/woshuoduijiushidui/pantry-steward/issues
+- 隐私：https://github.com/woshuoduijiushidui/pantry-steward/blob/main/PRIVACY.md
 - 源码检查、单元测试及尚未验证项见 [VALIDATION.md](VALIDATION.md)。
 
 ## 发布前仍须本人确认
