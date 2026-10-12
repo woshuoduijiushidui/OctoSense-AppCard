@@ -1,5 +1,76 @@
 # Migration validation
 
+## Issue #26 待核对购物车：匹配、无法匹配的处理、增减与总价 — 2026-10-14
+
+- `bundle/main.splash`: the 购物车 is now user input stored in `state.cart`
+  (ADR 0003: only the cart is persisted; the 缺菜清单 stays derived). Each line is
+  `{name, product, quantity, dropped}`; an empty `product` means no allowed match.
+  `migrate_state` seeds `cart: []` for older files and `valid_state` bounds and
+  type-checks it on load, so a restart keeps the cart exactly.
+- `bundle/main.splash`: entering the region (`open_market`) auto-fills the cart by
+  name via `market_pick`, which refuses anything `excluded_food` (过敏与忌口).
+  `market_spec_grams`/`market_packs` round the purchase quantity up to whole
+  packs by the product's 规格 (g/kg); 枚/L specs fall back to 1 pack. Auto-fill
+  only adds names it has never seen, so a user's own quantity, replacement and
+  deletion survive every re-entry.
+- `bundle/main.splash`: the 购物车 tab renders each line with its simulated unit
+  price and line subtotal, `−/＋` quantity steps, `删除` (a tombstone, so a
+  deleted row is never re-added) and `替换`. A row with no match or more packs
+  than `stock` gets a `无匹配`/`可售不足` badge and an inline explanation instead
+  of being dropped; the tab shows `共 N 样 · 模拟总价` from `market_cart_total`.
+- `bundle/main.splash`: `替换` opens `market_alternatives`, ranked by
+  `market_category_hint` (same 品类 first) then by spec closeness to the gap,
+  with 过敏与忌口 excluded; `market_replace_with` re-picks the quantity by spec.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market-cart` (auto-fill,
+  rounding, flags, 增减/删除/替换, total, re-entry persistence) and
+  `--market-cart-restart` QA modes. The Issue #25 `--market` cart assertion was
+  updated from the retired read-only preview ("无对应模拟商品") to the new cart's
+  `购物车 · 待核对` + `无匹配`.
+- `tools/test_release.py`: offline guard
+  `test_market_cart_auto_fill_total_and_persistence` (markers, labels, cart in
+  state, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `5db3570591932a0aaf856ef167f8088ba73dbfb09b2c950b26a76bcc1453b751`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-14 — bundle files of this commit, manifest patched in a test copy
+
+- Same pinned reference `card-host.exe` (655114c) and the same task-owned test
+  copy as Issue #25: `.local-state/qa-cart/bundle` with `manifest.json` patched
+  in that copy only (drop `files`, `requires`, `host_api`), admitted with
+  `card-host --stamp --allow-unsigned` at 1200x800. No committed bundle file
+  differed.
+- `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-cart/qa-cart --market-cart` — **13/13 checks passed**: the demo
+  menu uses 菠菜 400 g, 蘑菇 3000 g and 秋葵 200 g with the fridge emptied; opening
+  the region auto-fills `购物车 · 待核对`; 菠菜 rounds to 2 把 and 蘑菇 to 15 盒;
+  蘑菇 is `可售不足` (14 盒 on sale) and 秋葵 is `无匹配`, both with a `替换`
+  entry and an explanation; the total is `¥102.60`; `＋` on 菠菜 persists as 3 把
+  and re-prices to `¥107.40`; `替换 秋葵` offers same-category 蔬菜 alternatives
+  by 规格 and `换成 青菜` re-picks 1 把; `删除 蘑菇` drops it and its price to
+  `¥18.60`; and re-entering the region keeps the edits.
+- `--market-cart-restart` on the same profile: **4/4** — the persisted cart
+  round-trips exactly, the butler dashboard resumes, and the restored cart still
+  shows 3 把/青菜 with 蘑菇 gone, while the derived 缺菜清单 still lists 菠菜 and
+  秋葵.
+- Regressions: `--market` **12/12** and `--menu-purchase` **13/13**; the generic
+  `--restart` for the Issue #25 profile **1/1**.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **28 passed**.
+- Screenshots `docs/qa/issue-26-cart.png` (flags + total) and
+  `docs/qa/issue-26-replace.png` (same-category 替换 list) are real 1200x800
+  captures of the same synthetic run.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- As with Issue #25, the committed manifest still cannot be admitted by the
+  locally available reference host (pre-existing `files`/`host-api-v1` mismatch),
+  so this was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- Submitting the cart as a 模拟订单, order status and 确认收货 are Issue #27 and
+  are not implemented or claimed here; the cart footer says so.
+
 ## Issue #25 模拟买菜区域与商品浏览（含一键补齐入口）— 2026-10-14
 
 - `bundle/main.splash`: the 缺菜清单 panel gains `一键补齐 · 去模拟买菜  →`
@@ -63,9 +134,11 @@
   reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
   work), so the bundle was not run under the full OctoSense shell.
 - Live `model.complete` was not exercised; the QA used the local rule path.
-- The 购物车 and 订单 pages are read-only/preview pages here; matching relaxation
-  by 品类与规格, cart editing, totals and 模拟订单 are Issue #26/#27 and are not
-  implemented or claimed in this PR.
+- The 购物车 and 订单 pages were read-only/preview pages at the time of the #25
+  run; matching by 品类与规格, cart editing, totals and 模拟订单 were not
+  implemented then. Cart editing and totals were delivered afterwards by
+  Issue #26 (see the #26 section above); 模拟订单 stays Issue #27 and is still
+  not implemented or claimed.
 
 ## Issue #24 缺菜清单 (derived, editable, follows stock) — 2026-10-13
 

@@ -422,7 +422,7 @@ def exercise_market(ui):
     ui.click("‹ 返回商品列表")
     ui.click("▧  购物车")
     ui.check("the region has its own 购物车 page",
-             "购物车 · 待核对" in ui.text() and "无对应模拟商品" in ui.text())
+             "购物车 · 待核对" in ui.text() and "无匹配" in ui.text())
     ui.click("▦  订单")
     ui.check("the region has its own 订单 page with 模拟下单 labelling",
              "还没有模拟订单" in ui.text() and "模拟下单" in ui.text())
@@ -437,6 +437,120 @@ def exercise_market(ui):
         json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
 
 
+def market_cart_rows(ui):
+    return [line["name"] for line in ui.state()["cart"] if not line.get("dropped")]
+
+
+def exercise_market_cart(ui):
+    """Issue #26: entering 模拟买菜 auto-fills a 待核对 购物车 by name/spec/quantity,
+    rounds each purchase quantity up to whole packs, flags unmatched or
+    under-stocked rows with a 替换 entry instead of dropping them, and keeps
+    quantity/delete/replace edits in persisted state. Synthetic inventory only."""
+    ui.click("选择", index=1)
+    ui.click("女性")
+    for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
+        enter(ui, label, value)
+    ui.click("下一步 · 选择周期方案  →")
+    ui.scroll(700)
+    ui.click("确认计划 · 去录冰箱  →")
+    # 菠菜 400 g against a 300 g/把 spec rounds up to 2 把.
+    # 蘑菇 3000 g against a 200 g/盒 spec needs 15 盒, but only 14 are on sale.
+    # 秋葵 has no catalog product at all.
+    for name, quantity in (("菠菜", "400"), ("蘑菇", "3000"), ("秋葵", "200")):
+        ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
+        enter(ui, "食材名称", name)
+        enter(ui, "数量", quantity)
+        if name == "秋葵":
+            ui.click("填写 / 收起包装营养参考")
+            enter(ui, "每100g热量 kcal", "30")
+            enter(ui, "每100g蛋白质 g", "2")
+            enter(ui, "每100g膳食纤维 g", "3")
+            enter(ui, "每100g维生素C mg", "20")
+        ui.click("预览并确认  →")
+        ui.click("最终确认入库")
+    ui.click("完成建档 · 开始托管  →")
+    ui.click("⚙  设置")
+    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
+    ui.click("改用本地规则")
+    ui.click("⌂  首页")
+    ui.click("生成今日菜单  →")
+    plan = ui.state()["plans"][0]
+    ui.check("the cart demo menu uses all three synthetic ingredients",
+             {u["name"] for m in plan["meals"] for u in m["uses"]} == {"菠菜", "蘑菇", "秋葵"})
+    ui.click("▣  冰箱")
+    for _ in range(3):
+        ui.click("展开 / 收起")
+        ui.click("丢弃/移除")
+        ui.click("确认移除")
+    ui.check("the synthetic fridge is empty before 一键补齐", ui.state()["foods"] == [])
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.click("一键补齐 · 去模拟买菜  →")
+    ui.click("▧  购物车")
+    cart = ui.text()
+    ui.check("entering the region auto-fills a 待核对 购物车", "购物车 · 待核对" in cart)
+    ui.check("the purchase quantity rounds up by 规格与单位", "2 把" in cart and "15 盒" in cart)
+    ui.check("an under-stocked row is flagged, not silently dropped",
+             "可售不足" in cart and "14 盒" in cart)
+    ui.check("an uncatalogued row is flagged with a 替换 entry",
+             "无匹配" in cart and "替换" in cart)
+    ui.check("the cart shows unit prices and a simulated total",
+             "模拟总价" in cart and "¥102.60" in cart)
+    rows = market_cart_rows(ui)
+    picked = [line["name"] for line in ui.state()["cart"]
+              if not line.get("dropped") and line["product"]]
+    ui.click("＋", index=picked.index("菠菜"))
+    ui.check("increasing a quantity persists and re-prices the cart",
+             ui.state()["cart"][rows.index("菠菜")]["quantity"] == 3
+             and "3 把" in ui.text() and "¥107.40" in ui.text())
+    ui.click("替换", index=rows.index("秋葵"))
+    picker = ui.text()
+    ui.check("替换 offers same-category alternatives by 规格",
+             "优先显示同品类（蔬菜）" in picker and "青菜 · 蔬菜" in picker and "换成 青菜" in picker)
+    ui.click("换成 青菜")
+    replaced = ui.text()
+    ui.check("replacing an unmatched row gives it a product and a rounded quantity",
+             "青菜" in replaced and "无匹配" not in replaced
+             and ui.state()["cart"][rows.index("秋葵")]["product"] == "青菜")
+    ui.click("删除", index=rows.index("蘑菇"))
+    deleted = ui.text()
+    ui.check("deleting a row removes it and its price from the cart",
+             "蘑菇" not in deleted and "可售不足" not in deleted
+             and ui.state()["cart"][rows.index("蘑菇")]["dropped"] is True)
+    ui.check("the total reflects the decrease, the replacement and the deletion",
+             "¥18.60" in deleted)
+    ui.click("← 返回管家")
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.click("一键补齐 · 去模拟买菜  →")
+    ui.click("▧  购物车")
+    reopened = ui.text()
+    ui.check("re-entering the region keeps the user's cart edits",
+             "3 把" in reopened and "青菜" in reopened
+             and "蘑菇" not in reopened and "无匹配" not in reopened)
+    (ui.profile / "expected-state.json").write_text(
+        json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
+    (ui.profile / "checks.json").write_text(
+        json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
+
+
+def exercise_market_cart_restart(ui):
+    """Issue #26: the persisted 购物车 survives a host restart, and the derived
+    缺菜清单 still agrees with it."""
+    expected = json.loads((ui.profile / "expected-state.json").read_text(encoding="utf-8"))
+    ui.check("restart keeps the persisted cart exactly", ui.state() == expected)
+    ui.check("restart resumes on the butler dashboard", "今天想吃点什么？" in ui.text())
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.click("一键补齐 · 去模拟买菜  →")
+    ui.click("▧  购物车")
+    cart = ui.text()
+    ui.check("the restored cart keeps the user's quantity, replacement and deletion",
+             "3 把" in cart and "青菜" in cart and "蘑菇" not in cart and "无匹配" not in cart)
+    ui.check("the derived 缺菜清单 still lists every ingredient the cart came from",
+             "菠菜" in cart and "秋葵" in cart)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18442)
@@ -447,6 +561,10 @@ def main():
                         help="Issue #23/#24 daily menu: three meals, nutrition, over-limit refusal, derived 缺菜清单")
     parser.add_argument("--market", action="store_true",
                         help="Issue #25 模拟买菜: 一键补齐 entry, carried 缺菜清单, catalog list/detail, 模拟 labels")
+    parser.add_argument("--market-cart", action="store_true",
+                        help="Issue #26 购物车: auto-fill, pack rounding, flags, 增减/删除/替换, total, persistence")
+    parser.add_argument("--market-cart-restart", action="store_true",
+                        help="Issue #26: the persisted 购物车 survives a restart")
     args = parser.parse_args()
     ui = UI(args.port, args.profile.resolve())
     if args.restart:
@@ -457,6 +575,10 @@ def main():
         exercise_menu_purchase(ui)
     elif args.market:
         exercise_market(ui)
+    elif args.market_cart:
+        exercise_market_cart(ui)
+    elif args.market_cart_restart:
+        exercise_market_cart_restart(ui)
     elif args.recipe:
         exercise_recipe(ui)
     else:

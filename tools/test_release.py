@@ -136,6 +136,24 @@ class ReleaseMetadataTests(unittest.TestCase):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["id"], "pantry-steward")
 
+    def test_market_cart_auto_fill_total_and_persistence(self):
+        # Offline guard only: qa_release.py --market-cart drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn market_packs(", "fn market_spec_grams(", "fn market_pick(",
+                       "fn market_fill_cart(){", "fn market_cart_step(", "fn market_cart_drop(",
+                       "fn market_replace_with(", "fn market_line_flag(", "fn market_cart_total(",
+                       "fn market_alternatives(", "fn market_category_hint("):
+            self.assertIn(marker, script)
+        for label in ("购物车 · 待核对", "模拟总价", "可售不足", "替换"):
+            self.assertIn(label, script)
+        # The cart is user input stored in state (ADR 0003), migrated for old files
+        # and validated on load, not kept in the transient market view.
+        self.assertIn("cart: []}", script)
+        self.assertIn("state.cart.push(", script)
+        self.assertIn("value.cart = []", script)
+        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["id"], "pantry-steward")
+
     def test_shortfall_list_is_derived_and_editable(self):
         # Offline guard only: qa_release.py --menu-purchase drives the real behaviour.
         script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
