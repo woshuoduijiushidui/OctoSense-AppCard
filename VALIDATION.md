@@ -1685,3 +1685,123 @@ hidden test windows were closed through their own remote endpoint.
 Publisher identity and privacy text remain unapproved; the existing listing
 keeps the author's pending identity. Local test-key creation was explicitly
 approved by the user. Production signing and submission were not authorized.
+# PR #21 schema compatibility and main integration — 2026-10-12
+
+Merged the stage/candidate split, native inventory units, image-entry drafts,
+day menus, derived shortages, mock cart and orders from main `3ddeb82`, while
+keeping the optional stock-only one-day experience, append-only actual intake
+and online nutrition estimation. Ordinary shopping remains available; the
+experience has no shopping route. The release version remains main's 0.8.0.
+
+Removed `uniqueItems` from `recipe_steps_schema()`. `parse_recipe()` retains its
+local per-step duplicate-ID guard, allocated-food-ID check and coverage check.
+The old captured experience request was independently rejected by the official
+host compiler with `the keyword "uniqueItems" is not supported`. The new
+`tools/model_schema_probe` compiles the original host
+`apps/ai-providers/host-service/src/complete/schema.rs` directly via a generated
+`#[path]` module; it does not reproduce a keyword whitelist. Its source SHA256
+was `a86d2c679402684730cc0b036cc9717ce5e2efc8d62b49d5c41e0d923cca50f9`.
+All five native-captured schemas in `docs/model-schemas/` compiled successfully:
+nutrition, ordinary day menu, one-day experience, native-quantity recipe-only
+menu and image intake. An injected unsupported-keyword negative control was
+rejected. This requires no provider credentials or live calls.
+
+Validation at this checkpoint:
+
+- 30/30 offline Python tests passed.
+- Official App Hub `8347a489141c0e24cab564883db7c4592935a8b2` stamped and admitted
+  the production bundle, including its retained `host-api-v1`, camera/files and
+  optional camera-permission declarations. No release version bump.
+- 24/24 native merge checks passed on schema-2 synthetic stock, and again
+  24/24 on a schema-1 file containing field names in user text. Migration adds
+  candidate/stage fields before validating old schema-1 states and uses exact
+  key checks for the independent ledger. Confirmed historical nutrition and
+  actual snapshots survive; exhausted legacy batches do not resurrect.
+- Native checks cover duplicate and unknown recipe IDs in both menu paths,
+  independent recommended/actual quantities, atomic native-unit stock updates,
+  stage intake, regeneration preserving confirmed recommendations, all three
+  confirmations, 100% recap and long-term history after a stage switch.
+- A real process restart preserved exact inventory and execution history.
+- Seven shopping checks preserved the derived shortage, editable mock cart,
+  confirmation-before-order and zero stock/intake/progress change on ordering.
+- Two native-unit checks preserved a piece-only recipe without inventing a
+  mass conversion. Six nutrition-failure checks continued once to an online
+  menu, retained unknown references, recorded external food without a stock
+  deduction and counted confirmation without claiming nutritional completion.
+
+Native tests use task-owned hidden official standalone card-host, a private
+bundle with deterministic model dispatch, and isolated synthetic app data.
+Standalone card-host does not link the full shell's device-consent broker, so
+only its private test manifest omits `host-api-v1` and optional host API fields;
+the production manifest retains them. No camera/files service is injected.
+Image schema compilation is verified, but camera capture, image recognition,
+the full-shell permission boundary and live provider output are not new evidence
+from these tests. Model request captures are separately fed through the real
+official schema compiler, addressing the prior fake-dispatch coverage gap.
+Earlier schema-1 QA reports below remain historical evidence, not a claim that
+their old drivers run unchanged against the new candidate/stage architecture.
+
+Subsequent main update: `0e092ff` added Issue #28 receipt confirmation while this
+repair was running. It was merged too. The final offline suite passed 31/31;
+the native shopping/receipt path passed 12/12, including editable receipt
+quantities, preview/cancellation without writes, a new canonical batch only
+after confirmation, persisted received status and unchanged execution/stage
+progress. An actual restart of the final integrated code preserved the exact
+confirmed inventory and execution ledger. Production bundle digest after this
+integration: `0a96264adf2b739522ee651c0b80474b1261091f9ad452b5b81ec7d4fda53ccc`.
+This update leaves the five model schemas unchanged.
+
+Current reproducible entry points: `tools/qa_merge.py` and
+`tools/check_model_schema.py`; see `EXPERIENCE.md`. Personal application data,
+provider settings and existing published commits were not modified for testing.
+
+# PR #21 online opt-out and pending request control — 2026-10-12
+
+Preserve stored `model_enabled=false` at load. Settings explicitly enables or
+disables online AI and persists the choice; menus, nutrition and image-model
+requests check that choice before dispatch. Disabling AI also invalidates
+pending replies. Menus still use online AI only when enabled; no local fallback
+was reintroduced.
+
+Nutrition snapshots now carry the original trigger reason through success,
+malformed output, failure and timeout. Turning off automatic generation
+invalidates pending automatic menu/nutrition flows via the request sequence;
+later re-enabling does not revive them. Both ordinary and experience menu
+continuations recheck the current switch before sending. Explicit manual
+generation continues when only automatic generation is turned off.
+
+Validation on the changed bundle:
+
+- 31/31 offline Python tests passed; `tools/launch.py --check` and official Hub
+ stamp/check passed, retaining version 0.8.0 and production permissions.
+- `tools/qa_request_control.py`: 54/54 native checks across 14 fresh isolated
+ fixtures. Legacy schema-1 and current schema-2 opt-outs survived inventory
+ removal, manual attempts, stock nutrition and image dispatch attempts, saved
+ state and actual process restarts. The UI enable button persisted consent;
+ the next explicit menu request sent nutrition then menu exactly once.
+- Held nutrition replies covered success, error, malformed data and accelerated
+ timeout. Turning auto generation off sent no second request and wrote no
+ late nutrition/menu. Turning it off then on, experience auto generation,
+ stock estimation and disabling online AI during a request were covered.
+ Manual generation continued for each of the four reply outcomes.
+- 24/24 existing `qa_merge.py` checks passed for ordinary menus, optional trial,
+ immutable actual records, inventory deductions and completion recap.
+- All nine current request captures (nutrition, ordinary/experience menus and
+ image schema) compiled through the original official host schema compiler;
+ unsupported `uniqueItems` negative control was still rejected.
+
+The new regression driver reuses synthetic `qa_merge` state and a private
+model-dispatch shim. Initial opt-out removal/enable paths use native UI;
+cancellation cases invoke the same production action functions via test-only
+commands. Only response delivery and the timeout deadline are controlled;
+production guards, persistence, callbacks and watchdog run unchanged. The
+image opt-out test verifies no dispatch, not image recognition capability.
+Standalone-host test-manifest limitations described above still apply. No real
+provider, personal inventory or provider credentials were used. Already sent
+provider requests cannot be guaranteed to stop or avoid billing.
+
+Machine-readable assertions: `docs/model-request-control-validation.json`.
+Reproduction: `tools/qa_request_control.py --profile <fresh .local-state/qa-*>
+--hub <official hub> --card-host <official card-host>`; the driver starts and
+closes its own hidden hosts. Bundle digest:
+`234e13907694e1efabca02da29b9e275557fd6115a4f8eeea95eaf57734c62ed`.

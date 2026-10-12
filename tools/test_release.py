@@ -156,7 +156,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertIn(label, script)
         # The cart is user input stored in state (ADR 0003), migrated for old files
         # and validated on load, not kept in the transient market view.
-        self.assertIn("cart: [] orders: []}", script)
+        self.assertIn("cart: [] orders: []", script)
         self.assertIn("state.cart.push(", script)
         self.assertIn("value.cart = []", script)
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
@@ -174,7 +174,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertIn(label, script)
         # The order is user input stored in state (like the cart), migrated for
         # old files and validated on load, not kept in the transient market view.
-        self.assertIn("orders: []}", script)
+        self.assertIn("orders: []", script)
         self.assertIn("state.orders.push(", script)
         self.assertIn("value.orders = []", script)
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
