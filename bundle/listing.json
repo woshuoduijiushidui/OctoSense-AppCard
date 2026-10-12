@@ -21,8 +21,8 @@
   ],
   "publisher": {
     "name": "leoniaodo,zix,power胖丸,Roooy",
-    "support": "https://github.com/woshuoduijiushidui/OctoSense-AppCard/issues",
-    "privacy_policy_url": "https://github.com/woshuoduijiushidui/OctoSense-AppCard/blob/main/PRIVACY.md"
+    "support": "https://github.com/woshuoduijiushidui/pantry-steward/issues",
+    "privacy_policy_url": "https://github.com/woshuoduijiushidui/pantry-steward/blob/main/PRIVACY.md"
   },
   "release_notes": "0.8.0 本地候选：新增图片能力探测、拍照／已有图片入口和待核对草稿。图片识别仅在支持该能力的本地改版宿主启用；官方宿主回退手动录入。真实图片提供方演示待验证，未发布或获得 App Hub 审核批准。 PR #21：可选 1 天体验、实际食用独立记录及 AI 营养估算；普通菜单和体验三餐使用结构化食材 ID 做法，并兼容官方宿主 schema 编译。",
   "age_rating": "all",

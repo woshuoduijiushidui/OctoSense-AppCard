@@ -8,7 +8,7 @@
 
 此功能分支是尚未发布的 Issue #2 **0.8.0 源码候选**，并包含 Issue #8–#11 与 #23–#28 的功能（六周期候选、组合计划、未来阶段编辑、总览页、三餐日菜单与派生缺菜清单、模拟买菜区域与其待核对购物车、确认收货）。除手动库存、周期和菜单外，它在具备图片能力的本地改版宿主上提供拍照／导入图片识别草稿；官方宿主回退手动录入。源码包通过当前固定版本 App Hub 门禁。[Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) 请求审核的是 **0.6.1**，不是此候选；不声称已发布或获 App Hub 审批。
 
-目标平台仅为 Windows。2026-10-11，0.8.0 包通过固定版本 App Hub 检查，19 项 Python 测试通过；未修改的官方完整宿主在隔离档案完成 26 项 UI／数据检查和重启检查，两种图片入口都显示手动回退。本地改版宿主通过图片能力探测、共用选择界面及取消不写库检查；任务专用模拟结果验证了两类可编辑草稿和多行一次入库。用户报告剩余的 MiniMax 图片、摄像头、重试和重启前台验收通过；没有逐步独立日志。正式 Store 发布仍未验证。见[验证记录](VALIDATION.md)。
+目标平台仅为 Windows。2026-10-11，0.8.0 包通过固定版本 App Hub 检查，19 项 Python 测试通过；未修改的官方完整宿主在隔离档案完成 26 项 UI／数据检查和重启检查，两种图片入口都显示手动回退。本地改版宿主通过图片能力探测、共用选择界面及取消不写库检查；任务专用模拟结果验证了两类可编辑草稿和多行一次入库。用户报告剩余的 MiniMax 图片、摄像头、重试和重启前台验收通过；没有逐步独立日志。正式 Store 发布仍未验证。见[验证记录](VALIDATION.md)。2026-10-12 的交付检查点（#29）重拍了四张发布截图，把支持与隐私链接改为改名后的 `pantry-steward` 仓库，并用宿主固定的官方 App Hub `8347a489141c0e24cab564883db7c4592935a8b2` 重新盖章；`hub check bundle --allow-unsigned` 通过且仅余预期的未签名提示，31 项 Python 测试通过。
 
 ## 功能闭环
 
@@ -28,7 +28,7 @@
 
 [三餐日菜单与缺菜清单](bundle/screenshots/02-plan.png) · [缺菜清单与可编辑缺口](bundle/screenshots/03-confirm.png) · [库存](bundle/screenshots/04-updated.png)
 
-四张截图为当前 0.8.0 在隐藏 Windows card-host 中的合成数据截图（1200x800）：首页；三餐日菜单（早／中／晚）与派生缺菜清单；缺菜清单显示 还差 941 克 及可编辑数量；库存批次。录屏仍为先前 0.7.0 手动流程。当前版其它合成数据截图包括[首页](docs/qa/issue-2-home-after.png)、[修改用户画像](docs/qa/issue-2-profile-edit-after.png)、[库存](docs/qa/issue-2-inventory-after.png)、[改版宿主图片选择](docs/qa/issue-2-image-chooser-after.png)、[官方宿主手动提示](docs/qa/issue-2-official-fallback-after.png)、[菜谱](docs/qa/issue-2-recipe-after.png)和[食用前核对](docs/qa/issue-2-consumption-after.png)、[模拟买菜区域](docs/qa/issue-25-market.png)、其[带 无匹配／可售不足 标注与模拟总价的待核对购物车](docs/qa/issue-26-cart.png)，以及[同品类替换列表](docs/qa/issue-26-replace.png)，和[提交后显示 待收货 的模拟订单](docs/qa/issue-27-order.png)，以及[确认收货的核对数量与保质期界面](docs/qa/issue-28-receive.png)。截图只说明界面，不能证明真实图片识别、Store 发布或真实模型响应。新录屏不属于本次 PR。
+四张截图为当前 0.8.0 在隐藏 Windows card-host 中的合成数据截图（1200x800）：首页；三餐日菜单（早／中／晚）与派生缺菜清单；缺菜清单显示 还差 952 克 及可编辑数量与 一键补齐 入口；库存批次。录屏仍为先前 0.7.0 手动流程。当前版其它合成数据截图包括[首页](docs/qa/issue-2-home-after.png)、[修改用户画像](docs/qa/issue-2-profile-edit-after.png)、[库存](docs/qa/issue-2-inventory-after.png)、[改版宿主图片选择](docs/qa/issue-2-image-chooser-after.png)、[官方宿主手动提示](docs/qa/issue-2-official-fallback-after.png)、[菜谱](docs/qa/issue-2-recipe-after.png)和[食用前核对](docs/qa/issue-2-consumption-after.png)、[模拟买菜区域](docs/qa/issue-25-market.png)、其[带 无匹配／可售不足 标注与模拟总价的待核对购物车](docs/qa/issue-26-cart.png)，以及[同品类替换列表](docs/qa/issue-26-replace.png)，和[提交后显示 待收货 的模拟订单](docs/qa/issue-27-order.png)，以及[确认收货的核对数量与保质期界面](docs/qa/issue-28-receive.png)。截图只说明界面，不能证明真实图片识别、Store 发布或真实模型响应。新录屏不属于本次 PR。
 
 ## Windows 源码运行
 

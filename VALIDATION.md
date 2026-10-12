@@ -1,5 +1,76 @@
 # Migration validation
 
+## Issue #29 交付检查点：标注、文档、截图、重新盖章 — 2026-10-12
+
+This is the delivery checkpoint, not a behaviour change: `bundle/main.splash` is
+byte-identical to the Issue #28 commit. Only metadata, screenshots and docs
+changed.
+
+- Renamed-repository links fixed everywhere they were still stale after the
+  rename to `woshuoduijiushidui/pantry-steward`: `bundle/listing.json`
+  (`publisher.support`, `publisher.privacy_policy_url`), `PRIVACY.md`,
+  `SUPPORT.md`, the historical links in `SUBMISSION.md`,
+  `tools/test_release.py`'s `REPOSITORY`, and the tracker note in `AGENTS.md`.
+  No `OctoSense-AppCard` URL remains in the tree outside ignored local state.
+- The four `bundle/screenshots/*.png` release assets were recaptured from this
+  commit's bundle files in the same hidden reference card-host used since
+  Issue #24 (655114c, 1200x800, synthetic inventory: 豆腐 300 g 临期, 鸡蛋
+  2000 g → 100 g, 菠菜 200 g 临期, 蘑菇 150 g; local-rule day menu): 首页 (4 批);
+  the candidate three-meal day menu with its derived 缺菜清单; the 缺菜清单
+  after the 鸡蛋 batch was edited to 100 g, showing `需要补齐 952` / `还差 952 克`,
+  the editable amount, and the `一键补齐 · 去模拟买菜` entry; and the inventory
+  batch list. The old captures predated #25 and showed neither the editable gap
+  nor `一键补齐`. The earlier text said 941 克; the honest recapture says 952.
+- Restamped with the official App Hub revision the current host pins,
+  `8347a489141c0e24cab564883db7c4592935a8b2` (`hub stamp bundle`), built with
+  `cargo build --release -p octosense-app-hub --bin hub` from a task-owned
+  worktree checked out at that commit (output under `target/hub-8347`, using
+  the prepared sibling runtime checkouts). `bundle_blake3 =
+  c75cc689a2bd050ed682d787c272b10c57541412fc0bf8e073c2dc12a40e3bc6`. Manifest
+  version stays **0.8.0**; capabilities stay `storage, model, camera, files`.
+- `hub check bundle --allow-unsigned` on the committed bundle **PASSED** with
+  only the expected unsigned warning: `pantry-steward 0.8.0 — PASSED`, warning
+  `publisher-signature: unsigned`. This is why the host pin matters: the older
+  publishing pin `655114c4943cd2490daaefa2173e7b5aaa20669f` does not know the
+  `files` capability and refuses it. That refusal was a pin mismatch, not a
+  bundle defect; `files` is declared in App Hub from commit `30c9d19`, which is
+  in the host pin's history.
+
+### Native run, 2026-10-12 — bundle files of this commit, manifest patched in a test copy
+
+- Same task-owned host procedure as Issue #25–#28: `.local-state/qa-29/bundle`
+  with `manifest.json` patched in that copy only (drop `files`, `requires`,
+  `host_api`), admitted with the pinned reference `card-host --stamp
+  --allow-unsigned` at 1200x800. The copy differs from the committed bundle
+  only in `manifest.json` (`diff -rq`), so no committed bundle file differed.
+  This copy is used only because the machine's prebuilt card-host is the
+  655114c build that lacks `files`; the committed manifest was not changed to
+  accommodate it.
+- The four screenshots above are real captures of that run.
+- Regression on the same bundle files: `python -X utf8 tools/qa_release.py
+  --port 18499 --profile .local-state/qa-29/qa-std --menu-purchase` — **13/13
+  checks passed** (three meals, grams, over-budget refusal, merged 缺菜清单,
+  re-derived gap, editable gap, never stored, accept, empty-meal refusal).
+  Since `main.splash` is byte-identical to the #28 run, the #25–#28 mode
+  regressions are unchanged and were not re-driven.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **31 passed**
+  (includes the updated repository-link guard).
+- `git diff --check` clean; bundle 2,518,774 / 8,388,608 bytes.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- No full OctoSense shell checkout with the 8347a489 pin exists on this
+  machine, so the committed manifest was not run under the full official shell
+  (only the reference card-host on a patched test copy).
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- The publishing workflow and `publisher-toolchain.json` still pin App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f`, which cannot gate this bundle as
+  is; the publishing route must be reviewed before any 0.8.0 tag.
+- Formal release evidence review, publisher identity/signing, public-link
+  review, App Hub submission and competition qualification remain human
+  checkpoints. No tag, Release, new issue or submission was made.
+
 ## Issue #28 确认收货：核对数量与保质期并入库 — 2026-10-12
 
 - `bundle/main.splash` (schema stays 2, no new state field): the transient
