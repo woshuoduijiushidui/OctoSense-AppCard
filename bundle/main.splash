@@ -534,6 +534,8 @@ fn confirm_health_plan(){
         }
     }
     let before = state.to_json()
+    let saved_draft = plan_draft
+    let saved_step = onboarding_step
     // Each stage snapshots its candidate's targets and starts where the previous
     // stage ended, so the ranges meet end-to-start.
     let cursor = floor(now() / 86400) * 86400
@@ -567,7 +569,13 @@ fn confirm_health_plan(){
         profile_edit_backup = nil
         redraw() return
     }
-    if commit(before) { message = "已启用 " + entries.len() + " 个阶段的计划。现在请录入冰箱里的真实食材。" }
+    if commit(before) {
+        message = "已启用 " + entries.len() + " 个阶段的计划。现在请录入冰箱里的真实食材。"
+    } else {
+        // Keep the composed plan when the write failed instead of dropping it.
+        plan_draft = saved_draft
+        onboarding_step = saved_step
+    }
     redraw()
 }
 fn choose_meals_per_day(value){
@@ -869,7 +877,7 @@ fn migrate_candidates(value){
     if json.search("program_history") < 0 { value.program_history = [] }
     // Issue #9 split unconfirmed candidates from confirmed stages. A previously
     // active program becomes a one-stage plan; archived programs become plan history.
-    if json.search("stages") < 0 {
+    if json.search("\"stages\":") < 0 {
         let confirmed = []
         let candidates = []
         for p in value.programs {
@@ -880,10 +888,10 @@ fn migrate_candidates(value){
         value.stage_next = 1
         if value.program_next > value.stage_next { value.stage_next = value.program_next }
         value.plan_history = []
-        if json.search("program_history") >= 0 {
+        if json.search("\"program_history\":") >= 0 {
             for old in value.program_history {
                 // Older archives may predate the intake/consumed fields.
-                if old.to_json().search("intake") < 0 {
+                if old.to_json().search("\"intake\":") < 0 {
                     old.consumed_kcal = 0 old.consumed_protein = 0 old.consumed_fiber = 0 old.consumed_vitamin_c = 0
                     old.intake = []
                 }
@@ -901,9 +909,9 @@ fn migrate_candidates(value){
         value.programs = confirmed
     }
     let migrated_json = value.to_json()
-    if migrated_json.search("stage_next") < 0 { value.stage_next = 1 }
-    if migrated_json.search("stages") < 0 { value.stages = [] }
-    if migrated_json.search("plan_history") < 0 { value.plan_history = [] }
+    if migrated_json.search("\"stage_next\":") < 0 { value.stage_next = 1 }
+    if migrated_json.search("\"stages\":") < 0 { value.stages = [] }
+    if migrated_json.search("\"plan_history\":") < 0 { value.plan_history = [] }
     value
 }
 fn migrate_state(value){
@@ -1118,6 +1126,13 @@ fn meal_kcal(p){
 }
 fn remaining_budget(){
     program_remaining_daily(current_stage())
+}
+// The archive/budget figures follow the stage whose dates cover today, not the
+// stage that was current when the plan was confirmed.
+fn live_daily_target(){
+    let s = current_stage()
+    if s == nil { return state.daily_target }
+    s.daily_kcal
 }
 fn nutrition_percent(){
     let p = current_stage()
@@ -1854,6 +1869,12 @@ fn active_plan(){
 }
 fn validate(p){
     if p == nil || p.consumed || p.revision != state.revision || p.profile_revision != state.profile_revision || p.uses.len() == 0 { return false }
+    // A menu belongs to the stage that produced it; crossing into the next
+    // stage's dates invalidates it. Legacy menus without a stage keep working.
+    if p.to_json().search("\"stage_id\":") >= 0 {
+        let stage = current_stage()
+        if stage == nil || p.stage_id != stage.id { return false }
+    }
     let totals = {}
     for u in p.uses {
         let amount = use_quantity(u)
@@ -1966,7 +1987,7 @@ fn rule_plan(reason){
     if tofu { title = "香煎豆腐配时蔬" }
     else { if spinach && egg { title = "菠菜鸡蛋饼" } else { title = picked[0].name + "家常餐" } }
     let p = {id: state.next_id title: title uses: picked accepted: false consumed: false
-        revision: state.revision profile_revision: state.profile_revision created: time_now() reason: reason + " · " + goal goal: goal
+        stage_id: program.id revision: state.revision profile_revision: state.profile_revision created: time_now() reason: reason + " · " + goal goal: goal
         source: "离线规则规划" previous: "" minutes: 20
         steps: "1. 核对食材状态，按清单称重。\n2. 蔬菜洗净切段，豆腐切块；鸡蛋若使用则打散。\n3. 有豆腐先少油煎至两面金黄；其余食材分别炒熟。\n4. 合适食材搭配出餐。按个人饮食需求调整调味。"}
     let previous = active_plan()
@@ -2193,8 +2214,11 @@ fn save_ai_result(output, reason, requested_goal){
             if steps != "" { steps = steps + "\n" }
             steps = steps + (i + 1) + ". " + recipe_display_text(text)
         }
+        let stage = current_stage()
+        let stage_id_now = 0
+        if stage != nil { stage_id_now = stage.id }
         let p = {id: state.next_id title: recipe_display_text(output.title) uses: uses accepted: false consumed: false
-            revision: state.revision profile_revision: state.profile_revision created: time_now() reason: recipe_display_text(output.reason) goal: requested_goal
+            stage_id: stage_id_now revision: state.revision profile_revision: state.profile_revision created: time_now() reason: recipe_display_text(output.reason) goal: requested_goal
             source: "在线 AI" previous: "" minutes: output.minutes steps: steps}
         if ai_snapshot.recipe_only { p.numeric = false p.source = "在线 AI · 营养未核算" }
         let previous = active_plan()
@@ -3544,7 +3568,7 @@ View{width: Fill height: Fill flow: Overlay
                                                     Label{text: "" + program_today_kcal(current_stage()) padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 20}}}
                                                 }
                                                 View{width: Fill height: Fit flow: Down spacing: 5
-                                                    Copy{text: "/ " + state.daily_target + " kcal" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                                    Copy{text: "/ " + live_daily_target() + " kcal" draw_text.text_style: theme.font_bold{font_size: 17}}
                                                     Hint{text: "按已核算餐食剩余约 " + remaining_budget() + " kcal"}
                                                     Hint{text: "已记录 " + state.meal_count + " 餐"}
                                                     if unquantified_meals() > 0 { Hint{text: "其中 " + unquantified_meals() + " 餐营养未核算"} }

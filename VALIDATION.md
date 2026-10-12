@@ -17,6 +17,13 @@ records, and a plan is an ordered list of stage snapshots.
   into a one-stage plan and turns legacy `program_history` entries into plan
   history without dropping `consumed_kcal` or `intake`. A re-serialization after
   the split prevents the fallback defaults from overwriting the split result.
+- Review fixes: the archive page and the `model.complete` payload now derive
+  their daily/protein/fibre targets from the stage covering today; a failed save
+  keeps the composed draft and stays on the candidate page; migration detects
+  `stages` / `stage_next` / `plan_history` by exact key instead of substring-
+  searching the whole JSON (a `diet` value containing `stages` no longer skips
+  it); and each menu records the stage that generated it, so crossing a stage
+  boundary invalidates the old menu.
 - `tools/qa_release.py` gained compose, cap, and ordered-stage assertions;
   `tools/smoke.py` follows the new `确认计划 · 去录冰箱  →` label, its
   `stages` schema, and a small `scroll` helper; `tools/test_release.py` guards the
@@ -25,11 +32,23 @@ records, and a plan is an ordered list of stage snapshots.
 
 ### Native run, 2026-10-10 — unreleased 0.6.2 working tree
 
-- Restamped the editable bundle with the pinned official App Hub
+- The original `14/14` run in this entry was on the pre-rebase commit (digest
+  `54f917fc…`), before Issue #9 was restacked on the updated Issue #8 branch; it
+  no longer describes this head.
+- Review fixes (stage-derived targets, save-failure draft recovery, exact-key
+  migration, stage-bound menus) were applied and verified against the Issue #9
+  bundle alone. Restamped it with the pinned official App Hub
   `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
-  `bundle_blake3 = 54f917fcbe012ddd7195b7d35c9aef57cdc5a692d3f1392dda31558a251a2d0d`.
-  `hub check bundle --allow-unsigned` then **PASSED** with only the expected unsigned
-  warning and unchanged grants (model, storage, 16 MiB, no agent, no hosts).
+  `bundle_blake3 = 791b647235eb090b1c5a4c26dd275bca0b0288d3a95de5f820b426b0affc49bb`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts).
+- Re-ran `tools/qa_release.py` against this fixed head: **14/14 passed**. Extra
+  regression runs on the same head: a legacy archive whose user text contains
+  `stages` still migrates its active program into `stages` (17 candidates kept);
+  a menu generated for one stage is invalidated once the calendar enters the
+  next stage; and the archive page shows the stage covering today (`/ 1800 kcal`)
+  instead of the stale first-stage target.
 - Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
   with task-owned `--app-data` under `.local-state/qa-*`:
   `tools/qa_release.py` — **14/14 checks passed**: first-run onboarding; six
