@@ -1,6 +1,0 @@
-run.cmd text eol=crlf
-tools/*.rs text eol=lf
-tools/*.py text eol=lf
-.github/workflows/*.yml text eol=lf
-bundle/** -text
-**/bundle/** -text
