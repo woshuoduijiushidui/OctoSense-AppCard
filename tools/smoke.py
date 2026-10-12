@@ -645,6 +645,139 @@ def exercise_market_order_restart(ui):
              and "菠菜" in page and "蘑菇" in page and "不产生真实支付" in page)
 
 
+def exercise_market_receive(ui):
+    """Issue #28: 确认收货 checks each ordered line by hand. Received quantity
+defaults to the ordered amount and can only go down; 保质期 defaults to the
+模拟商品's 保质期天数 from today and can be edited. Only checked-in quantities
+become new inventory batches (a new batch, never merged into an existing one);
+the remainder re-derives into the 缺菜清单. No 实际执行记录 and no 进度.
+Synthetic inventory only."""
+    ui.click("选择", index=1)
+    ui.click("女性")
+    for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
+        enter(ui, label, value)
+    ui.click("下一步 · 选择周期方案  →")
+    ui.scroll(700)
+    ui.click("确认计划 · 去录冰箱  →")
+    for name, quantity in (("菠菜", "400"), ("蘑菇", "3000"), ("秋葵", "200")):
+        ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
+        enter(ui, "食材名称", name)
+        enter(ui, "数量", quantity)
+        enter(ui, "还剩几天（可留空）", "30")
+        if name == "秋葵":
+            ui.click("填写 / 收起包装营养参考")
+            enter(ui, "每100g热量 kcal", "30")
+            enter(ui, "每100g蛋白质 g", "2")
+            enter(ui, "每100g膳食纤维 g", "3")
+            enter(ui, "每100g维生素C mg", "20")
+        ui.click("预览并确认  →")
+        ui.click("最终确认入库")
+    ui.click("完成建档 · 开始托管  →")
+    ui.click("⚙  设置")
+    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
+    ui.click("改用本地规则")
+    ui.click("⌂  首页")
+    ui.click("生成今日菜单  →")
+    plan = ui.state()["plans"][0]
+    need = {}
+    for use in plan["uses"]:
+        need[use["name"]] = need.get(use["name"], 0) + use["grams"]
+    existing = [f for f in ui.state()["foods"] if f["name"] == "蘑菇"]
+    ui.check("the demo menu needs more 蘑菇 than the fridge holds",
+             need["蘑菇"] > 100 and len(existing) == 1)
+    # Shrink the existing 蘑菇 batch to 100 g, so the 缺菜清单 opens while a
+    # same-name batch already exists — the arrival must not merge into it.
+    ui.click("▣  冰箱")
+    ui.click("展开 / 收起", index=1)
+    ui.click("编辑", index=0)
+    ui.fill("100", index=1)
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
+    kept = [f for f in ui.state()["foods"] if f["name"] == "蘑菇"]
+    ui.check("the existing 蘑菇 batch is shrunk to open a 缺口",
+             len(kept) == 1 and kept[0]["canonical_quantity"] == 100)
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.click("一键补齐 · 去模拟买菜  →")
+    ui.click("▧  购物车")
+    ui.scroll(900)
+    ui.click("提交模拟订单  →")
+    ui.click("确认提交订单")
+    ui.scroll(-2000)
+    order = ui.state()["orders"][0]
+    lines = order["lines"]
+    mushroom = [line["name"] for line in lines].index("蘑菇")
+    ui.check("the order caps 蘑菇 at the on-sale maximum",
+             lines[mushroom]["quantity"] == 14)
+    before_stage = json.dumps(ui.state()["stages"][0], ensure_ascii=False)
+    before_meals = ui.state()["meal_count"]
+    ui.click("确认收货  →")
+    panel = ui.text()
+    ui.check("确认收货 pre-fills the ordered quantity and 保质期天数",
+             "下单 14 盒" in panel and "默认按商品保质期 5 天" in panel)
+    ui.shot("issue-28-receive.png")
+    # Part-check: 13 of 14 盒 蘑菇, and a hand-edited 保质期 of 1 day.
+    ui.click("−", index=mushroom)
+    ui.check("an ordered line can be checked in smaller than ordered", "13 盒" in ui.text())
+    ui.fill("1", index=mushroom)
+    ui.click("确认收货入库")
+    foods = ui.state()["foods"]
+    today = int(time.time() + ui.state()["offset"]) // 86400
+    mushrooms = [f for f in foods if f["name"] == "蘑菇"]
+    received = next(f for f in mushrooms if f["id"] != kept[0]["id"])
+    ui.check("the checked-in quantity becomes a new batch, not merged into the old one",
+             len(mushrooms) == 2 and kept[0]["canonical_quantity"] == 100
+             and received["canonical_quantity"] == 2600 and received["canonical_unit"] == "g"
+             and received["id"] != kept[0]["id"])
+    ui.check("the new batch keeps its own 到货日期的保质期, edited by hand",
+             received["expires_on_day"] == today + 1
+             and kept[0]["expires_on_day"] == today + 30)
+    ui.check("确认收货 writes no 实际执行记录 and no 进度",
+             json.dumps(ui.state()["stages"][0], ensure_ascii=False) == before_stage
+             and ui.state()["meal_count"] == before_meals
+             and ui.state()["stages"][0]["intake"] == [])
+    ui.check("the order shows 已收货 after checking in", "已收货" in ui.text()
+             and ui.state()["orders"][0]["status"] == "已收货")
+    # The 库存页 shows the new batch at once.
+    ui.click("← 返回管家")
+    ui.click("▣  冰箱")
+    ui.scroll(700)
+    ui.check("the 库存页 shows the new batch at once",
+             "蘑菇 · 2 批" in ui.text() and "2700g" in ui.text())
+    # The remainder re-derives into the 缺菜清单: 100 + 2600 g available.
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    menu = ui.text()
+    gap = max(0, need["蘑菇"] - 2700)
+    shortfall = next(w for w in ui.snap() if w.get("i") == "shortfall_amount")
+    ui.check("the received amount re-derives the remaining 缺口 without a refresh",
+             "库存可用 2700 g" in menu and shortfall.get("t") == str(gap))
+    (ui.profile / "expected-state.json").write_text(
+        json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
+    (ui.profile / "checks.json").write_text(
+        json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
+
+
+def exercise_market_receive_restart(ui):
+    """Issue #28: the checked-in batches and the 已收货 status survive a restart,
+    and the derived 缺菜清单 agrees."""
+    expected = json.loads((ui.profile / "expected-state.json").read_text(encoding="utf-8"))
+    keys = ("foods", "orders", "cart", "stages", "meal_count")
+    ui.check("restart keeps the received batches and 已收货 status exactly",
+             {k: ui.state()[k] for k in keys} == {k: expected[k] for k in keys})
+    ui.check("restart resumes on the butler dashboard", "今天想吃点什么？" in ui.text())
+    ui.click("▣  冰箱")
+    ui.scroll(700)
+    fridge = ui.text()
+    ui.check("the received 蘑菇 batch is still in the fridge", "蘑菇 · 2 批" in fridge)
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.click("一键补齐 · 去模拟买菜  →")
+    ui.click("▦  订单")
+    ui.check("the restored order is 已收货 and no longer offers 确认收货",
+             "已收货" in ui.text() and "确认收货  →" not in ui.text())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18442)
@@ -663,6 +796,10 @@ def main():
                         help="Issue #27 模拟订单: confirm-then-submit, 待收货 status, stock/progress untouched, persistence")
     parser.add_argument("--market-order-restart", action="store_true",
                         help="Issue #27: the submitted 模拟订单 survives a restart")
+    parser.add_argument("--market-receive", action="store_true",
+                        help="Issue #28 确认收货: check quantities/保质期, new batches, no progress, remaining 缺口")
+    parser.add_argument("--market-receive-restart", action="store_true",
+                        help="Issue #28: received batches and 已收货 status survive a restart")
     args = parser.parse_args()
     ui = UI(args.port, args.profile.resolve())
     if args.restart:
@@ -681,6 +818,10 @@ def main():
         exercise_market_order(ui)
     elif args.market_order_restart:
         exercise_market_order_restart(ui)
+    elif args.market_receive:
+        exercise_market_receive(ui)
+    elif args.market_receive_restart:
+        exercise_market_receive_restart(ui)
     elif args.recipe:
         exercise_recipe(ui)
     else:

@@ -1,5 +1,92 @@
 # Migration validation
 
+## Issue #28 确认收货：核对数量与保质期并入库 — 2026-10-12
+
+- `bundle/main.splash` (schema stays 2, no new state field): the transient
+  `receipt` draft is opened by `market_receipt_open(order_id)` from a
+  `确认收货  →` action on a `待收货` 模拟订单. Each line is
+  `{name, product, ordered, received, days, unit, price_cents}`; `received`
+  defaults to `ordered` and `market_receipt_step` steps it within `0…ordered`
+  (the `＋` undo never exceeds the ordered amount),
+  so a short-shipped delivery is never accepted by default. `days` defaults to
+  the 模拟商品's `shelf_days` (today + days) and is editable through
+  `market_receipt_days`; blank means 保质期未知.
+- `bundle/main.splash`: `market_receipt_batch` turns one checked line into one
+  batch from the product's spec (`g/kg/ml/L`, or a `10 枚 / 盒` count spec as a
+  piece package). `market_receipt_confirm` gathers the checked batches and calls
+  `apply_inventory_operation({type: "add"})` — the one inventory-write path — so
+  every arrival gets a **new batch with a new id** and its own 到货日期 instead of
+  merging into an existing same-name batch. It also removes the checked-in cart
+  rows, sets the order status to `已收货` in the same commit, and never touches
+  `foods` for unchecked lines. It writes no `stages[].intake` and does not move
+  `meal_count`/progress.
+- `bundle/main.splash`: `valid_state` now accepts `order.status` of `待收货` or
+  `已收货`; older files were already migrated with `orders: []`. The 缺菜清单 was
+  not changed: with the new batches in stock it re-derives from
+  `用量 − 库存可用` (ADR 0003), so the unchecked remainder reappears on its own.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market-receive` (defaults,
+  partial check-in, new-not-merged batch, edited 保质期, no intake/progress,
+  `已收货`, re-derived 缺口) and `--market-receive-restart` modes; both write the
+  usual `expected-state.json`/`checks.json`. The restart check compares the
+  persisted domain keys (`foods`, `orders`, `cart`, `stages`, `meal_count`)
+  because the boot reminder legitimately rewrites the volatile `risk_key`/`log`.
+- `tools/test_release.py`: offline guard
+  `test_receipt_checks_quantities_and_adds_new_batches` (markers, `type: "add"`,
+  status transition, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `adb074b02773439eaffff3c67240ee39f4ee36b068280b1ec8f98b98daa53686`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-12 — bundle files of this commit, manifest patched in a test copy
+
+- Same pinned reference `card-host.exe` (655114c) and the same task-owned test
+  copy as Issue #25–#27: `.local-state/qa-receive/bundle` with `manifest.json`
+  patched in that copy only (drop `files`, `requires`, `host_api`), admitted
+  with `card-host --stamp --allow-unsigned` at 1200x800. No committed bundle
+  file differed. `hub check bundle --allow-unsigned` on the real bundle rejects
+  only the pre-existing `files` capability and accepts the new digest (no
+  digest refusal).
+- Command: `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-receive/qa-receive --market-receive` — **10/10 checks
+  passed**: the demo menu needs more 蘑菇 than one 100 g batch holds; 确认收货
+  pre-fills the ordered `14 盒` and the product's `保质期 5 天`; `−` reduces it to
+  `13 盒`; 确认收货入库 writes a **second** 蘑菇 batch (2600 g) next to the
+  untouched 100 g batch (distinct ids), the new one carrying the hand-edited
+  1-day 保质期 (`today + 1`) while the old one keeps `today + 30`; the stage JSON
+  (`intake` empty, counters identical) and `meal_count` are byte-identical; the
+  order shows `已收货`; and the 缺菜清单 re-derives to `库存可用 2700 g` with the
+  remaining `300` gap.
+- Relaunched the same host/profile and ran `--market-receive-restart`: **4/4**
+  (`foods`/`orders`/`cart`/`stages`/`meal_count` identical, dashboard restored,
+  the fridge still shows `蘑菇 · 2 批`, the order is `已收货` and no longer offers
+  `确认收货  →`).
+- Regression on the same bundle copy: `--market-order` **10/10**,
+  `--market-order-restart` **3/3**, `--market-cart` **13/13**, `--market`
+  **12/12**, `--menu-purchase` **13/13**, so the Issue #23–#27 flows still pass.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **30 passed**.
+- Screenshot `docs/qa/issue-28-receive.png` is a real 1200x800 capture of the
+  same run: 模拟订单 #1 待收货, 蘑菇 14 盒, and the 核对实际收到的食材 panel with the
+  14→13 stepper and the editable 保质期天数 5.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- The committed manifest still cannot be admitted by the locally available
+  reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
+  work), so the bundle was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- The receive flow was exercised for gram-spec products (菠菜/蘑菇). The count
+  spec path (`10 枚 / 盒` → a piece-package batch) and the `ml/L` path are
+  implemented and unit-guarded but not driven by the native QA, whose demo menu
+  only needs gram ingredients.
+- Pre-existing, unrelated: the generic `qa_release.py` default flow (no mode
+  flag) still stops at `ui.fill(text, index)` on the onboarding page (six
+  positional values, five `TextInput`s), unchanged by this work.
+- #29 owns the release checkpoint: bilingual README wording, real screenshots,
+  VALIDATION.md summary and the re-stamp are prepared here, but the final
+  delivery review, signing and submission remain human checkpoints.
+
 ## Issue #27 模拟订单：确认、状态、不改变库存 — 2026-10-14
 
 - `bundle/main.splash`: a 模拟订单 is user input kept in `state.orders` (like
@@ -68,7 +155,8 @@
   reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
   work), so the bundle was not run under the full OctoSense shell.
 - Live `model.complete` was not exercised; the QA used the local rule path.
-- 确认收货 (Issue #28) is not implemented; the order page and its note say so.
+- 确认收货 (Issue #28) is not implemented at the Issue #27 commit; the order
+  page and its note said so. It is implemented by the Issue #28 section above.
 - Pre-existing, unrelated: the generic `qa_release.py` default flow (no mode
   flag) stops at `ui.fill(text, index)` on the onboarding page because it passes
   six positional values while that page renders five `TextInput`s. It fails the
