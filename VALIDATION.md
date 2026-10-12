@@ -1,5 +1,72 @@
 # Migration validation
 
+## Issue #25 模拟买菜区域与商品浏览（含一键补齐入口）— 2026-10-14
+
+- `bundle/main.splash`: the 缺菜清单 panel gains `一键补齐 · 去模拟买菜  →`
+  when any line is short. It opens an in-window 模拟买菜 region (`let market`) that
+  replaces the dashboard and returns via `← 返回管家`; the butler's own tabs are
+  untouched. The region has its own left navigation (商品 / 购物车 / 订单) and
+  carries the current derived 缺菜清单 (ADR 0003): no list is stored, it re-derives
+  from `menu_stock_lines(choose_plan())` on every render and marks each line
+  `已对应模拟商品` or `无对应模拟商品`.
+- `bundle/main.splash`: `market_products()` is the fixed 24-item 模拟商品 catalog
+  shipped in the bundle (名称、品类、规格、单位、价格、可售数量、每 100 g
+  营养参考、参考保质期). The 商品 tab lists it and opens a detail page per item.
+  秋葵 is deliberately absent from the catalog so at least one 缺菜 can exercise
+  the no-match path instead of only describing it. The catalog is local data: no
+  network call, no new capability, no new bundle unit, same `pantry-steward` id.
+  Every region page carries a `模拟平台` badge and a `模拟下单` footer.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market` QA mode
+  (`exercise_market`). `tools/smoke.py` `exercise_menu_purchase` also gained one
+  `ui.scroll(700)` before the now-longer cycle page's confirm button, which had
+  become unreachable on this 1200x800 host.
+- `tools/test_release.py`: offline guard `test_market_region_is_in_bundle_not_a_second_unit`
+  (markers, 模拟 labels, exactly 24 catalog entries, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `1639c2fcbac79c8332a5218b892a190ebdf1e3a2a724d1c2f45d736770085fc9`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-14 — bundle files of this commit, manifest patched in a test copy
+
+- The only host on this machine is the pinned App Hub's prebuilt `card-host.exe`
+  (655114c). Like the Issue #24 run, it refuses the committed manifest's `files`
+  capability; the bundle was copied to a task-owned `.local-state/qa-market/bundle`
+  and its `manifest.json` was patched in that copy only (drop `files`, `requires`,
+  `host_api`), then admitted with `card-host --stamp --allow-unsigned` at
+  1200x800. No committed bundle file differed. `hub check bundle --allow-unsigned`
+  on the real bundle rejects only the pre-existing `files` capability and accepts
+  the new digest.
+- Command: `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-market/qa-market --market` — **12/12 checks passed**: the demo
+  menu uses both a catalogued (菠菜) and an uncatalogued (秋葵) ingredient; the
+  fridge is emptied so the day menu's usage is the whole 缺菜清单; the panel
+  offers 一键补齐; the region opens in the same window with 模拟平台/模拟下单;
+  it carries `本次要补齐的缺菜` with 菠菜 and 秋葵; 菠菜 is `已对应模拟商品` and
+  秋葵 is `无对应模拟商品` (not silently dropped); the list shows `共 24 条`
+  catalog rows; the detail shows 品类、规格、单位、价格、可售数量、每 100 g
+  营养参考 and 参考保质期; 购物车 and 订单 are the region's own pages; and
+  `返回管家` restores the butler with its 菜单 tab and the region gone.
+- `--restart` on the same profile: **1/1** (exact synthetic state). The region is
+  in-memory only, so nothing about it was persisted.
+- `python -X utf8 tools/qa_release.py --port 18498 --profile .local-state/qa-mp
+  --menu-purchase`: **13/13**, so the Issue #23/#24 menu and 缺菜清单 flow still
+  passes with the added button and code.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **27 passed**.
+- Screenshot `docs/qa/issue-25-market.png` is a real 1200x800 capture of the same
+  run (synthetic inventory: 菠菜 300 g and 秋葵 200 g, then both batches removed).
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- The committed manifest still cannot be admitted by the locally available
+  reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
+  work), so the bundle was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- The 购物车 and 订单 pages are read-only/preview pages here; matching relaxation
+  by 品类与规格, cart editing, totals and 模拟订单 are Issue #26/#27 and are not
+  implemented or claimed in this PR.
+
 ## Issue #24 缺菜清单 (derived, editable, follows stock) — 2026-10-13
 
 - `bundle/main.splash`: the menu side panel is now the 缺菜清单. One row per

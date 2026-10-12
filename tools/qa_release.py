@@ -30,6 +30,8 @@ parser.add_argument("--session-switch", action="store_true",
                     help="keep one host open across the civil day and expect the overview to advance itself")
 parser.add_argument("--menu-purchase", action="store_true",
                     help="Issue #23/#24 daily menu: three meals, nutrition, over-limit refusal, derived 缺菜清单")
+parser.add_argument("--market", action="store_true",
+                    help="Issue #25 模拟买菜: 一键补齐 entry, carried 缺菜清单, catalog list/detail, 模拟 labels")
 args = parser.parse_args()
 profile = args.profile.resolve()
 if not profile.is_relative_to((APP / ".local-state").resolve()) or not profile.name.startswith("qa-"):
@@ -79,6 +81,8 @@ elif args.session_switch:
     ui.shot("11-session-stage-after.png")
 elif args.menu_purchase:
     smoke.exercise_menu_purchase(ui)
+elif args.market:
+    smoke.exercise_market(ui)
 else:
     ui.check("first-run onboarding rendered", "首次建档  1 / 4" in ui.text())
     ui.shot("01-first-run.png")
