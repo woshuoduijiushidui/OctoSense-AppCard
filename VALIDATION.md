@@ -1,5 +1,813 @@
 # Migration validation
 
+## Issue #29 交付检查点：标注、文档、截图、重新盖章 — 2026-10-12
+
+This is the delivery checkpoint, not a behaviour change: `bundle/main.splash` is
+byte-identical to the Issue #28 commit. Only metadata, screenshots and docs
+changed.
+
+- Renamed-repository links fixed everywhere they were still stale after the
+  rename to `woshuoduijiushidui/pantry-steward`: `bundle/listing.json`
+  (`publisher.support`, `publisher.privacy_policy_url`), `PRIVACY.md`,
+  `SUPPORT.md`, the historical links in `SUBMISSION.md`,
+  `tools/test_release.py`'s `REPOSITORY`, and the tracker note in `AGENTS.md`.
+  No `OctoSense-AppCard` URL remains in the tree outside ignored local state.
+- The four `bundle/screenshots/*.png` release assets were recaptured from this
+  commit's bundle files in the same hidden reference card-host used since
+  Issue #24 (655114c, 1200x800, synthetic inventory: 豆腐 300 g 临期, 鸡蛋
+  2000 g → 100 g, 菠菜 200 g 临期, 蘑菇 150 g; local-rule day menu): 首页 (4 批);
+  the candidate three-meal day menu with its derived 缺菜清单; the 缺菜清单
+  after the 鸡蛋 batch was edited to 100 g, showing `需要补齐 952` / `还差 952 克`,
+  the editable amount, and the `一键补齐 · 去模拟买菜` entry; and the inventory
+  batch list. The old captures predated #25 and showed neither the editable gap
+  nor `一键补齐`. The earlier text said 941 克; the honest recapture says 952.
+- Restamped with the official App Hub revision the current host pins,
+  `8347a489141c0e24cab564883db7c4592935a8b2` (`hub stamp bundle`), built with
+  `cargo build --release -p octosense-app-hub --bin hub` from a task-owned
+  worktree checked out at that commit (output under `target/hub-8347`, using
+  the prepared sibling runtime checkouts). `bundle_blake3 =
+  c75cc689a2bd050ed682d787c272b10c57541412fc0bf8e073c2dc12a40e3bc6`. Manifest
+  version stays **0.8.0**; capabilities stay `storage, model, camera, files`.
+- `hub check bundle --allow-unsigned` on the committed bundle **PASSED** with
+  only the expected unsigned warning: `pantry-steward 0.8.0 — PASSED`, warning
+  `publisher-signature: unsigned`. This is why the host pin matters: the older
+  publishing pin `655114c4943cd2490daaefa2173e7b5aaa20669f` does not know the
+  `files` capability and refuses it. That refusal was a pin mismatch, not a
+  bundle defect; `files` is declared in App Hub from commit `30c9d19`, which is
+  in the host pin's history.
+
+### Native run, 2026-10-12 — bundle files of this commit, manifest patched in a test copy
+
+- Same task-owned host procedure as Issue #25–#28: `.local-state/qa-29/bundle`
+  with `manifest.json` patched in that copy only (drop `files`, `requires`,
+  `host_api`), admitted with the pinned reference `card-host --stamp
+  --allow-unsigned` at 1200x800. The copy differs from the committed bundle
+  only in `manifest.json` (`diff -rq`), so no committed bundle file differed.
+  This copy is used only because the machine's prebuilt card-host is the
+  655114c build that lacks `files`; the committed manifest was not changed to
+  accommodate it.
+- The four screenshots above are real captures of that run.
+- Regression on the same bundle files: `python -X utf8 tools/qa_release.py
+  --port 18499 --profile .local-state/qa-29/qa-std --menu-purchase` — **13/13
+  checks passed** (three meals, grams, over-budget refusal, merged 缺菜清单,
+  re-derived gap, editable gap, never stored, accept, empty-meal refusal).
+  Since `main.splash` is byte-identical to the #28 run, the #25–#28 mode
+  regressions are unchanged and were not re-driven.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **31 passed**
+  (includes the updated repository-link guard).
+- `git diff --check` clean; bundle 2,518,774 / 8,388,608 bytes.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- No full OctoSense shell checkout with the 8347a489 pin exists on this
+  machine, so the committed manifest was not run under the full official shell
+  (only the reference card-host on a patched test copy).
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- The publishing workflow and `publisher-toolchain.json` still pin App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f`, which cannot gate this bundle as
+  is; the publishing route must be reviewed before any 0.8.0 tag.
+- Formal release evidence review, publisher identity/signing, public-link
+  review, App Hub submission and competition qualification remain human
+  checkpoints. No tag, Release, new issue or submission was made.
+
+## Issue #28 确认收货：核对数量与保质期并入库 — 2026-10-12
+
+- `bundle/main.splash` (schema stays 2, no new state field): the transient
+  `receipt` draft is opened by `market_receipt_open(order_id)` from a
+  `确认收货  →` action on a `待收货` 模拟订单. Each line is
+  `{name, product, ordered, received, days, unit, price_cents}`; `received`
+  defaults to `ordered` and `market_receipt_step` steps it within `0…ordered`
+  (the `＋` undo never exceeds the ordered amount),
+  so a short-shipped delivery is never accepted by default. `days` defaults to
+  the 模拟商品's `shelf_days` (today + days) and is editable through
+  `market_receipt_days`; blank means 保质期未知.
+- `bundle/main.splash`: `market_receipt_batch` turns one checked line into one
+  batch from the product's spec (`g/kg/ml/L`, or a `10 枚 / 盒` count spec as a
+  piece package). `market_receipt_confirm` gathers the checked batches and calls
+  `apply_inventory_operation({type: "add"})` — the one inventory-write path — so
+  every arrival gets a **new batch with a new id** and its own 到货日期 instead of
+  merging into an existing same-name batch. It also removes the checked-in cart
+  rows, sets the order status to `已收货` in the same commit, and never touches
+  `foods` for unchecked lines. It writes no `stages[].intake` and does not move
+  `meal_count`/progress.
+- `bundle/main.splash`: `valid_state` now accepts `order.status` of `待收货` or
+  `已收货`; older files were already migrated with `orders: []`. The 缺菜清单 was
+  not changed: with the new batches in stock it re-derives from
+  `用量 − 库存可用` (ADR 0003), so the unchecked remainder reappears on its own.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market-receive` (defaults,
+  partial check-in, new-not-merged batch, edited 保质期, no intake/progress,
+  `已收货`, re-derived 缺口) and `--market-receive-restart` modes; both write the
+  usual `expected-state.json`/`checks.json`. The restart check compares the
+  persisted domain keys (`foods`, `orders`, `cart`, `stages`, `meal_count`)
+  because the boot reminder legitimately rewrites the volatile `risk_key`/`log`.
+- `tools/test_release.py`: offline guard
+  `test_receipt_checks_quantities_and_adds_new_batches` (markers, `type: "add"`,
+  status transition, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `adb074b02773439eaffff3c67240ee39f4ee36b068280b1ec8f98b98daa53686`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-12 — bundle files of this commit, manifest patched in a test copy
+
+- Same pinned reference `card-host.exe` (655114c) and the same task-owned test
+  copy as Issue #25–#27: `.local-state/qa-receive/bundle` with `manifest.json`
+  patched in that copy only (drop `files`, `requires`, `host_api`), admitted
+  with `card-host --stamp --allow-unsigned` at 1200x800. No committed bundle
+  file differed. `hub check bundle --allow-unsigned` on the real bundle rejects
+  only the pre-existing `files` capability and accepts the new digest (no
+  digest refusal).
+- Command: `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-receive/qa-receive --market-receive` — **10/10 checks
+  passed**: the demo menu needs more 蘑菇 than one 100 g batch holds; 确认收货
+  pre-fills the ordered `14 盒` and the product's `保质期 5 天`; `−` reduces it to
+  `13 盒`; 确认收货入库 writes a **second** 蘑菇 batch (2600 g) next to the
+  untouched 100 g batch (distinct ids), the new one carrying the hand-edited
+  1-day 保质期 (`today + 1`) while the old one keeps `today + 30`; the stage JSON
+  (`intake` empty, counters identical) and `meal_count` are byte-identical; the
+  order shows `已收货`; and the 缺菜清单 re-derives to `库存可用 2700 g` with the
+  remaining `300` gap.
+- Relaunched the same host/profile and ran `--market-receive-restart`: **4/4**
+  (`foods`/`orders`/`cart`/`stages`/`meal_count` identical, dashboard restored,
+  the fridge still shows `蘑菇 · 2 批`, the order is `已收货` and no longer offers
+  `确认收货  →`).
+- Regression on the same bundle copy: `--market-order` **10/10**,
+  `--market-order-restart` **3/3**, `--market-cart` **13/13**, `--market`
+  **12/12**, `--menu-purchase` **13/13**, so the Issue #23–#27 flows still pass.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **30 passed**.
+- Screenshot `docs/qa/issue-28-receive.png` is a real 1200x800 capture of the
+  same run: 模拟订单 #1 待收货, 蘑菇 14 盒, and the 核对实际收到的食材 panel with the
+  14→13 stepper and the editable 保质期天数 5.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- The committed manifest still cannot be admitted by the locally available
+  reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
+  work), so the bundle was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- The receive flow was exercised for gram-spec products (菠菜/蘑菇). The count
+  spec path (`10 枚 / 盒` → a piece-package batch) and the `ml/L` path are
+  implemented and unit-guarded but not driven by the native QA, whose demo menu
+  only needs gram ingredients.
+- Pre-existing, unrelated: the generic `qa_release.py` default flow (no mode
+  flag) still stops at `ui.fill(text, index)` on the onboarding page (six
+  positional values, five `TextInput`s), unchanged by this work.
+- #29 owns the release checkpoint: bilingual README wording, real screenshots,
+  VALIDATION.md summary and the re-stamp are prepared here, but the final
+  delivery review, signing and submission remain human checkpoints.
+
+## Issue #27 模拟订单：确认、状态、不改变库存 — 2026-10-14
+
+- `bundle/main.splash`: a 模拟订单 is user input kept in `state.orders` (like
+  `state.cart`; the 缺菜清单 stays derived, ADR 0003). Each order is
+  `{id, day, status, total_cents, lines}` where each line is
+  `{name, product, quantity, unit, price_cents}`. `migrate_state` seeds
+  `orders: []` for older files and `valid_state` bounds and type-checks it on
+  load, so a restart keeps the submitted orders exactly. Schema stays 2.
+- `bundle/main.splash`: the 购物车 tab shows `提交模拟订单  →`, and the order is
+  written only by `market_submit_order`, which refuses to run unless
+  `market.confirming` is true. `提交模拟订单  →` opens a `确认提交模拟订单？`
+  panel with `确认提交订单`/`取消`; `取消` writes nothing. This is the only gate,
+  so no order exists before the user confirms.
+- `bundle/main.splash`: `market_order_lines` includes only non-dropped cart rows
+  whose 模拟商品 is picked; a `无匹配` row has nothing to buy and stays in the
+  cart, and a `可售不足` row is ordered at the product's `stock` (never more than
+  可售数量). `market_order_total`/`market_order_line_total` use the simulated
+  unit prices. The write skips `foods`, `stages`, `intake`, `meal_count` and
+  progress entirely.
+- `bundle/main.splash`: the 订单 tab lists each order as
+  `模拟订单 #id · <下单日>`, a `待收货` badge, `共 N 样 · 模拟总价`, the lines and
+  the note `下单不等于货到手…`. The footer states the 模拟下单 no-real-payment
+  rule on every region page.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market-order` (confirm-then-
+  submit, status, stock/progress untouched, on-sale cap, unmatched row excluded)
+  and `--market-order-restart` QA modes; both write the usual
+  `expected-state.json`/`checks.json`.
+- `tools/test_release.py`: offline guard
+  `test_market_order_requires_confirmation_and_changes_no_stock` (markers,
+  confirm/status/no-payment labels, orders in state, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `cd69dfec7ecf8aa843f22a62c8398d071e1bf81cbbc5b6f9d50245ca1981ed88`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-14 — bundle files of this commit, manifest patched in a test copy
+
+- Same pinned reference `card-host.exe` (655114c) and the same task-owned test
+  copy as Issue #25/#26: `.local-state/qa-order/bundle` with `manifest.json`
+  patched in that copy only (drop `files`, `requires`, `host_api`), admitted
+  with `card-host --stamp --allow-unsigned` at 1200x800. No committed bundle
+  file differed. `hub check bundle --allow-unsigned` on the real bundle rejects
+  only the pre-existing `files` capability and accepts the new digest.
+- Command: `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-order/qa-order --market-order` — **10/10 checks passed**: the
+  cart offers `提交模拟订单`; clicking it first shows `确认提交模拟订单？` with
+  `state.orders` still empty; `取消` writes no order; `确认提交订单` writes exactly
+  one `待收货` order and the 订单 page shows `模拟订单 #1` and its status; the page
+  says no real purchase or payment; the 可售不足 row is ordered at the 14-box
+  on-sale maximum while the 无匹配 row is left out; and `foods`, the stage JSON
+  (`intake` empty, counters unchanged) and `meal_count` are byte-identical before
+  and after submitting.
+- Relaunched the same host/profile and ran `--market-order-restart`: **3/3**
+  (state identical, dashboard restored, the order keeps its lines, `待收货`
+  status and no-payment note).
+- Regression on the same bundle copy: `--market-cart` **13/13**, `--market`
+  **12/12**, `--menu-purchase` **13/13**, so the Issue #23–#26 flows still pass.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **29 passed**.
+- Screenshot `docs/qa/issue-27-order.png` is a real 1200x800 capture of the same
+  run (order #1: 菠菜 2 把, 蘑菇 14 盒, 模拟总价 ¥96.40, 待收货).
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- The committed manifest still cannot be admitted by the locally available
+  reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
+  work), so the bundle was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- 确认收货 (Issue #28) is not implemented at the Issue #27 commit; the order
+  page and its note said so. It is implemented by the Issue #28 section above.
+- Pre-existing, unrelated: the generic `qa_release.py` default flow (no mode
+  flag) stops at `ui.fill(text, index)` on the onboarding page because it passes
+  six positional values while that page renders five `TextInput`s. It fails the
+  same way on the unmodified Issue #26 bundle, so it is not a regression of this
+  work and was left untouched.
+
+## Issue #26 待核对购物车：匹配、无法匹配的处理、增减与总价 — 2026-10-14
+
+- `bundle/main.splash`: the 购物车 is now user input stored in `state.cart`
+  (ADR 0003: only the cart is persisted; the 缺菜清单 stays derived). Each line is
+  `{name, product, quantity, dropped}`; an empty `product` means no allowed match.
+  `migrate_state` seeds `cart: []` for older files and `valid_state` bounds and
+  type-checks it on load, so a restart keeps the cart exactly.
+- `bundle/main.splash`: entering the region (`open_market`) auto-fills the cart by
+  name via `market_pick`, which refuses anything `excluded_food` (过敏与忌口).
+  `market_spec_grams`/`market_packs` round the purchase quantity up to whole
+  packs by the product's 规格 (g/kg); 枚/L specs fall back to 1 pack. Auto-fill
+  only adds names it has never seen, so a user's own quantity, replacement and
+  deletion survive every re-entry.
+- `bundle/main.splash`: the 购物车 tab renders each line with its simulated unit
+  price and line subtotal, `−/＋` quantity steps, `删除` (a tombstone, so a
+  deleted row is never re-added) and `替换`. A row with no match or more packs
+  than `stock` gets a `无匹配`/`可售不足` badge and an inline explanation instead
+  of being dropped; the tab shows `共 N 样 · 模拟总价` from `market_cart_total`.
+- `bundle/main.splash`: `替换` opens `market_alternatives`, ranked by
+  `market_category_hint` (same 品类 first) then by spec closeness to the gap,
+  with 过敏与忌口 excluded; `market_replace_with` re-picks the quantity by spec.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market-cart` (auto-fill,
+  rounding, flags, 增减/删除/替换, total, re-entry persistence) and
+  `--market-cart-restart` QA modes. The Issue #25 `--market` cart assertion was
+  updated from the retired read-only preview ("无对应模拟商品") to the new cart's
+  `购物车 · 待核对` + `无匹配`.
+- `tools/test_release.py`: offline guard
+  `test_market_cart_auto_fill_total_and_persistence` (markers, labels, cart in
+  state, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `5db3570591932a0aaf856ef167f8088ba73dbfb09b2c950b26a76bcc1453b751`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-14 — bundle files of this commit, manifest patched in a test copy
+
+- Same pinned reference `card-host.exe` (655114c) and the same task-owned test
+  copy as Issue #25: `.local-state/qa-cart/bundle` with `manifest.json` patched
+  in that copy only (drop `files`, `requires`, `host_api`), admitted with
+  `card-host --stamp --allow-unsigned` at 1200x800. No committed bundle file
+  differed.
+- `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-cart/qa-cart --market-cart` — **13/13 checks passed**: the demo
+  menu uses 菠菜 400 g, 蘑菇 3000 g and 秋葵 200 g with the fridge emptied; opening
+  the region auto-fills `购物车 · 待核对`; 菠菜 rounds to 2 把 and 蘑菇 to 15 盒;
+  蘑菇 is `可售不足` (14 盒 on sale) and 秋葵 is `无匹配`, both with a `替换`
+  entry and an explanation; the total is `¥102.60`; `＋` on 菠菜 persists as 3 把
+  and re-prices to `¥107.40`; `替换 秋葵` offers same-category 蔬菜 alternatives
+  by 规格 and `换成 青菜` re-picks 1 把; `删除 蘑菇` drops it and its price to
+  `¥18.60`; and re-entering the region keeps the edits.
+- `--market-cart-restart` on the same profile: **4/4** — the persisted cart
+  round-trips exactly, the butler dashboard resumes, and the restored cart still
+  shows 3 把/青菜 with 蘑菇 gone, while the derived 缺菜清单 still lists 菠菜 and
+  秋葵.
+- Regressions: `--market` **12/12** and `--menu-purchase` **13/13**; the generic
+  `--restart` for the Issue #25 profile **1/1**.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **28 passed**.
+- Screenshots `docs/qa/issue-26-cart.png` (flags + total) and
+  `docs/qa/issue-26-replace.png` (same-category 替换 list) are real 1200x800
+  captures of the same synthetic run.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- As with Issue #25, the committed manifest still cannot be admitted by the
+  locally available reference host (pre-existing `files`/`host-api-v1` mismatch),
+  so this was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- Submitting the cart as a 模拟订单, order status and 确认收货 are Issue #27 and
+  are not implemented or claimed here; the cart footer says so.
+
+## Issue #25 模拟买菜区域与商品浏览（含一键补齐入口）— 2026-10-14
+
+- `bundle/main.splash`: the 缺菜清单 panel gains `一键补齐 · 去模拟买菜  →`
+  when any line is short. It opens an in-window 模拟买菜 region (`let market`) that
+  replaces the dashboard and returns via `← 返回管家`; the butler's own tabs are
+  untouched. The region has its own left navigation (商品 / 购物车 / 订单) and
+  carries the current derived 缺菜清单 (ADR 0003): no list is stored, it re-derives
+  from `menu_stock_lines(choose_plan())` on every render and marks each line
+  `已对应模拟商品` or `无对应模拟商品`.
+- `bundle/main.splash`: `market_products()` is the fixed 24-item 模拟商品 catalog
+  shipped in the bundle (名称、品类、规格、单位、价格、可售数量、每 100 g
+  营养参考、参考保质期). The 商品 tab lists it and opens a detail page per item.
+  秋葵 is deliberately absent from the catalog so at least one 缺菜 can exercise
+  the no-match path instead of only describing it. The catalog is local data: no
+  network call, no new capability, no new bundle unit, same `pantry-steward` id.
+  Every region page carries a `模拟平台` badge and a `模拟下单` footer.
+- `tools/smoke.py` / `tools/qa_release.py`: new `--market` QA mode
+  (`exercise_market`). `tools/smoke.py` `exercise_menu_purchase` also gained one
+  `ui.scroll(700)` before the now-longer cycle page's confirm button, which had
+  become unreachable on this 1200x800 host.
+- `tools/test_release.py`: offline guard `test_market_region_is_in_bundle_not_a_second_unit`
+  (markers, 模拟 labels, exactly 24 catalog entries, unchanged app id).
+- Committed manifest digest restamped with the pinned App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `1639c2fcbac79c8332a5218b892a190ebdf1e3a2a724d1c2f45d736770085fc9`.
+  Version stays 0.8.0; capabilities stay `storage, model, camera, files`.
+
+### Native run, 2026-10-14 — bundle files of this commit, manifest patched in a test copy
+
+- The only host on this machine is the pinned App Hub's prebuilt `card-host.exe`
+  (655114c). Like the Issue #24 run, it refuses the committed manifest's `files`
+  capability; the bundle was copied to a task-owned `.local-state/qa-market/bundle`
+  and its `manifest.json` was patched in that copy only (drop `files`, `requires`,
+  `host_api`), then admitted with `card-host --stamp --allow-unsigned` at
+  1200x800. No committed bundle file differed. `hub check bundle --allow-unsigned`
+  on the real bundle rejects only the pre-existing `files` capability and accepts
+  the new digest.
+- Command: `python -X utf8 tools/qa_release.py --port 18499 --profile
+  .local-state/qa-market/qa-market --market` — **12/12 checks passed**: the demo
+  menu uses both a catalogued (菠菜) and an uncatalogued (秋葵) ingredient; the
+  fridge is emptied so the day menu's usage is the whole 缺菜清单; the panel
+  offers 一键补齐; the region opens in the same window with 模拟平台/模拟下单;
+  it carries `本次要补齐的缺菜` with 菠菜 and 秋葵; 菠菜 is `已对应模拟商品` and
+  秋葵 is `无对应模拟商品` (not silently dropped); the list shows `共 24 条`
+  catalog rows; the detail shows 品类、规格、单位、价格、可售数量、每 100 g
+  营养参考 and 参考保质期; 购物车 and 订单 are the region's own pages; and
+  `返回管家` restores the butler with its 菜单 tab and the region gone.
+- `--restart` on the same profile: **1/1** (exact synthetic state). The region is
+  in-memory only, so nothing about it was persisted.
+- `python -X utf8 tools/qa_release.py --port 18498 --profile .local-state/qa-mp
+  --menu-purchase`: **13/13**, so the Issue #23/#24 menu and 缺菜清单 flow still
+  passes with the added button and code.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **27 passed**.
+- Screenshot `docs/qa/issue-25-market.png` is a real 1200x800 capture of the same
+  run (synthetic inventory: 菠菜 300 g and 秋葵 200 g, then both batches removed).
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+- The committed manifest still cannot be admitted by the locally available
+  reference host (pre-existing `files`/`host-api-v1` mismatch, unchanged by this
+  work), so the bundle was not run under the full OctoSense shell.
+- Live `model.complete` was not exercised; the QA used the local rule path.
+- The 购物车 and 订单 pages were read-only/preview pages at the time of the #25
+  run; matching by 品类与规格, cart editing, totals and 模拟订单 were not
+  implemented then. Cart editing and totals were delivered afterwards by
+  Issue #26 (see the #26 section above); 模拟订单 stays Issue #27 and is still
+  not implemented or claimed.
+
+## Issue #24 缺菜清单 (derived, editable, follows stock) — 2026-10-13
+
+- `bundle/main.splash`: the menu side panel is now the 缺菜清单. One row per
+ingredient name merges the three meals (用量), shows the available stock
+(库存可用) and the gap (还差 N 克 = max(0, 用量 − 库存可用)). The gap is editable:
+typing a number sets the day menu's merged usage to 库存可用 + that number (a
+proportional split with the rounding remainder on the last meal), and 不需要
+sets the usage to what is already available. Both writes go through
+`commit`, so the day menu and the list cannot disagree. The list itself is
+never stored (ADR 0003); it recomputes on every render, so a stock change is
+visible without a manual refresh and a restart re-derives the same numbers.
+- `tools/smoke.py` / `tools/qa_release.py`: `--menu-purchase` extended with the
+Issue #24 checks, and `UI.scroll` added (the three meals no longer fit one
+screen). `tools/test_release.py` guards the new symbols offline.
+- Committed manifest digest restamped with the pinned App Hub
+`655114c4943cd2490daaefa2173e7b5aaa20669f`: `c25dc206a332269e444781692f517b5569076a8c70bf022f72ffdd8080a92bbf`.
+- The README pair carried unresolved `<<<<<<< HEAD` / `>>>>>>> f0a7de7`
+conflict markers from the #23 branch (the #11 Overview paragraph on one side,
+the three-meal menu on the other). Both paragraphs are kept now and the markers
+are gone.
+- The four `bundle/screenshots/` PNGs were recaptured from the same hidden
+Card-runtime run (1200x800, synthetic inventory) and replace the stale pre-#23
+captures: 01 首页, 02 三餐日菜单 with the 缺菜清单, 03 the 缺菜清单 showing
+还差 941 克 with its editable field, 04 the 冰箱 batch list. The listing
+description now says so instead of "旧截图展示手动流程".
+
+### Base blockers found and fixed (the app did not evaluate at all)
+
+The branch as checked out could not run: `main.splash` failed to parse, and the
+first inventory write was rejected. These are Issue #23/#9 defects, not part of
+the Issue #24 feature, but nothing in the menu flow could be tested without
+them:
+
+- `fn menu_meals` ended `{ return p.meals } []`; the trailing `[]` was parsed as
+  an array index. Rewritten to `return []` through a local.
+- `fn distribute_meals` named a local `use`, which makepad-script reserves.
+  Renamed to `planned`.
+- The default `state` literal had no `program_history`, so a fresh install's
+  first `apply_inventory_operation` failed `valid_state` and no batch could ever
+  be added. Added `program_history: []`.
+- `valid_state` validated `programs` as if they still held stages
+  (`consumed_kcal`, `intake`), but Issue #9 split candidates (`programs`) from
+  confirmed stages (`stages`). Candidate fields are checked on `programs` and a
+  stage check (including the 12-stage cap) was restored for `stages`.
+
+### Native run, 2026-10-13 — bundle files of this commit, adjusted manifest
+
+- The only host on this machine is the pinned App Hub's prebuilt
+  `card-host.exe`/`hub.exe`. It refuses the committed manifest: it does not know
+  the `files` capability and does not implement `host-api-v1` /
+  `app_policy.device_consent@1` (which `tools/install_local.rs` registers for the
+  full shell). That is a pre-existing manifest/host mismatch (main already had
+  `files`), not introduced here.
+- To exercise the bundle anyway, the manifest was patched **in memory of the
+  test directory only** to drop `files`, `requires` and `host_api`, and
+  `card-host --system --allow-unsigned` was used. No bundle file other than
+  `manifest.json` differed; the digest is manifest-excluded, so the same files
+  hash to the committed `98444c…`. The committed manifest was then restored.
+- Command: hidden `card-host.exe` (pinned 655114c) standalone at 1200x800 with a
+task-owned `--app-data` under `.local-state/qa-issue24`, then
+  `python -X utf8 tools/qa_release.py --port 18499 --profile .local-state/qa-issue24 --menu-purchase`
+  — **13/13 checks passed**: one generation gives 早/中/晚, every meal lists grams,
+  an over-budget portion is refused, the three meals merge into one line with the
+  day's total, every meal shows a nutrition reference, a shrunk batch plus an
+  expired batch leaves 库存可用 at the unexpired 100 g, the gap re-derives without
+  a refresh, typing a gap rewrites the day menu's usage (300 = 100 + 200) while
+  the raw state file contains no `shortfall` key, 不需要 falls the usage back to
+  the available amount, the menu is then accepted, and an edit that would empty a
+  meal (both batches removed, then 不需要) is refused and rolled back instead of
+  writing an invalid day menu.
+- `--restart` on the same profile: **1/1 checks passed** (exact synthetic state,
+  so the derived list left nothing behind on disk).
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`: **26 passed**.
+- All inventory was synthetic; no real inventory, keys or provider calls.
+
+### Not verified
+
+The committed manifest cannot be admitted by the locally available reference
+host (see above), so the bundle was not run under the full OctoSense shell, no
+live `model.complete` menu was generated, 忌口-excluded batches were not exercised
+through the UI (they share `plan_eligible` with expiry). The screenshots are
+hidden Card-runtime captures of synthetic data, not full-shell captures, because
+the committed manifest cannot be admitted locally (see above). The
+pre-existing `tools/smoke.py exercise()` and the default `tools/qa_release.py`
+main path remain stale for the post-#8/#23 flow and were not run.
+
+## Issue #23 daily menu, 2026-10-12 — code complete, native QA not run on this machine
+
+- `bundle/main.splash` now generates one day of 早／中／晚 three meals from a
+  single generation (one `model.complete` call) or the local rule path, which
+  returns the same shape. Each meal carries its own ingredients, grams, minutes,
+  steps and per-100 g nutrition totals.
+- Acceptance checks only allergies/avoidances, complete nutrition references and
+  the current cycle's remaining daily kcal. Stock is no longer an acceptance
+  gate: every ingredient shows 库存够 or 还差 N 克, and an accepted menu becomes
+  executable by itself once the missing batches are added, with no regeneration.
+- Editing a meal's portion or swapping one ingredient recomputes the nutrition at
+  once; an edit that would break a taboo, leave a reference missing or exceed the
+  day's remaining kcal is refused and rolled back with the reason.
+- Storage stays schema 2. `state.plans` now holds day menus with a `meals` array
+  and a merged `uses` list; `migrate_menus` upgrades old single-meal plans to one
+  晚餐 meal on read, so old files keep loading. Menus are capped at the recent 20.
+- Interface wording for the meal flow now says 菜单, not 方案.
+- New QA mode `--menu-purchase` (`tools/smoke.py`, wired in `tools/qa_release.py`)
+  drives onboarding with synthetic inventory, one generation, three meals,
+  per-meal nutrition and an over-budget portion edit that must be refused.
+- Offline guards added in `tools/test_release.py`: menu symbols present and no
+  network/shopping capability in the manifest.
+
+Resetting the base: the working tree's `bundle/main.splash` had reverted to an
+older pre-Issue-#2 revision while its tools expected the later cycle work. This
+change re-anchors the app, tools and docs on `origin/main` (the coherent, merged
+revision) plus the existing 菜单 glossary/ADR edits, then adds Issue #23 on top.
+
+Not verified here: the native official-shell QA (`tools/smoke.py --menu-purchase`,
+`tools/qa_release.py --menu-purchase`) was not run. This machine has no built
+official host and no pinned `.sources`, so the bundle was not exercised in the
+unmodified shell and no live model call was made. The manifest digest was
+recomputed with the App Hub's documented bundle algorithm (per-file portable
+path, NUL, little-endian length, bytes; blake3) because the pinned
+`hub stamp bundle` binary was unavailable:
+`eead2683f8594174c877dfcd381aa193e536f2c76d2451ab97bc576f2afdb2df`. The three
+screenshots under `bundle/screenshots/` still show the prior flow and were not
+recaptured; they need refreshing before any release checkpoint.
+
+## Overview page: long-term plan and progress, 2026-10-10 — unreleased working tree
+
+Implementation for Issue #11. A dedicated Overview tab shows the long-term plan
+and its progress.
+
+- `bundle/main.splash`: the nav gains `◈  总览` between 首页 and 冰箱 (the later
+tabs and their `navigate` calls were renumbered). `meals_per_day()` fixes the
+daily meal count at 3 (早/中/晚); `stage_done_meals`, `stage_planned_meals`
+(`days × 3`) and `stage_progress_percent` compute a stage's progress, and
+`plan_done_meals` / `plan_planned_meals` / `plan_progress_percent` roll the
+per-stage counts up, so a future stage with no confirmed meal cannot move the
+confirmed numerator. `stage_today_intake` lists the meals confirmed today. The
+Overview shows the plan (stages, total days, plan progress, per-stage progress),
+the current stage's kcal and protein target against actuals, and today's
+per-meal progress with its meals. Only `confirm_consume` appends to a stage's
+`intake`, so generating or accepting a menu never changes progress.
+`ensure_extended_state` now refreshes `state.daily_target` from `current_stage`,
+so a date-driven stage switch shows the new stage's target; when the calendar has
+passed every stage, the Overview says the plan has ended and offers "选择下一份
+计划…" instead of showing a stale stage. `meals_per_day()` is the single source of
+truth for progress; the persisted `meals_per_day` field keeps its historical
+default and is no longer read for progress, so an old value cannot change the
+formula, and the unused `choose_meals_per_day` setter whose text promised a
+configurable meal count was deleted. `ai_watchdog` also re-renders the app when
+the civil day turns over (`shown_day` compared with `health_day()`), so an
+Overview left open across midnight shows the new stage and targets without a
+click or restart.
+- Storage schema stays 1; no new stored field.
+- `tools/qa_release.py` now exercises the Overview against a real host and adds
+  `--stage-switch`, `--plan-ended` and `--session-switch` modes with generated
+  fixtures whose clock offset has passed the first stage, the whole plan, or the
+  civil midnight; `tools/test_release.py` guards the new symbols. Bilingual
+  READMEs and `CYCLE-PLANS.md` describe the page and the progress rule.
+
+### Native run, 2026-10-10 — historical 0.6.2 bundle
+
+These results were captured on the 0.6.2 bundle (capabilities storage+model)
+before the Issue #2 capabilities landed. They are history and do **not**
+describe the current commit.
+
+- Restamped that editable bundle with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 34666994381141739f4918c1ab8bbed31627a6c5fe16b13a377fa21b197107b7`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts).
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-issue11`:
+  `tools/qa_release.py --port 18571 --profile .local-state/qa-issue11` —
+  **28/28 checks passed**, including the Overview tab, plan progress
+  `1 / 66` (= 1 of (7+15)×3), per-stage `1 / 21` and `0 / 45`, per-meal `1 / 3`,
+  the current stage's kcal/protein target against actuals, no progress change
+  after generating and accepting a menu, and progress rising to `2 / 66` and
+  `2 / 3` only after a confirmed meal. `--restart` then preserved the exact
+  synthetic state.
+- Stage switch: the main run wrote a fixture profile
+  `.local-state/qa-issue11-stage` whose synthetic clock offset had passed the
+  7-day first stage. A second hidden host at port 18572 plus
+  `tools/qa_release.py --stage-switch` — **2/2 checks passed**: the 15-day stage
+  became current and its kcal/protein target replaced the first stage's, and a
+  restart preserved the fixture unchanged.
+- Ended plan: a third fixture `.local-state/qa-issue11-ended` passed every stage.
+  A hidden host at port 18573 plus `tools/qa_release.py --plan-ended` — **2/2
+  checks passed**: the Overview says the plan has ended and marks no stage as
+  current, and the 档案 tab shows the same ended summary instead of a stale
+  "当前阶段".
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures: `docs/qa/issue-11-overview.png` (1/66, stage 1 current),
+  `docs/qa/issue-11-progress.png` (2/66, today 2/3) and
+  `docs/qa/issue-11-stage-switch.png` (the 15-day stage current). These are
+  hidden Card-runtime captures of synthetic data at 1200x800.
+- Bundle total is 7,839,683 bytes, under the 8 MiB package guard.
+- An independent two-axis review (Standards + Spec) of the commit found no
+  blocker. Acting on it: `stage_progress_percent` / `plan_progress_percent` reuse
+  the existing `goal_percent`; the stored `meals_per_day` defaults were left
+  untouched; `choose_meals_per_day` was deleted; the dead `program == nil`
+  Overview branch was removed; and the ended-plan state was added and covered by
+  a native check, with `program_expired()` shared so the 档案 tab agrees.
+  The reviewers read "计划进度为各阶段之和" as rolling the per-stage meal counts
+  into one plan progress (1/66), which is what the implementation does and what
+  the acceptance criterion calls 汇总.
+
+### Current bundle verification, 2026-10-11 — pending a capabilities host
+
+- The current bundle is 0.8.0 and declares `storage, model, camera, files`.
+  Restamped with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 0fe1939edb8186990d8e4b9ffb12bc426c626f6fdfcdb3c18d51ce497e52cbdb`.
+- The pinned host cannot run it: `hub check` and `card-host` refuse with
+  `unknown capability "files"`; stripping `files`/`camera` then gets
+  `app pantry-steward needs a host implementing app_policy.device_consent@1`.
+  The Issue #11 native results above therefore belong to the 0.6.2 bundle and
+  were not re-run on this commit.
+- `tools/qa_release.py --session-switch` was added for the day turn-over fix. It
+  keeps one host open across the civil midnight and expects the Overview to
+  advance itself with no click and no restart. It is ready but could not be
+  executed here for the host-capability reason above; it needs a host that
+  implements the Issue #2 `camera`/`files` capabilities.
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'` — **23 passed**
+  (offline guards on the current tree).
+
+### Still unverified
+
+- The full `tools/smoke.py` regression was not run: on the standalone
+  `card-host` the AI-provider status check (`宿主服务可用`) fails because that host
+  intentionally has no model service. It needs the full desktop host.
+- A stage switch was verified by advancing the synthetic clock offset, not by
+  waiting real days. Re-running the native checks and the new `--session-switch`
+  day turn-over case needs a host that implements the current `camera`/`files`
+  capabilities; `tools/launch.py --check` against a full host workspace, live
+  provider calls, non-Windows platforms, signing and submission remain
+  unverified human checkpoints.
+- The four `bundle/screenshots/*.png` release assets were not re-captured, so
+  they still show the old five-item navigation; regenerate them with the full
+  desktop host at the release checkpoint. No tag, release, new Issue or
+  submission was performed.
+
+## Stage locking and future-stage editing, 2026-10-10 — unreleased 0.6.2 working tree
+
+Implementation for Issue #10. A confirmed plan can be edited only in front of
+its started date.
+
+- `bundle/main.splash`: `stage_locked` treats a stage as locked from the day its
+  start date arrives (`floor(started / 86400) <= health_day()`), which also
+  covers a user who has fallen behind on logging. `stage_lock_hint` explains the
+  reason; the Archive-tab row for a started stage shows the reason and offers no
+  edit controls, while an unstarted stage gets 上移 / 下移 / 改目标 / 移除.
+  `stage_move`, `stage_remove` and `stage_replace` refuse any locked target, and
+  `stage_replace` snapshots another candidate (same or different cycle) over a
+  future stage, so 替换 and 改目标 share one safe path. `relayout_stages`
+  re-anchors the not-yet-started suffix end-to-start from the fixed locked
+  prefix; `future_stage_names` names the affected future goals in the notice.
+  `plan_done_meals` / `plan_planned_meals` / `plan_progress_percent` show plan
+  progress, whose denominator changes with an edit while the confirmed numerator
+  does not. Later stages' nutrient targets are deliberately left as their own
+  snapshots (docs/adr/0001); an edit moves their date ranges and the plan
+  totals, not their targets. `migrate_state` now fills only the missing
+  `intake`/`consumed_*` keys of a legacy stage, so an existing aggregate is
+  never zeroed by the migration.
+- Storage schema stays 1; no new stored field. Only `started`, `name`, `days`,
+  `goal` and the four target fields of an unstarted stage can change, so a
+  locked stage's `consumed_*` and `intake` are byte-identical across edits.
+- `tools/qa_release.py` now confirms a 7+15+30-day plan and then exercises:
+  the calendar lock reason, reorder of only the future suffix, retargeting a
+  future stage to a 1-day candidate, one real confirmed meal on the started
+  stage, and a later future-stage removal that leaves that meal intact while
+  the plan totals fall from 52 to 22 days. `tools/test_release.py` guards the
+  new symbols. Bilingual READMEs and `CYCLE-PLANS.md` describe the flow.
+
+### Native run, 2026-10-10 — unreleased 0.6.2 working tree
+
+- Restamped the editable bundle with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = f7a75404fb6fc48e4fcd7d12e5cd63a6d94417caf3df6e27a958b0afd61770a6`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts).
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-issue10`:
+  `tools/qa_release.py --port 18528 --profile .local-state/qa-issue10` —
+  **21/21 checks passed**, then `--restart` preserved the exact synthetic state.
+  New checks: the started stage locks by calendar with a readable reason;
+  reorder touches only the not-yet-started stages and names the moved future
+  goals; retargeting a future stage snapshots the new candidate while the
+  locked stage stays byte-identical; a confirmed meal records on the started
+  stage and survives a later edit to a future stage; the plan totals recalculate
+  (52 -> 22 days) with the confirmed count unchanged.
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures: `docs/qa/issue-10-stage-lock.png` (three stages, the current
+  one locked with its calendar reason, the next editable) and
+  `docs/qa/issue-10-future-edited.png` (progress 1/44 after a future-stage
+  removal). These are hidden Card-runtime captures of synthetic data.
+- The bundle had only 8,639 bytes under the 8 MiB package guard once the new
+  code was added, so the five bundled PNGs (`assets/sunlit-pantry-bg.png` and
+  the four `screenshots/*.png`) were recompressed losslessly with Pillow
+  (`optimize=True`). Pixels are identical (verified by decoding before/after);
+  bundle total is now 7,831,339 bytes.
+
+### Still unverified
+
+- A two-axis review (Standards + Spec) of the commit found no blocker. Acting on
+  it: the migration now preserves existing aggregates, the retarget picker uses
+  its own `stage_swap_cycle` instead of the compose page's
+  `cycle_view`/`program_selected`, and the target-copy duplication was folded
+  into `copy_stage_targets`. `GLOSSARY.md` says the meal count is 3 while the
+  shipped default is 2; that wording predates this change and is a tracker
+  document, so it was not edited under the Parent-Issue comment rule.
+- Not run: the full `tools/smoke.py` regression and its `--legacy` fixture; on
+  the standalone `card-host` the AI-provider check (`宿主服务可用`) fails because
+  that host intentionally has no model service, so that check needs the full
+  desktop host. `tools/launch.py --check` against a full host workspace, live
+  provider calls, and non-Windows platforms remain unverified. Signing and
+  submission remain human checkpoints. No tag, release, new Issue or submission
+  was performed.
+
+## Composed plans with ordered stages, 2026-10-10 — unreleased 0.6.2 working tree
+
+Implementation for Issue #9. Candidates and confirmed stages are now separate
+records, and a plan is an ordered list of stage snapshots.
+
+- `bundle/main.splash`: `state.programs` holds unconfirmed candidates only;
+  `state.stages` holds the confirmed plan's snapshots in order, and
+  `state.plan_history` holds archived plans. `make_stage` copies a candidate's
+  targets at confirmation; the compose page shows total days and each stage's
+  date range and targets, with add / move / remove / replace and a hard cap of
+  12 stages. The current stage is the first stage whose date range still covers
+  today, so a multi-stage plan advances on its own dates. The GPU renderer is
+  unchanged.
+- Storage schema stays 1. `migrate_state` splits a previously active program
+  into a one-stage plan and turns legacy `program_history` entries into plan
+  history without dropping `consumed_kcal` or `intake`. A re-serialization after
+  the split prevents the fallback defaults from overwriting the split result.
+- Review fixes: the archive page and the `model.complete` payload now derive
+  their daily/protein/fibre targets from the stage covering today; a failed save
+  keeps the composed draft and stays on the candidate page; migration detects
+  `stages` / `stage_next` / `plan_history` by exact key instead of substring-
+  searching the whole JSON (a `diet` value containing `stages` no longer skips
+  it); and each menu records the stage that generated it, so crossing a stage
+  boundary invalidates the old menu.
+- `tools/qa_release.py` gained compose, cap, and ordered-stage assertions;
+  `tools/smoke.py` follows the new `确认计划 · 去录冰箱  →` label, its
+  `stages` schema, and a small `scroll` helper; `tools/test_release.py` guards the
+  new symbols. Bilingual READMEs and `CYCLE-PLANS.md` describe the flow. The
+  version stays 0.6.2 because it is set at release, not per feature PR.
+
+### Native run, 2026-10-10 — unreleased 0.6.2 working tree
+
+- The original `14/14` run in this entry was on the pre-rebase commit (digest
+  `54f917fc…`), before Issue #9 was restacked on the updated Issue #8 branch; it
+  no longer describes this head.
+- Review fixes (stage-derived targets, save-failure draft recovery, exact-key
+  migration, stage-bound menus) were applied and verified against the Issue #9
+  bundle alone. Restamped it with the pinned official App Hub
+  `655114c4943cd2490daaefa2173e7b5aaa20669f` (`hub stamp bundle`):
+  `bundle_blake3 = 791b647235eb090b1c5a4c26dd275bca0b0288d3a95de5f820b426b0affc49bb`.
+  `hub check bundle --allow-unsigned` then **PASSED** with only the expected
+  unsigned warning and unchanged grants (model, storage, 16 MiB, no agent, no
+  hosts).
+- Re-ran `tools/qa_release.py` against this fixed head: **14/14 passed**. Extra
+  regression runs on the same head: a legacy archive whose user text contains
+  `stages` still migrates its active program into `stages` (17 candidates kept);
+  a menu generated for one stage is invalidated once the calendar enters the
+  next stage; and the archive page shows the stage covering today (`/ 1800 kcal`)
+  instead of the stale first-stage target.
+- Hidden official `card-host.exe` (same pinned revision) standalone at 1200x800
+  with task-owned `--app-data` under `.local-state/qa-*`:
+  `tools/qa_release.py` — **14/14 checks passed**: first-run onboarding; six
+  cycles x three candidates without auto-activation; cycle switching;
+  per-cycle regeneration; reorder, remove and replace in the draft; the 12-stage
+  cap; clearing the draft leaves candidates unconfirmed; the compose page sums
+  cycles (7+15 = 22 days); confirmation writes two ordered stages whose start
+  dates meet end-to-start; inventory preview does not commit; explicit commit
+  persists; manual default does not generate. A restart then preserved the exact
+  synthetic state.
+- Migration checks with real old-schema fixtures (copies of the Issue #8
+  synthetic profile): the previously active 7-day program opened as a
+  one-stage plan with its 11550 kcal target, 17 candidates stayed unconfirmed,
+  and `stage_next` continued its id space. A fixture with a legacy
+  `program_history` entry migrated it into `plan_history` with its 3210 kcal
+  preserved. Tab 3 rendered the plan stages and plan history; `选择下一份计划…`
+  archived the 2-stage plan (`2 个阶段 · 22 天`) and returned to candidate
+  selection; the demo profile resolved its stage so menu generation still
+  worked.
+- No real inventory, keys, provider calls or AI credentials were used.
+- Real captures of this run: `docs/qa/issue-9-compose.png` (a 7+15+21 draft:
+  43 total days, stages 10月10日–10月16日 / 10月17日–10月31日 / 11月1日–11月21日),
+  `docs/qa/issue-9-plan.png` (the confirmed plan's stages) and
+  `docs/qa/issue-9-history.png` (the archived 3-stage plan under 计划历史).
+  These are hidden Card-runtime captures of synthetic data, not phone images.
+
+An independent two-axis review (standards + spec) of the feature commit found
+no blocker. Acting on it: `draft_move` now clears the armed replace target so a
+reorder cannot make 替换 hit the wrong stage; the replace prompt is shown inline
+and points to the candidates above; the archive/clear sequence is one
+`archive_plan` helper; and `tools/smoke.py`'s `--legacy` assertions now compare
+the migrated field set (`foods`, `plans`, active/revision/meal fields) instead of
+requiring the pre-migration `programs` shape.
+
+### Still unverified
+
+- Not run: the full `tools/smoke.py` regression and its `--legacy` fixture. On
+  the standalone `card-host` the AI-provider check (`宿主服务可用`) fails because
+  that host intentionally has no model service; that check needs the full
+  desktop host. `tools/launch.py --check` against a full host workspace, live
+  provider calls, and non-Windows platforms are also unverified. Signing and
+  submission remain human checkpoints. No tag, release, new Issue or submission
+  was performed.
+
+## Six cycle candidates and per-cycle regeneration, 2026-10-10 — unreleased 0.6.2 working tree
+## Issue #8 six-cycle candidates, merged onto the #2 rework
+
+`bundle/main.splash` was reworked by Issue #2 while Issue #8 added the six-cycle
+candidate picker, so this merge re-applies #8's feature onto #2's script instead
+of a line merge:
+
+- Cycles 1/3/7/15/21/30 with three profile-derived candidates each; each shows
+  name, goal, execution trait, daily and cycle totals, and the difference from
+  the cycle baseline. A seeded line-up means `重新生成本周期候选` replaces only the
+  viewed cycle's unconfirmed candidates.
+- The candidate/config migration is factored into `migrate_candidates`, applied
+  to both freshly converted schema-1 states and current schema-2 states. It adds
+  `cycle_seed` and rebuilds old-format candidates by shape (`variant` field), so
+  user text (preferences, food names) cannot be mistaken for a field name.
+- Verified live in the hidden official host after the merge: the cycle page
+  renders the six lengths, switching cycles and regenerating the viewed cycle
+  keep a confirmed plan and the other cycles untouched, and re-saving the profile
+  from a non-default cycle returns the page and marker to 7 days. `hub check
+  bundle --allow-unsigned` PASSED.
+
 ## Issue #2 foreground verification, 2026-10-11 — user reported pass
 
 After installing digest `ba2d1a2bf588bd48a74c9c6112cfa706146375649c45cdff0fad5e2449498ff5`,
@@ -920,3 +1728,151 @@ approved by the user. Production signing and submission were not authorized.
 - Real provider multi-turn/compaction calls were not run. The separate Issue
   #4 stage and Issue #5 final menu revisions/lock contract are absent from
   this checkout, so their snapshot fields and the final M2 exit remain open.
+
+# PR #21 schema compatibility and main integration — 2026-10-12
+
+Merged the stage/candidate split, native inventory units, image-entry drafts,
+day menus, derived shortages, mock cart and orders from main `3ddeb82`, while
+keeping the optional stock-only one-day experience, append-only actual intake
+and online nutrition estimation. Ordinary shopping remains available; the
+experience has no shopping route. The release version remains main's 0.8.0.
+
+Removed `uniqueItems` from `recipe_steps_schema()`. `parse_recipe()` retains its
+local per-step duplicate-ID guard, allocated-food-ID check and coverage check.
+The old captured experience request was independently rejected by the official
+host compiler with `the keyword "uniqueItems" is not supported`. The new
+`tools/model_schema_probe` compiles the original host
+`apps/ai-providers/host-service/src/complete/schema.rs` directly via a generated
+`#[path]` module; it does not reproduce a keyword whitelist. Its source SHA256
+was `a86d2c679402684730cc0b036cc9717ce5e2efc8d62b49d5c41e0d923cca50f9`.
+All five native-captured schemas in `docs/model-schemas/` compiled successfully:
+nutrition, ordinary day menu, one-day experience, native-quantity recipe-only
+menu and image intake. An injected unsupported-keyword negative control was
+rejected. This requires no provider credentials or live calls.
+
+Validation at this checkpoint:
+
+- 30/30 offline Python tests passed.
+- Official App Hub `8347a489141c0e24cab564883db7c4592935a8b2` stamped and admitted
+  the production bundle, including its retained `host-api-v1`, camera/files and
+  optional camera-permission declarations. No release version bump.
+- 24/24 native merge checks passed on schema-2 synthetic stock, and again
+  24/24 on a schema-1 file containing field names in user text. Migration adds
+  candidate/stage fields before validating old schema-1 states and uses exact
+  key checks for the independent ledger. Confirmed historical nutrition and
+  actual snapshots survive; exhausted legacy batches do not resurrect.
+- Native checks cover duplicate and unknown recipe IDs in both menu paths,
+  independent recommended/actual quantities, atomic native-unit stock updates,
+  stage intake, regeneration preserving confirmed recommendations, all three
+  confirmations, 100% recap and long-term history after a stage switch.
+- A real process restart preserved exact inventory and execution history.
+- Seven shopping checks preserved the derived shortage, editable mock cart,
+  confirmation-before-order and zero stock/intake/progress change on ordering.
+- Two native-unit checks preserved a piece-only recipe without inventing a
+  mass conversion. Six nutrition-failure checks continued once to an online
+  menu, retained unknown references, recorded external food without a stock
+  deduction and counted confirmation without claiming nutritional completion.
+
+Native tests use task-owned hidden official standalone card-host, a private
+bundle with deterministic model dispatch, and isolated synthetic app data.
+Standalone card-host does not link the full shell's device-consent broker, so
+only its private test manifest omits `host-api-v1` and optional host API fields;
+the production manifest retains them. No camera/files service is injected.
+Image schema compilation is verified, but camera capture, image recognition,
+the full-shell permission boundary and live provider output are not new evidence
+from these tests. Model request captures are separately fed through the real
+official schema compiler, addressing the prior fake-dispatch coverage gap.
+Earlier schema-1 QA reports below remain historical evidence, not a claim that
+their old drivers run unchanged against the new candidate/stage architecture.
+
+Subsequent main update: `0e092ff` added Issue #28 receipt confirmation while this
+repair was running. It was merged too. The final offline suite passed 31/31;
+the native shopping/receipt path passed 12/12, including editable receipt
+quantities, preview/cancellation without writes, a new canonical batch only
+after confirmation, persisted received status and unchanged execution/stage
+progress. An actual restart of the final integrated code preserved the exact
+confirmed inventory and execution ledger. Production bundle digest after this
+integration: `0a96264adf2b739522ee651c0b80474b1261091f9ad452b5b81ec7d4fda53ccc`.
+This update leaves the five model schemas unchanged.
+
+Current reproducible entry points: `tools/qa_merge.py` and
+`tools/check_model_schema.py`; see `EXPERIENCE.md`. Personal application data,
+provider settings and existing published commits were not modified for testing.
+
+# PR #21 online opt-out and pending request control — 2026-10-12
+
+Preserve stored `model_enabled=false` at load. Settings explicitly enables or
+disables online AI and persists the choice; menus, nutrition and image-model
+requests check that choice before dispatch. Disabling AI also invalidates
+pending replies. Menus still use online AI only when enabled; no local fallback
+was reintroduced.
+
+Nutrition snapshots now carry the original trigger reason through success,
+malformed output, failure and timeout. Turning off automatic generation
+invalidates pending automatic menu/nutrition flows via the request sequence;
+later re-enabling does not revive them. Both ordinary and experience menu
+continuations recheck the current switch before sending. Explicit manual
+generation continues when only automatic generation is turned off.
+
+Validation on the changed bundle:
+
+- 31/31 offline Python tests passed; `tools/launch.py --check` and official Hub
+ stamp/check passed, retaining version 0.8.0 and production permissions.
+- `tools/qa_request_control.py`: 54/54 native checks across 14 fresh isolated
+ fixtures. Legacy schema-1 and current schema-2 opt-outs survived inventory
+ removal, manual attempts, stock nutrition and image dispatch attempts, saved
+ state and actual process restarts. The UI enable button persisted consent;
+ the next explicit menu request sent nutrition then menu exactly once.
+- Held nutrition replies covered success, error, malformed data and accelerated
+ timeout. Turning auto generation off sent no second request and wrote no
+ late nutrition/menu. Turning it off then on, experience auto generation,
+ stock estimation and disabling online AI during a request were covered.
+ Manual generation continued for each of the four reply outcomes.
+- 24/24 existing `qa_merge.py` checks passed for ordinary menus, optional trial,
+ immutable actual records, inventory deductions and completion recap.
+- All nine current request captures (nutrition, ordinary/experience menus and
+ image schema) compiled through the original official host schema compiler;
+ unsupported `uniqueItems` negative control was still rejected.
+
+The new regression driver reuses synthetic `qa_merge` state and a private
+model-dispatch shim. Initial opt-out removal/enable paths use native UI;
+cancellation cases invoke the same production action functions via test-only
+commands. Only response delivery and the timeout deadline are controlled;
+production guards, persistence, callbacks and watchdog run unchanged. The
+image opt-out test verifies no dispatch, not image recognition capability.
+Standalone-host test-manifest limitations described above still apply. No real
+provider, personal inventory or provider credentials were used. Already sent
+provider requests cannot be guaranteed to stop or avoid billing.
+
+Machine-readable assertions: `docs/model-request-control-validation.json`.
+Reproduction: `tools/qa_request_control.py --profile <fresh .local-state/qa-*>
+--hub <official hub> --card-host <official card-host>`; the driver starts and
+closes its own hidden hosts. Bundle digest:
+`234e13907694e1efabca02da29b9e275557fd6115a4f8eeea95eaf57734c62ed`.
+
+## Issue #3 branch sync with remote main, 2026-10-12
+
+- Fetched `origin/main` at `358d61c` and merged its stage, three-meal,
+  shopping, and actual-intake work into the Issue #3 branch. The merge kept the
+  Agent busy gate on image recognition and added the new online-ready gate.
+  It also remapped the Agent entry to the new Home/Inventory/Menu tabs (0/2/3)
+  and leaves the Overview tab (1) without an Agent entry.
+- `python -X utf8 -m unittest discover -s tools -p "test_*.py"`: 33/33 passed
+  with normal local filesystem permissions. The restricted execution sandbox
+  denied Python temporary-directory access; those ACL errors were not product
+  failures. The production Script VM Agent harness passed 18 cases, including
+  the updated tab mapping.
+- The pinned local `hub.exe stamp bundle` produced digest
+  `b80a513b0f3289f3a90806eb2501ece4beb62ddba41788339fb96c81482a37ac`;
+  `tools/launch.py --hub <pinned hub> --check` passed with the expected unsigned
+  editable-bundle warning.
+- In a task-owned hidden `card-host` profile, the synthetic `qa_merge.py`
+  scenario passed 24/24 native checks for stage, ordinary three-meal menu,
+  one-day experience, actual consumption, and inventory writes. A separate
+  native UI probe found the Agent panel on Home, Inventory, and Menu and absent
+  from Overview. This fixture did not call a real provider.
+- The remote main contains `current_stage()` and a three-meal `state.plans`
+  path, but it does not implement Issue #5's final `state.daily_menu` draft,
+  status, allocation revision, or whole-day lock after one meal. The Issue #3
+  Agent still accepts only `none + {}`; proposals, full stage/menu projection,
+  memory writes after confirmed menus, and ASR remain unverified or unbuilt.

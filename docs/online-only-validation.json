@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-11",
+  "bundle_blake3": "11605b65e1b382de1b2be772835eefa49faac76ff2f60d62aeebc2a3bdd8a6e7",
+  "bundle_bytes": 8380043,
+  "native_provider_fixture_checks": [
+    "no-provider keeps inventory and menus unchanged",
+    "no-provider gives setup guidance without fallback",
+    "settings has no local generator toggle",
+    "ordinary candidate comes from online callback",
+    "ordinary request uses host JSON schema",
+    "generation does not deduct stock",
+    "online recipe records actual quantities separately",
+    "duplicate trial slots rejected without stock or ledger writes",
+    "unknown stock id rejected without stock or ledger writes",
+    "aggregate stock overbooking rejected without stock or ledger writes",
+    "unknown replenishment nutrition rejected without stock or ledger writes",
+    "daily calories overflow rejected without stock or ledger writes",
+    "trial creates three AI meals atomically",
+    "trial request includes only unconfirmed slots",
+    "trial generation does not change intake or stock",
+    "AI replenishment preview does not alter stock",
+    "simulation remains explicit and no real purchase",
+    "AI regeneration uses confirmed simulated stock",
+    "AI 早餐 actual confirmation advances 33",
+    "regeneration requests only remaining slots",
+    "confirmed recommendation and actual history survive AI",
+    "AI 午餐 actual confirmation advances 66",
+    "AI 晚餐 actual confirmation advances 100",
+    "header removed manual-generation wording",
+    "cancelled AI response cannot write late menus",
+    "changed goal discards a stale AI response"
+  ],
+  "native_unsupported_host_checks": [
+    "unsupported host shows online-only status",
+    "unsupported host cannot generate local candidate",
+    "local-rule toggle removed",
+    "unsupported host cannot create fixed trial templates"
+  ],
+  "automatic_tests": 18,
+  "live_provider_verified": false,
+  "real_inventory_used": false
+}

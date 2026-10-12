@@ -52,7 +52,8 @@ fn main() {
         let pending = false
         let plan_removal = nil
         let reset_pending = false
-        let show_shopping = false
+        let market = nil
+        let receipt = nil
         let ai_busy = false
         let voice_phase = 0
         let storage_blocked = false
@@ -242,7 +243,7 @@ fn main() {
         "#),
         ("text_entry_and_contract", r#"
             agent_load_session()
-            for i in 3 {
+            for i in [0 2 3] {
                 tab = i
                 assert(agent_entry_allowed())
                 agent_open_panel()
@@ -252,7 +253,7 @@ fn main() {
                 agent_close_panel()
                 assert(!agent_open && agent_session.messages.len() == 1)
             }
-            tab = 3
+            tab = 1
             assert(!agent_entry_allowed())
             tab = 0 onboarding_step = 3
             assert(!agent_entry_allowed())
@@ -260,9 +261,9 @@ fn main() {
             assert(!agent_entry_allowed())
             pending = false intake_draft = {rows: []}
             assert(!agent_entry_allowed())
-            intake_draft = nil tab = 2 show_shopping = true
+            intake_draft = nil tab = 2 market = {tab: 0}
             assert(!agent_entry_allowed())
-            tab = 0
+            market = nil tab = 0
             assert(agent_entry_allowed())
             agent_input = "先看首页"
             assert(agent_append("user", "先看首页") == 2)
@@ -310,9 +311,9 @@ fn main() {
             assert(agent_session.messages[1].text == "目前没有已确认的库存。")
             assert(agent_input == "" && agent_current_id == 0)
             agent_close_panel()
-            tab = 1
+            tab = 3
             agent_open_panel()
-            assert(agent_session.messages.len() == 2 && agent_origin_tab == 1)
+            assert(agent_session.messages.len() == 2 && agent_origin_tab == 3)
             true
         "#),
         ("text_compaction_then_one_answer", r#"
