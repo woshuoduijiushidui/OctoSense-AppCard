@@ -6,7 +6,7 @@ Turn confirmed pantry inventory into a meal you can review and execute.
 
 ## Version and evidence
 
-This branch contains the unpublished **0.8.0 source candidate** for Issue #2 and the Issue #8–#11 features (six-cycle candidates, composed plans, future-stage editing and the Overview page). Alongside manual inventory, cycles, and menus, it creates editable drafts from a camera or imported image when the locally modified host reports image capability. The official host falls back to manual entry. The bundle passes the pinned App Hub gate. [Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) reviews **0.6.1**, not this candidate; no release or Hub approval is claimed.
+This branch contains the unpublished **0.8.0 source candidate** for Issue #2 and the Issue #8–#11 and #23–#24 features (six-cycle candidates, composed plans, future-stage editing, the Overview page, the three-meal day menu and its derived 缺菜清单). Alongside manual inventory, cycles, and menus, it creates editable drafts from a camera or imported image when the locally modified host reports image capability. The official host falls back to manual entry. The bundle passes the pinned App Hub gate. [Issue #99](https://github.com/OctoSense-org/OctoSense-App-Hub/issues/99) reviews **0.6.1**, not this candidate; no release or Hub approval is claimed.
 
 Only Windows is targeted. On 2026-10-11 the 0.8.0 bundle passed the pinned App Hub gate and 19 Python tests. In an isolated profile, the unmodified full official host passed 26 UI/data checks and restart checks, including manual fallback from both image buttons. The locally modified host passed the capability probe, shared chooser, and cancellation checks; task-only model fixtures exercised both editable image drafts and a multi-row inventory commit. The user reported that the remaining foreground MiniMax image, camera, retry, and restart checks passed; per-step logs were not captured independently. Formal Store publication remains unverified. See [VALIDATION.md](VALIDATION.md).
 
@@ -22,11 +22,11 @@ Generation is manual by default. Optional automatic generation must be enabled i
 
 [Historical manual-flow recording](video/演示视频.mp4)
 
-![Prior Windows card-host home capture](bundle/screenshots/01-main.png)
+![Windows card-host home capture](bundle/screenshots/01-main.png)
 
-[Candidate](bundle/screenshots/02-plan.png) · [Consumption](bundle/screenshots/03-confirm.png) · [Inventory](bundle/screenshots/04-updated.png)
+[Three-meal day menu and 缺菜清单](bundle/screenshots/02-plan.png) · [缺菜清单 with an editable gap](bundle/screenshots/03-confirm.png) · [Inventory](bundle/screenshots/04-updated.png)
 
-The video and four captures show the prior 0.7.0 manual flow in an isolated official Windows card-host. Their image-button state does not represent the current 0.8.0 UI. Current synthetic-data captures: [home](docs/qa/issue-2-home-after.png), [profile editing](docs/qa/issue-2-profile-edit-after.png), [inventory](docs/qa/issue-2-inventory-after.png), [local-host image chooser](docs/qa/issue-2-image-chooser-after.png), [official-host fallback](docs/qa/issue-2-official-fallback-after.png), [recipe](docs/qa/issue-2-recipe-after.png), and [consumption review](docs/qa/issue-2-consumption-after.png). The current captures illustrate the UI only; they do not prove live image recognition, Store publication, or a live provider response. Recording a new video is outside this PR.
+The four captures are current 0.8.0 captures from a hidden Windows card-host with synthetic inventory (1200x800): 首页; the three-meal day menu (早/中/晚) with its derived 缺菜清单; the 缺菜清单 showing 还差 941 克 with an editable quantity; and the inventory batch list. The recording is the historical 0.7.0 manual-flow video. More synthetic-data captures: [home](docs/qa/issue-2-home-after.png), [profile editing](docs/qa/issue-2-profile-edit-after.png), [inventory](docs/qa/issue-2-inventory-after.png), [local-host image chooser](docs/qa/issue-2-image-chooser-after.png), [official-host fallback](docs/qa/issue-2-official-fallback-after.png), [recipe](docs/qa/issue-2-recipe-after.png), and [consumption review](docs/qa/issue-2-consumption-after.png). The captures illustrate the UI only; they do not prove live image recognition, Store publication, or a live provider response. Recording a new video is outside this PR.
 
 ## Windows source launch
 
