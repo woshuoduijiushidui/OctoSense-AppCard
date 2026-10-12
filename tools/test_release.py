@@ -172,6 +172,24 @@ class ReleaseMetadataTests(unittest.TestCase):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["id"], "pantry-steward")
 
+    def test_receipt_checks_quantities_and_adds_new_batches(self):
+        # Offline guard only: qa_release.py --market-receive drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn market_receipt_open(", "fn market_receipt_step(",
+                       "fn market_receipt_days(", "fn market_receipt_batch(",
+                       "fn market_receipt_confirm(){"):
+            self.assertIn(marker, script)
+        for label in ("确认收货", "确认收货入库", "核对实际收到的食材", "已收货"):
+            self.assertIn(label, script)
+        # Received lines go through the one inventory-write path as a new
+        # batch (type "add"); nothing merges into an existing same-name batch.
+        self.assertIn('type: "add" batches: batches', script)
+        self.assertIn('order.status = "已收货"', script)
+        # Orders may now be either 待收货 or 已收货; schema stays 2.
+        self.assertIn('order.status != "待收货" && order.status != "已收货"', script)
+        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["id"], "pantry-steward")
+
     def test_shortfall_list_is_derived_and_editable(self):
         # Offline guard only: qa_release.py --menu-purchase drives the real behaviour.
         script = (BUNDLE / "main.splash").read_text(encoding="utf-8")

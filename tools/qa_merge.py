@@ -176,6 +176,16 @@ def main_features(ui):
     after=ui.state()
     ui.check('mock order creates pending receipt',len(after['orders'])==1 and after['orders'][0]['status']=='待收货')
     ui.check('shopping does not add stock or food records',after['foods']==before['foods'] and after['execution_records']==before['execution_records'] and after['stages']==before['stages'])
+    ui.click('确认收货  →');ui.click('−');ui.fill('2',index=0)
+    ui.check('receipt draft does not write inventory',ui.state()==after)
+    ui.click('取消收货')
+    ui.check('receipt cancellation preserves order and stock',ui.state()==after)
+    ui.click('确认收货  →');ui.click('−');ui.fill('2',index=0);ui.click('确认收货入库')
+    received=ui.state();batch=received['foods'][-1]
+    ui.check('confirmed receipt adds a new native-unit batch',batch['name']=='豆腐' and batch['canonical_quantity']==400 and batch['id']>3)
+    ui.check('received order status persists and cart rows clear',received['orders'][0]['status']=='已收货' and not received['cart'])
+    ui.check('receipt does not count as actual consumption',received['execution_records']==after['execution_records'] and received['stages']==after['stages'])
+    after=received
     (ui.profile/'expected-state.json').write_text(json.dumps(after,ensure_ascii=False),encoding='utf-8')
 
 

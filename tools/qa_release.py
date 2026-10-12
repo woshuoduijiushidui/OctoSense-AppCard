@@ -40,6 +40,10 @@ parser.add_argument("--market-order", action="store_true",
                     help="Issue #27 模拟订单: confirm-then-submit, 待收货 status, stock/progress untouched")
 parser.add_argument("--market-order-restart", action="store_true",
                     help="Issue #27: the submitted 模拟订单 survives a restart")
+parser.add_argument("--market-receive", action="store_true",
+                    help="Issue #28 确认收货: check quantities/保质期, new batches, no progress, remaining 缺口")
+parser.add_argument("--market-receive-restart", action="store_true",
+                    help="Issue #28: received batches and 已收货 status survive a restart")
 args = parser.parse_args()
 profile = args.profile.resolve()
 if not profile.is_relative_to((APP / ".local-state").resolve()) or not profile.name.startswith("qa-"):
@@ -99,6 +103,10 @@ elif args.market_order:
     smoke.exercise_market_order(ui)
 elif args.market_order_restart:
     smoke.exercise_market_order_restart(ui)
+elif args.market_receive:
+    smoke.exercise_market_receive(ui)
+elif args.market_receive_restart:
+    smoke.exercise_market_receive_restart(ui)
 else:
     ui.check("first-run onboarding rendered", "首次建档  1 / 4" in ui.text())
     ui.shot("01-first-run.png")
