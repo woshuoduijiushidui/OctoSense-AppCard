@@ -1,20 +1,30 @@
 {
   "capabilities": [
     "storage",
-    "model"
+    "model",
+    "camera",
+    "files"
   ],
   "compute": {
     "instruction_budget": 20000000,
     "memory_bytes": 33554432
   },
+  "host_api": {
+    "optional": {
+      "camera.permission.request": 1
+    }
+  },
   "id": "pantry-steward",
   "integrity": {
-    "bundle_blake3": "efb77a17781ac5a706e0e71f27a35b357d5210faf6571f6c4e1e1797a99526bb"
+    "bundle_blake3": "d451d77e4765018490881417d45770a6b464f6f9f65e42a082052139be610982"
   },
   "name": "冰箱管家",
+  "requires": [
+    "host-api-v1"
+  ],
   "schema": 1,
   "storage": {
     "max_bytes": 16777216
   },
-  "version": "0.6.2"
+  "version": "0.8.0"
 }
