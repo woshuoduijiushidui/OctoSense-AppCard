@@ -132,7 +132,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertIn(label, script)
         # The fixed demo catalog ships in the bundle; the region is not a second
         # bundle unit, so it lives in the same splash and manifest id.
-        self.assertEqual(script.count("price_cents:"), 24)
+        self.assertEqual(script.count("shelf_days:"), 24)
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["id"], "pantry-steward")
 
@@ -148,9 +148,27 @@ class ReleaseMetadataTests(unittest.TestCase):
             self.assertIn(label, script)
         # The cart is user input stored in state (ADR 0003), migrated for old files
         # and validated on load, not kept in the transient market view.
-        self.assertIn("cart: []}", script)
+        self.assertIn("cart: [] orders: []}", script)
         self.assertIn("state.cart.push(", script)
         self.assertIn("value.cart = []", script)
+        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["id"], "pantry-steward")
+
+    def test_market_order_requires_confirmation_and_changes_no_stock(self):
+        # Offline guard only: qa_release.py --market-order drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn market_order_next_id(){", "fn market_order_lines(){",
+                       "fn market_order_total(", "fn market_order_line_total(",
+                       "fn market_order_open_confirm(){", "fn market_order_cancel_confirm(){",
+                       "fn market_submit_order(){"):
+            self.assertIn(marker, script)
+        for label in ("提交模拟订单", "确认提交模拟订单？", "确认提交订单", "待收货", "不产生真实支付"):
+            self.assertIn(label, script)
+        # The order is user input stored in state (like the cart), migrated for
+        # old files and validated on load, not kept in the transient market view.
+        self.assertIn("orders: []}", script)
+        self.assertIn("state.orders.push(", script)
+        self.assertIn("value.orders = []", script)
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["id"], "pantry-steward")
 
