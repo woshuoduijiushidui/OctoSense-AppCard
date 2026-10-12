@@ -94,6 +94,9 @@ let extra_kcal_text = "0"
 // window while it is open; nil means the dashboard. The 购物车 itself lives in
 // state.cart (Issue #26) so it survives a restart; only the view is kept here.
 let market = nil // {tab selected replacing}
+// Issue #28: 确认收货 is a transient draft — the checked-in quantities and expiry
+// are never persisted; only the resulting 库存批次 and the order status are.
+let receipt = nil // {order_id lines error}
 
 let ink = #x22211f
 let muted = #x77736d
@@ -933,14 +936,16 @@ fn market_product_index(name){
     if name == "" { return -1 }
     market_match(name)
 }
+fn market_spec_parts(product){
+    let parts = product.spec.split(" ")
+    if parts.len() < 2 { return {amount: 0 measure: ""} }
+    {amount: parts[0].trim().to_f64() measure: parts[1].trim()}
+}
 fn market_spec_grams(product){
     // Specs ship as "<amount> <measure> / <pack unit>"; only g/kg yield grams.
-    let parts = product.spec.split(" ")
-    if parts.len() < 2 { return 0 }
-    let amount = parts[0].trim().to_f64()
-    let measure = parts[1].trim()
-    if measure == "g" { return amount }
-    if measure == "kg" { return amount * 1000 }
+    let parts = market_spec_parts(product)
+    if parts.measure == "g" { return parts.amount }
+    if parts.measure == "kg" { return parts.amount * 1000 }
     0
 }
 // 采购数量按商品的规格与单位向上取整 (Issue #26).
@@ -1101,6 +1106,120 @@ fn market_submit_order(){
     if commit(before) { message = "模拟订单已提交；不产生真实支付，也不改变库存。" }
     redraw()
 }
+// Issue #28: 确认收货 turns a 模拟订单 into real 库存. Each line is checked in by
+// hand: the received quantity defaults to the ordered amount and can only go
+// down, and the 保质期 defaults to the 模拟商品's 保质期天数 from today and can be
+// edited. Every checked-in line becomes a new batch with a new id rather than
+// merging into an existing batch, so the arrival keeps its own 到货日期. This
+// deliberately writes no 实际执行记录 and no 进度: 买到手不等于吃过.
+fn market_receipt_open(order_id){
+    for order in state.orders {
+        if order.id == order_id {
+            let lines = []
+            for line in order.lines {
+                let days = ""
+                let index = market_match(line.product)
+                if index >= 0 { days = "" + market_products()[index].shelf_days }
+                lines.push({name: line.name product: line.product ordered: line.quantity
+                    received: line.quantity days: days unit: line.unit price_cents: line.price_cents})
+            }
+            receipt = {order_id: order_id lines: lines error: ""}
+        }
+    }
+    redraw()
+}
+fn market_receipt_close(){ receipt = nil redraw() }
+fn market_receipt_step(index, delta){
+    if receipt == nil || index < 0 || index >= receipt.lines.len() { return }
+    let line = receipt.lines[index]
+    line.received = max(0, min(line.ordered, line.received + delta))
+    redraw()
+}
+fn market_receipt_days(index, text){
+    if receipt == nil || index < 0 || index >= receipt.lines.len() { return }
+    receipt.lines[index].days = text
+    redraw()
+}
+// The product spec gives the batch unit: g/kg/ml/L stay that unit, and a count
+// spec such as 10 枚 / 盒 becomes a package batch of pieces. Anything else has
+// no batch form and makes the line unconfirmable.
+fn market_receipt_batch(line){
+    let index = market_match(line.product)
+    if index < 0 { return nil }
+    let product = market_products()[index]
+    let parts = market_spec_parts(product)
+    let amount = parts.amount
+    let measure = parts.measure
+    if !(amount > 0) { return nil }
+    let expiry = 0
+    let precision = "unknown"
+    let days_text = line.days.trim()
+    if days_text != "" {
+        let days = days_text.to_f64()
+        if !(days >= 0) || days > 3650 || days != floor(days) { return nil }
+        expiry = today_day() + days
+        precision = "estimated"
+    }
+    let batch = {name: product.name quantity: 0 unit: "" package_size: 0 package_size_unit: ""
+        average_item_grams: 0 expires_on_day: expiry expiry_precision: precision source: "manual"}
+    if measure == "g" || measure == "kg" || measure == "ml" || measure == "L" {
+        batch.quantity = amount * line.received
+        batch.unit = measure
+    } else {
+        if (measure == "枚" || measure == "个") && package_unit(product.unit) {
+            batch.quantity = line.received
+            batch.unit = product.unit
+            batch.package_size = amount
+            batch.package_size_unit = "piece"
+        } else { return nil }
+    }
+    if normalize_batch(batch, 1) == nil { return nil }
+    batch
+}
+fn market_receipt_confirm(){
+    if receipt == nil { return }
+    let batches = []
+    for line in receipt.lines {
+        if line.received > 0 {
+            let batch = market_receipt_batch(line)
+            if batch == nil {
+                receipt.error = "「" + line.product + "」的收货数量或保质期无效，请核对后再确认。"
+                redraw()
+                return
+            }
+            batches.push(batch)
+        }
+    }
+    let before = state.to_json()
+    let found = false
+    for order in state.orders {
+        if order.id == receipt.order_id { order.status = "已收货" found = true }
+    }
+    if !found { receipt = nil message = "这条模拟订单已不存在。" redraw() return }
+    // The checked rows are done: drop them so the 购物车 no longer claims them
+    // and the remaining 缺口 can be 一键补齐 again.
+    let kept = []
+    for line in state.cart {
+        let ordered = false
+        for r in receipt.lines { if r.name == line.name { ordered = true } }
+        if !ordered { kept.push(line) }
+    }
+    state.cart = kept
+    if batches.len() > 0 {
+        let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "add" batches: batches}
+        if !apply_inventory_operation(operation, before) {
+            if receipt != nil { receipt.error = message }
+            redraw()
+            return
+        }
+    } else {
+        state.revision = state.revision + 1
+        if !commit(before) { redraw() return }
+    }
+    receipt = nil
+    message = "已确认收货：核对过的数量已作为新批次入库；没收到的部分仍在缺菜清单。"
+    redraw()
+}
 // Replacement is offered by 品类 and 规格: a keyword hint puts same-category
 // products first, then the spec closest to the gap; 过敏与忌口 are excluded.
 fn market_category_hint(name){
@@ -1164,8 +1283,8 @@ fn market_short_count(p){
     count
 }
 fn open_market(){ market = {tab: 0 selected: -1 replacing: -1 confirming: false} market_fill_cart() redraw() }
-fn close_market(){ market = nil redraw() }
-fn market_tab(index){ market.tab = index market.selected = -1 market.replacing = -1 redraw() }
+fn close_market(){ market = nil receipt = nil redraw() }
+fn market_tab(index){ market.tab = index market.selected = -1 market.replacing = -1 receipt = nil redraw() }
 fn market_open_product(index){ market.selected = index redraw() }
 fn market_close_product(){ market.selected = -1 redraw() }
 fn menu_executable(p){ menu_ready(p) && validate(p) }
@@ -1420,7 +1539,7 @@ fn valid_state(value){
         }
         if value.orders.len() > 40 { return false }
         for order in value.orders {
-            if !(order.id > 0) || order.id != floor(order.id) || order.status != "待收货" { return false }
+            if !(order.id > 0) || order.id != floor(order.id) || (order.status != "待收货" && order.status != "已收货") { return false }
             if !(order.total_cents >= 0) || order.lines.len() == 0 || order.lines.len() > 80 { return false }
             for line in order.lines {
                 if line.name.len() == 0 || line.name.len() > 40 || line.product.len() == 0 || line.product.len() > 40 { return false }
@@ -4120,7 +4239,45 @@ View{width: Fill height: Fill flow: Overlay
                                                         Copy{width: 150 text: line.quantity + " " + line.unit + " · " + market_price(market_order_line_total(line)) draw_text.text_style: theme.font_bold{font_size: 15}}
                                                     }
                                                 }
-                                                Hint{text: "下单不等于货到手：这一步只生成待收货记录；确认收货在后续步骤实现。"}
+                                                if order.status == "待收货" && (receipt == nil || receipt.order_id != order.id) {
+                                                    Action{text: "确认收货  →" on_click: || market_receipt_open(order.id)}
+                                                }
+                                                if order.status == "已收货" {
+                                                    Hint{text: "已按核对的数量入库为新批次；没收到的那部分仍在缺菜清单里。"}
+                                                }
+                                                if receipt != nil && receipt.order_id == order.id {
+                                                    Divider{}
+                                                    Copy{text: "核对实际收到的食材" draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                    Hint{text: "收货数量默认等于下单数量，可以改小；只有核对过的数量会入库为带新编号的新批次。"}
+                                                    for j in receipt.lines.len() {
+                                                        let rline = receipt.lines[j]
+                                                        let pick = market_match(rline.product)
+                                                        Tint{draw_bg.color: #xf7f1df9e
+                                                            View{width: Fill height: Fit flow: Down spacing: 6
+                                                                View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                    View{width: Fill height: Fit flow: Down spacing: 2
+                                                                        Copy{text: rline.name + " · " + rline.product draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                                        Hint{text: "下单 " + rline.ordered + " " + rline.unit}
+                                                                    }
+                                                                    Quiet{text: "−" on_click: || market_receipt_step(j, -1)}
+                                                                    Copy{width: 80 text: rline.received + " " + rline.unit draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                                    Quiet{text: "＋" on_click: || market_receipt_step(j, 1)}
+                                                                }
+                                                                View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                    Hint{text: "保质期天数（今天加）"}
+                                                                    Field{text: rline.days empty_text: "还剩几天（可留空）" on_change: |text| market_receipt_days(j, text)}
+                                                                }
+                                                                if pick >= 0 { Hint{text: "默认按商品保质期 " + market_products()[pick].shelf_days + " 天；留空表示保质期未知。"} }
+                                                            }
+                                                        }
+                                                    }
+                                                    if receipt.error != "" { Hint{text: receipt.error} }
+                                                    View{width: Fill height: Fit flow: Right spacing: 8
+                                                        Action{text: "确认收货入库" on_click: || market_receipt_confirm()}
+                                                        Soft{text: "取消收货" on_click: || market_receipt_close()}
+                                                    }
+                                                }
+                                                Hint{text: "下单不等于货到手：库存只在确认收货并核对数量后增加；确认收货不写实际执行记录、也不增加进度。"}
                                             }
                                         }
                                         Hint{text: "模拟下单：不产生真实支付，提交订单不改变冰箱库存、进度或实际执行记录。"}
