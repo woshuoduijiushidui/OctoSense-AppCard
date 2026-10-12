@@ -1,5 +1,61 @@
 # Migration validation
 
+## Issue #22 与 Issue #5 设计文档对齐：A6／B1／B2（基于 main 的 #21）— 2026-10-12
+
+产品负责人在交叉设计验证后确认四项决定。这一版**从 main 重做**：A4（AI 营养估算）
+已由已合并的 PR #21（`358d61c`）交付，不再重复实现；本版只带 A6／B1／B2。
+
+- **A6 一次自动纠正**（设计 D5-007）。`plan()` 重置 `ai_correction`／
+  `ai_validation_error`；`save_ai_result` 的每个失败分支（reason、三餐数、
+  title／minutes／steps／uses 计数、食材数量与 grams、planned 为空、parse_recipe、
+  整份 validate、解析异常）写入具体错误；`apply_model_reply` 在菜单流程首次失败时
+  把该错误追加到任务描述并直接再调一次 `online_plan_ready`，第二次失败按原样
+  `ai_failure` 并保留重试入口。一天体验（`save_ai_trial_result`）和自己的
+  营养估算流程（`nutrition_flow`）保持各自的单次失败路径，不混入纠正。
+- **B1 接受跨批次**（设计 §7.2）。新增 `allocate_uses`／`draw_split`／`draw_piece`：
+  内存池按到期日从早到晚分配，未知到期最后，不跨单位族，一条 use 先花自己计划
+  的批次（保留食用核对页「改用同名食材的第 N 批」），不够才补到其它兼容批次，
+  且同一天的多条 use 不会重复花同一批次。`validate` 改为
+  `allocate_uses(p, p.uses).fits`；`finalize_actual` 的库存核对与扣减也用同一份
+  分配（`draw_split` + `merge_draws`），所以跨批次菜单从接受到扣减一致。
+  `merge_draws` 还把同一批次的多笔合并成一条 `consume` 用量，因为
+  `apply_inventory_operation` 拒绝同一次操作重复列同一批次。piece 仍留在单批次
+  （`shortcut:` 注释说明原因：平均克数是每批次的值）。
+- **B2 接受菜单才控制一键补齐**（设计 D5-008）。菜单页只在 `p.accepted` 时
+  渲染「一键补齐」，未接受时显示提示；`open_market()` 也拒绝未接受的菜单。
+
+### 已验证
+
+- `bundle/main.splash` 通过本机 `makepad-script` 的 `ScriptVm::eval`
+  （`target/parsecheck`，解析＋作用域检查）：只报预期的宿主缺失 `time_now`，
+  没有解析错误。该探针直接抽取 `main.splash` 里同一段 B1 代码跑内联断言：
+  use 先花自己计划的批次、不够时按到期顺序补到下一批（100＋50）、单批次不会
+  被两条 use 重复花掉、同一批次的多笔 draw 被 `merge_draws` 合成一条 60 g、
+  未知到期排最后、piece 不跨批次。
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`：**33 passed**
+  （新增离线守卫 `test_design_decisions_a6_b1_b2`）。
+- 用宿主固定引用的 App Hub `8347a489141c0e24cab564883db7c4592935a8b2`
+  （`target/hub-8347/release/hub.exe stamp bundle`）重新盖章：
+  `3c4fe4bc2798b9eaf82b09228679dcfef0e0ab4009719c5bf57f5cae5b16a270`，
+  并用 hub 的算法独立复算一致。manifest 版本保持 **0.8.0**，能力保持
+  `storage, model, camera, files`。`hub check bundle --allow-unsigned`：
+  `pantry-steward 0.8.0 — PASSED`，仅 unsigned 警告。
+- `tools/smoke.py`（脚本层改动，本次未在宿主上执行）：新增
+  `accept_menu_if_needed` 并在 8 处「一键补齐」之前调用；`exercise_market`
+  增加「一键补齐 waits until the menu is accepted」与「an accepted menu offers
+  一键补齐」两条断言。
+
+### 未验证
+
+- **没有在本机跑原生 QA**：本机没有完整 OctoSense 宿主 checkout，也没有
+  `card-host.exe`，所以 `--menu-purchase`／`--market*` 模式未重新驱动，A6 的
+  纠正回环也没有真实 `model.complete` 调用。改动是「代码完成、原生 QA 未跑」状态。
+- B2 改变的先接受后补齐流程只在脚本层验证，未在真实宿主上跑通。
+- A4 与已合并 #21 的分歧（决策要求估算“不写回库存批次”，#21 把估算以
+  `source: "AI 估算"` 写回 `state.foods[].nutrition` 并冻结进实际记录）
+  不在本 PR 处理，已另开 issue 由产品负责人决定。
+- 发版检查点、签名与提交仍是人工决定。
+
 ## Issue #29 交付检查点：标注、文档、截图、重新盖章 — 2026-10-12
 
 This is the delivery checkpoint, not a behaviour change: `bundle/main.splash` is

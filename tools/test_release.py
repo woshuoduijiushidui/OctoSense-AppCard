@@ -121,6 +121,29 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn('"午餐"', script)
         self.assertIn('"晚餐"', script)
 
+    def test_design_decisions_a6_b1_b2(self):
+        # Issue #22 decisions taken against the Issue #5 design doc, on top of the
+        # AI nutrition estimation that main already ships: A6 one automatic
+        # correction, B1 cross-batch allocation, B2 一键补齐 behind menu
+        # acceptance. Offline guard only; qa_release.py drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn draw_split(", "fn draw_piece(", "fn allocate_uses(",
+                       "fn merge_draws(", "let ai_correction", "let ai_validation_error"):
+            self.assertIn(marker, script)
+        # A6: one re-ask, carrying the concrete error; no second correction.
+        self.assertIn("if !ai_snapshot.experience && ai_correction < 1", script)
+        self.assertIn('task = task + "上一次输出未通过本地校验：" + ai_validation_error', script)
+        self.assertNotIn("ai_feedback", script)
+        # B1: validation and consumption share the one allocation; the consume
+        # operation never lists the same batch twice.
+        self.assertIn("allocate_uses(p, p.uses).fits", script)
+        self.assertIn("let uses = merge_draws(actual_draws)", script)
+        # B2: the entry is gated, and open_market refuses an unaccepted menu.
+        self.assertIn("接受这份菜单后即可一键补齐", script)
+        self.assertIn("请先接受这份菜单，再一键补齐", script)
+        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["capabilities"], ["storage", "model", "camera", "files"])
+
     def test_manifest_has_no_network_shopping_capability(self):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         capabilities = set(manifest["capabilities"])

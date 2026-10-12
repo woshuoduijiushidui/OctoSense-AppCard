@@ -55,6 +55,9 @@ let ai_error = ""
 let ai_model = ""
 let ai_calls = 0
 let ai_sequence = 0
+// Issue #22 decision A6: one automatic correction after a failed AI validation.
+let ai_correction = 0
+let ai_validation_error = ""
 let probe_sequence = 0
 let config_deadline = 0
 let model_deadline = 0
@@ -1300,7 +1303,11 @@ fn market_short_count(p){
     for line in market_lines(p) { count = count + 1 }
     count
 }
-fn open_market(){ market = {tab: 0 selected: -1 replacing: -1 confirming: false} market_fill_cart() redraw() }
+fn open_market(){
+    let p = choose_plan()
+    if p == nil || !p.accepted { message = "请先接受这份菜单，再一键补齐。" redraw() return }
+    market = {tab: 0 selected: -1 replacing: -1 confirming: false} market_fill_cart() redraw()
+}
 fn close_market(){ market = nil receipt = nil redraw() }
 fn market_tab(index){ market.tab = index market.selected = -1 market.replacing = -1 receipt = nil redraw() }
 fn market_open_product(index){ market.selected = index redraw() }
@@ -2730,6 +2737,101 @@ fn active_plan(){
     for p in state.plans { if p.id == state.active && p.accepted && !p.consumed { return p } }
     nil
 }
+// Issue #22 决定 B1 (design §7.2): the day's uses are covered from the eligible
+// batches in memory, earliest expiry first, unknown expiry last. A use may span
+// several batches; two uses never spend the same grams. Nothing here changes
+// state.foods.
+fn draw_split(pool, draws, u, amount){
+    let left = amount
+    // The menu's own batch is spent first, so the 食用核对 screen's explicit
+    // "改用同名食材的第 N 批" still decides where the deduction lands.
+    let unit = use_unit(u)
+    for i in pool.len() {
+        if left > 0 && pool[i].food_id == u.food_id && pool[i].name == u.name &&
+            pool[i].unit == unit && pool[i].left > 0 {
+            let take = min(left, pool[i].left)
+            draws.push({food_id: pool[i].food_id quantity: take unit: unit})
+            pool[i].left = pool[i].left - take
+            left = left - take
+        }
+    }
+    // Each turn zeroes a batch or finishes the use, so pool.len() + 1 is enough.
+    for step in pool.len() + 1 {
+        if left > 0 {
+            let best = -1
+            for i in pool.len() {
+                if pool[i].name == u.name && pool[i].unit == unit && pool[i].left > 0 {
+                    if best < 0 || pool[i].expiry < pool[best].expiry { best = i }
+                }
+            }
+            if best >= 0 {
+                let take = min(left, pool[best].left)
+                draws.push({food_id: pool[best].food_id quantity: take unit: unit})
+                pool[best].left = pool[best].left - take
+                left = left - take
+            }
+        }
+    }
+    left <= 0
+}
+// shortcut: pieces stay inside one batch, because 平均克数 is a per-batch number;
+// upgrade if a split-piece menu is ever needed.
+fn draw_piece(pool, draws, u, amount){
+    let best = -1
+    let preferred = -1
+    for i in pool.len() {
+        if pool[i].name == u.name && pool[i].unit == "piece" && pool[i].left >= amount &&
+            (u.grams == 0 || abs(u.grams - amount * pool[i].average_item_grams) < .01) {
+            if pool[i].food_id == u.food_id { preferred = i }
+            if best < 0 || pool[i].expiry < pool[best].expiry { best = i }
+        }
+    }
+    if preferred >= 0 { best = preferred }
+    if best < 0 { return false }
+    draws.push({food_id: pool[best].food_id quantity: amount unit: "piece"})
+    pool[best].left = pool[best].left - amount
+    true
+}
+// Issue #22 decision B1: one consume operation may not list the same batch twice,
+// so the per-use draws are coalesced by food_id before they are sent.
+fn merge_draws(draws){
+    let out = []
+    for d in draws {
+        let at = -1
+        for i in out.len() { if out[i].food_id == d.food_id { at = i } }
+        if at >= 0 { out[at].quantity = out[at].quantity + d.quantity }
+        else { out.push({food_id: d.food_id quantity: d.quantity unit: d.unit}) }
+    }
+    out
+}
+fn allocate_uses(p, uses){
+    let numeric = plan_numeric(p)
+    let pool = []
+    for f in state.foods {
+        if (numeric && plan_eligible(f)) || (!numeric && recipe_eligible(f)) {
+            pool.push({food_id: f.id name: f.name unit: f.canonical_unit left: f.canonical_quantity
+                average_item_grams: f.average_item_grams expiry: expiry_order(f)})
+        }
+    }
+    let draws = []
+    for u in uses {
+        let amount = use_quantity(u)
+        let unit = use_unit(u)
+        if !(amount > 0) || !(u.grams >= 0) || (numeric && !(u.grams > 0)) { return {fits: false draws: []} }
+        if unit == "piece" {
+            if amount != floor(amount) { return {fits: false draws: []} }
+            if !draw_piece(pool, draws, u, amount) { return {fits: false draws: []} }
+        } else {
+            if numeric && unit != "g" { return {fits: false draws: []} }
+            if numeric && amount != u.grams { return {fits: false draws: []} }
+            if !numeric && unit == "g" && amount != u.grams { return {fits: false draws: []} }
+            if !numeric && unit == "ml" && u.grams != 0 { return {fits: false draws: []} }
+            if !numeric && unit != "g" && unit != "ml" { return {fits: false draws: []} }
+            if !draw_split(pool, draws, u, amount) { return {fits: false draws: []} }
+        }
+    }
+    {fits: true draws: draws}
+}
 fn validate(p){
     // Issue #23: adding stock must not invalidate an accepted menu; stage scope
     // still applies, because a menu belongs to the stage that produced it.
@@ -2738,32 +2840,7 @@ fn validate(p){
         let stage = current_stage()
         if stage == nil || p.stage_id != stage.id { return false }
     }
-    let totals = {}
-    for u in p.uses {
-        let amount = use_quantity(u)
-        let unit = use_unit(u)
-        if !(amount > 0) || !(u.grams >= 0) || (plan_numeric(p) && !(u.grams > 0)) { return false }
-        let found = false
-        let total = amount
-        for k v in totals { if k == "" + u.food_id { total = total + v } }
-        totals["" + u.food_id] = total
-        for f in state.foods {
-            if f.id == u.food_id && unit == f.canonical_unit && total <= f.canonical_quantity {
-                if plan_numeric(p) && plan_eligible(f) {
-                    if unit == "g" && amount == u.grams { found = true }
-                    if unit == "piece" && amount == floor(amount) &&
-                        abs(u.grams - amount * f.average_item_grams) < .01 { found = true }
-                }
-                if !plan_numeric(p) && recipe_eligible(f) {
-                    if unit == "g" && amount == u.grams { found = true }
-                    if unit == "ml" && u.grams == 0 { found = true }
-                    if unit == "piece" && amount == floor(amount) && u.grams == 0 { found = true }
-                }
-            }
-        }
-        if !found { return false }
-    }
-    true
+    allocate_uses(p, p.uses).fits
 }
 // Issue #23: one menu is one day with 早/中/晚 three meals. The local rule path
 // returns the same shape as the model, so display and acceptance never branch on
@@ -3117,42 +3194,73 @@ fn recipe_display_text(text){
         .replace(regex("[ \\t]*profile[ \\t]*", "gi"), "饮食档案")
 }
 fn save_ai_result(output, reason, requested_goal){
+    ai_validation_error = ""
     try {
-        if output.reason.len() == 0 || output.reason.len() > 1200 { return false }
+        if output.reason.len() == 0 || output.reason.len() > 1200 {
+            ai_validation_error = "reason 缺失或超过 1200 字。"
+            return false
+        }
         if output.feasible != true {
             ai_error = "这次要求无法满足：" + recipe_display_text(output.reason)
             message = ai_error
             return true
         }
-        if output.meals.len() != 3 { return false }
+        if output.meals.len() != 3 {
+            ai_validation_error = "必须恰好返回早、中、晚三条 meals。"
+            return false
+        }
         let meals = []
         let uses = []
         for slot in 3 {
             let raw = output.meals[slot]
-            if raw.title.len() == 0 || raw.title.len() > 240 { return false }
-            if !(raw.minutes >= 1) || raw.minutes > 120 || raw.minutes != floor(raw.minutes) { return false }
-            if raw.steps.len() < 2 || raw.steps.len() > 8 { return false }
-            if raw.uses.len() == 0 || raw.uses.len() > 4 { return false }
+            if raw.title.len() == 0 || raw.title.len() > 240 {
+                ai_validation_error = "第 " + (slot + 1) + " 餐的 title 不符合要求。"
+                return false
+            }
+            if !(raw.minutes >= 1) || raw.minutes > 120 || raw.minutes != floor(raw.minutes) {
+                ai_validation_error = "第 " + (slot + 1) + " 餐的 minutes 必须是 1–120 的整数。"
+                return false
+            }
+            if raw.steps.len() < 2 || raw.steps.len() > 8 {
+                ai_validation_error = "第 " + (slot + 1) + " 餐的步骤需要 2–8 项。"
+                return false
+            }
+            if raw.uses.len() == 0 || raw.uses.len() > 4 {
+                ai_validation_error = "第 " + (slot + 1) + " 餐的 uses 需要 1–4 项。"
+                return false
+            }
             let meal_uses = []
             for u in raw.uses {
                 let planned = nil
                 if ai_snapshot.recipe_only {
-                    if !(u.quantity > 0) || u.quantity != floor(u.quantity) { return false }
+                    if !(u.quantity > 0) || u.quantity != floor(u.quantity) {
+                        ai_validation_error = "第 " + (slot + 1) + " 餐的食材数量必须是正整数。"
+                        return false
+                    }
                     for f in state.foods {
                         if f.id == u.food_id && u.quantity <= f.canonical_quantity { planned = recipe_use(f, u.quantity) }
                     }
                 } else {
-                    if !(u.grams > 0) || u.grams != floor(u.grams) { return false }
+                    if !(u.grams > 0) || u.grams != floor(u.grams) {
+                        ai_validation_error = "第 " + (slot + 1) + " 餐的 grams 必须是正整数。"
+                        return false
+                    }
                     for f in state.foods {
                         if f.id == u.food_id && u.grams <= batch_grams(f) { planned = plan_use(f, u.grams) }
                     }
                 }
-                if planned == nil { return false }
+                if planned == nil {
+                    ai_validation_error = "第 " + (slot + 1) + " 餐的食材不在本次候选内，或用量超出该批次可用量。"
+                    return false
+                }
                 meal_uses.push(planned)
                 uses.push(planned)
             }
             let recipe = parse_recipe(raw, meal_uses)
-            if recipe == nil { return false }
+            if recipe == nil {
+                ai_validation_error = "第 " + (slot + 1) + " 餐的做法结构不符合 schema。"
+                return false
+            }
             meals.push({slot: meal_label(slot) title: recipe.title minutes: raw.minutes uses: meal_uses steps: recipe.steps})
         }
         let stage = current_stage()
@@ -3164,7 +3272,10 @@ fn save_ai_result(output, reason, requested_goal){
         if ai_snapshot.recipe_only { p.numeric = false p.source = "在线 AI · 营养未核算" }
         let previous = active_plan()
         if previous != nil { p.previous = menu_title(previous) }
-        if !validate(p) { return false }
+        if !validate(p) {
+            ai_validation_error = "整份菜单未通过库存用量校验。"
+            return false
+        }
         let before = state.to_json()
         state.plans.push(p) state.next_id = state.next_id + 1
         prune_menus()
@@ -3179,7 +3290,10 @@ fn save_ai_result(output, reason, requested_goal){
             if issue != "" { message = "AI 已生成今日菜单，但暂时不能接受：" + issue }
         }
         true
-    } catch { false }
+    } catch {
+        ai_validation_error = "输出结构无法解析。"
+        false
+    }
 }
 fn online_plan(reason){
     if ai_busy { return }
@@ -3205,11 +3319,24 @@ fn apply_model_reply(envelope){
         let saved = false
         if ai_snapshot.experience { saved = save_ai_trial_result(r.data.output) }
         else { saved = save_ai_result(r.data.output, ai_snapshot.reason, ai_snapshot.goal) }
-        if !saved { ai_failure("AI 菜单未通过格式、忌口、库存用量或营养额度校验，原菜单保留。请重试。") return }
+        if !saved {
+            // Issue #22 decision A6: one automatic correction carrying the concrete
+            // error, then stop and leave the retry entry to the user. The trial flow
+            // keeps its own single failure path.
+            if !ai_snapshot.experience && ai_correction < 1 {
+                ai_correction = ai_correction + 1
+                message = "AI 菜单未通过校验，已把具体错误反馈给模型并自动修正一次。"
+                redraw()
+                online_plan_ready(ai_snapshot.reason)
+                return
+            }
+            ai_failure("AI 菜单未通过格式、忌口、库存用量或营养额度校验，原菜单保留。请重试。") return
+        }
         ai_calls = ai_calls + 1
         redraw()
 }
 fn plan(reason){
+    ai_correction = 0 ai_validation_error = ""
     if !state.auto_generate && automatic_reason(reason) { return }
     if storage_blocked { message = "库存文件异常，已停止生成和写入。请先备份修复。" return }
     if state.paused { message = "管家已暂停，请在设置里恢复。" return }
@@ -3589,6 +3716,9 @@ fn online_plan_ready(reason){
     if recipe_only {
         task = "你是一名家常菜冰箱管家。用中文根据 input.inventory 的真实食材安排一天的三餐：早、中、晚，恰好三条 meals，顺序固定。只能使用库存给出的 food_id，每条 meals 的 uses 中 quantity 使用对应 unit 的原生数量，不能超过库存，也不能添加不存在的食材；同一种食材在三餐里重复出现时按总量计算。优先选 nutrition_known=true 的食材，再考虑已知到期时间较近的食材；保质期未知时在做法中提醒用户先检查新鲜度。营养参考不足以完成整餐核算，不能估算、声称或编造热量、蛋白质、纤维、维生素 C 或周期目标达成情况。遵守 profile.allergies 和 profile.avoidances，熟食充分加热。每条 meals 给出 1–4 种食材、2–8 项做法，按早、中、晚安排。可满足时 feasible=true；不能满足时 feasible=false 并用 reason 说明原因。title、reason、steps 必须写成用户能看懂的中文，不得包含 JSON 字段名、布尔值、内部编号或英文状态。只输出 JSON。"
     }
+    if ai_validation_error != "" {
+        task = task + "上一次输出未通过本地校验：" + ai_validation_error + "请只修正这一点，仍然返回完整的 JSON。"
+    }
     let requested_goal = goal
     let model_input = {goal: requested_goal profile: state.profile inventory: inventory
         previous_menu: previous_title trigger: reason demo: state.demo}
@@ -3707,20 +3837,27 @@ fn finalize_actual(recommendation, plan_id){
         actual_error("请至少填写一项实际食物。") return
     }
 
-    let totals = {}
+    // Issue #22 decision B1 (design 7.2): cover the actual amounts from the
+    // eligible batches in memory, earliest expiry first, a batch never spent
+    // twice. An item with no stock (eaten outside the pantry) has nothing to
+    // deduct and is recorded on its own.
+    let pool = []
+    for f in state.foods {
+        if recipe_eligible(f) {
+            pool.push({food_id: f.id name: f.name unit: f.canonical_unit left: f.canonical_quantity
+                average_item_grams: f.average_item_grams expiry: expiry_order(f)})
+        }
+    }
+    let actual_draws = []
     for u in consumption {
         if !(use_quantity(u) > 0) || !(u.grams >= 0) || u.grams > 100000 || (use_unit(u) == "piece" && use_quantity(u) != floor(use_quantity(u))) {
             actual_error("实际克数必须为正整数。") return
         }
-        if u.food_id > 0 {
-            let total = use_quantity(u)
-            for k v in totals { if k == "" + u.food_id { total = total + v } }
-            totals["" + u.food_id] = total
-            let found = false
-            for f in state.foods { if f.id == u.food_id && f.canonical_quantity >= total && f.canonical_unit == use_unit(u) && recipe_eligible(f) { found = true } }
-            if !found { actual_error("实际食物超出库存或已到期，请修改用量。") return }
+        if u.food_id > 0 && !draw_split(pool, actual_draws, u, use_quantity(u)) {
+            actual_error("实际食物超出库存或已到期，请修改用量。") return
         }
     }
+
     let actual = []
     for draft in consumption {
         let n = actual_nutrition(draft)
@@ -3765,8 +3902,7 @@ fn finalize_actual(recommendation, plan_id){
     record_health_meal(actual, true)
     state.risk_key = ""
     record("确认实际食用 #" + entry.id + "：" + entry.title + " · " + calories + " kcal")
-    let uses = []
-    for u in actual { if u.food_id > 0 { uses.push({food_id: u.food_id quantity: use_quantity(u) unit: use_unit(u)}) } }
+    let uses = merge_draws(actual_draws)
     let saved = false
     if uses.len() > 0 { saved = apply_inventory_operation({operation_id: "pantry-local-" + state.next_operation_id type: "consume" uses: uses}, before) }
     else { state.revision = state.revision + 1 saved = commit(before) }
@@ -5373,7 +5509,11 @@ View{width: Fill height: Fill flow: Overlay
                                                     }
                                                 }
                                                 if market_short_count(p) > 0 {
-                                                    Action{text: "一键补齐 · 去模拟买菜  →" on_click: || open_market()}
+                                                    if p.accepted {
+                                                        Action{text: "一键补齐 · 去模拟买菜  →" on_click: || open_market()}
+                                                    } else {
+                                                        Hint{text: "接受这份菜单后即可一键补齐；接受前不创建购物车、不跳转模拟平台。"}
+                                                    }
                                                 }
                                                 Hint{text: "清单只描述需要补齐的数量，不代表已经购买或入库。"}
                                                 if menu_executable(p) { Hint{text: "库存够，这份菜单现在可以执行。"} }
