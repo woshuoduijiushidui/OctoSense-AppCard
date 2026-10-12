@@ -89,6 +89,9 @@ let stage_swap_cycle = 7
 let cycle_view = 7
 let cycle_days = [1 3 7 15 21 30]
 let extra_kcal_text = "0"
+// Issue #25: the 模拟买菜 region replaces the butler dashboard in the same
+// window while it is open; nil means the dashboard. Nothing here is stored.
+let market = nil // {tab selected}
 
 let ink = #x22211f
 let muted = #x77736d
@@ -880,6 +883,67 @@ fn menu_stock_lines(p){
     }
     out
 }
+// Issue #25: the 模拟商品 catalog is fixed demo data shipped with the bundle —
+// no network, no real prices. 秋葵 is deliberately absent so at least one 缺菜
+// can demonstrate the "no matching product" path.
+fn market_products(){
+    [
+        {name: "菠菜" category: "蔬菜" spec: "300 g / 把" unit: "把" price_cents: 480 stock: 20 kcal: 23 protein: 3 fiber: 2.2 vitamin_c: 28 shelf_days: 3 emoji: "🥬"}
+        {name: "青菜" category: "蔬菜" spec: "400 g / 把" unit: "把" price_cents: 420 stock: 15 kcal: 15 protein: 1.5 fiber: 1.5 vitamin_c: 45 shelf_days: 3 emoji: "🥬"}
+        {name: "生菜" category: "蔬菜" spec: "250 g / 把" unit: "把" price_cents: 390 stock: 10 kcal: 15 protein: 1.4 fiber: 1.3 vitamin_c: 8 shelf_days: 4 emoji: "🥬"}
+        {name: "番茄" category: "蔬菜" spec: "500 g / 份" unit: "份" price_cents: 690 stock: 18 kcal: 18 protein: 0.9 fiber: 1.2 vitamin_c: 14 shelf_days: 6 emoji: "🍅"}
+        {name: "胡萝卜" category: "蔬菜" spec: "500 g / 袋" unit: "袋" price_cents: 350 stock: 22 kcal: 39 protein: 1 fiber: 2.8 vitamin_c: 5.9 shelf_days: 14 emoji: "🥕"}
+        {name: "土豆" category: "蔬菜" spec: "1 kg / 袋" unit: "袋" price_cents: 590 stock: 25 kcal: 77 protein: 2 fiber: 2.2 vitamin_c: 19 shelf_days: 20 emoji: "🥔"}
+        {name: "西兰花" category: "蔬菜" spec: "400 g / 个" unit: "个" price_cents: 780 stock: 12 kcal: 34 protein: 2.8 fiber: 2.6 vitamin_c: 89 shelf_days: 5 emoji: "🥦"}
+        {name: "黄瓜" category: "蔬菜" spec: "500 g / 份" unit: "份" price_cents: 490 stock: 16 kcal: 16 protein: 0.8 fiber: 0.5 vitamin_c: 2.8 shelf_days: 5 emoji: "🥒"}
+        {name: "蘑菇" category: "蔬菜" spec: "200 g / 盒" unit: "盒" price_cents: 620 stock: 14 kcal: 22 protein: 3.1 fiber: 1 vitamin_c: 2 shelf_days: 5 emoji: "🍄"}
+        {name: "苹果" category: "水果" spec: "1 kg / 袋" unit: "袋" price_cents: 1290 stock: 30 kcal: 53 protein: 0.4 fiber: 2.4 vitamin_c: 4.6 shelf_days: 20 emoji: "🍎"}
+        {name: "香蕉" category: "水果" spec: "1 kg / 把" unit: "把" price_cents: 990 stock: 20 kcal: 93 protein: 1.4 fiber: 1.2 vitamin_c: 8.7 shelf_days: 5 emoji: "🍌"}
+        {name: "橙子" category: "水果" spec: "1 kg / 袋" unit: "袋" price_cents: 1190 stock: 18 kcal: 48 protein: 0.9 fiber: 2.4 vitamin_c: 53 shelf_days: 15 emoji: "🍊"}
+        {name: "鸡蛋" category: "肉蛋" spec: "10 枚 / 盒" unit: "盒" price_cents: 1080 stock: 26 kcal: 143 protein: 13 fiber: 0 vitamin_c: 0 shelf_days: 30 emoji: "🥚"}
+        {name: "鸡胸肉" category: "肉蛋" spec: "500 g / 份" unit: "份" price_cents: 1590 stock: 12 kcal: 133 protein: 24 fiber: 0 vitamin_c: 0 shelf_days: 3 emoji: "🍗"}
+        {name: "猪里脊" category: "肉蛋" spec: "500 g / 份" unit: "份" price_cents: 1890 stock: 9 kcal: 155 protein: 20 fiber: 0 vitamin_c: 0 shelf_days: 3 emoji: "🥩"}
+        {name: "牛肉" category: "肉蛋" spec: "500 g / 份" unit: "份" price_cents: 3590 stock: 6 kcal: 125 protein: 20 fiber: 0 vitamin_c: 0 shelf_days: 3 emoji: "🥩"}
+        {name: "三文鱼" category: "水产" spec: "300 g / 份" unit: "份" price_cents: 4290 stock: 5 kcal: 208 protein: 20 fiber: 0 vitamin_c: 0 shelf_days: 2 emoji: "🐟"}
+        {name: "豆腐" category: "豆制品" spec: "400 g / 盒" unit: "盒" price_cents: 480 stock: 20 kcal: 76 protein: 8 fiber: 1 vitamin_c: 0 shelf_days: 5 emoji: "◻️"}
+        {name: "豆浆" category: "豆制品" spec: "1 L / 瓶" unit: "瓶" price_cents: 890 stock: 24 kcal: 31 protein: 3 fiber: 0.6 vitamin_c: 0 shelf_days: 7 emoji: "🥛"}
+        {name: "牛奶" category: "乳品" spec: "1 L / 盒" unit: "盒" price_cents: 1290 stock: 28 kcal: 54 protein: 3.3 fiber: 0 vitamin_c: 1 shelf_days: 10 emoji: "🥛"}
+        {name: "酸奶" category: "乳品" spec: "200 g / 杯" unit: "杯" price_cents: 690 stock: 22 kcal: 72 protein: 3.2 fiber: 0 vitamin_c: 1 shelf_days: 21 emoji: "🥛"}
+        {name: "大米" category: "主食" spec: "5 kg / 袋" unit: "袋" price_cents: 3990 stock: 40 kcal: 346 protein: 7.4 fiber: 0.7 vitamin_c: 0 shelf_days: 365 emoji: "🍚"}
+        {name: "全麦面包" category: "主食" spec: "400 g / 袋" unit: "袋" price_cents: 1190 stock: 12 kcal: 246 protein: 9 fiber: 6 vitamin_c: 0 shelf_days: 7 emoji: "🍞"}
+        {name: "燕麦片" category: "主食" spec: "1 kg / 袋" unit: "袋" price_cents: 1990 stock: 16 kcal: 367 protein: 15 fiber: 10 vitamin_c: 0 shelf_days: 180 emoji: "🥣"}
+    ]
+}
+fn market_price(cents){
+    let yuan = floor(cents / 100)
+    let fen = cents - yuan * 100
+    "¥" + yuan + "." + (if fen < 10 { "0" + fen } else { "" + fen })
+}
+fn market_match(name){
+    let products = market_products()
+    for i in products.len() { if products[i].name == name { return i } }
+    -1
+}
+// Issue #25: the region carries the derived 缺菜清单 (ADR 0003) and marks each
+// line the 模拟商品 catalog has no same-name product for.
+fn market_lines(p){
+    let out = []
+    if p == nil { return out }
+    for line in menu_stock_lines(p) {
+        if line.short > 0 { out.push({name: line.name short: line.short pick: market_match(line.name)}) }
+    }
+    out
+}
+fn market_short_count(p){
+    let count = 0
+    for line in market_lines(p) { count = count + 1 }
+    count
+}
+fn open_market(){ market = {tab: 0 selected: -1} redraw() }
+fn close_market(){ market = nil redraw() }
+fn market_tab(index){ market.tab = index market.selected = -1 redraw() }
+fn market_open_product(index){ market.selected = index redraw() }
+fn market_close_product(){ market.selected = -1 redraw() }
 fn menu_executable(p){ menu_ready(p) && validate(p) }
 fn refresh_menu_uses(p){
     let uses = []
@@ -1460,6 +1524,7 @@ fn preference_summary(){
 }
 fn render_dashboard(){
     if onboarding_step < 4 { return }
+    if market != nil { return }
     ui.navigation.render()
     ui.content.render()
     ui.actions.render()
@@ -3580,6 +3645,153 @@ View{width: Fill height: Fill flow: Overlay
                     }
                 }
                 if onboarding_step == 4 {
+                    if market != nil {
+                        View{width: Fill height: Fill flow: Right
+                            RoundedView{show_bg: true width: 112 height: Fill flow: Down padding: Inset{left: 10 right: 10 top: 18 bottom: 18} spacing: 12
+                                draw_bg +: {color: #xf7f4efcf border_radius: 30}
+                                RoundedView{show_bg: true width: 48 height: 48 flow: Overlay align: Align{x: .5 y: .5}
+                                    draw_bg +: {color: #x4e765d border_radius: 16}
+                                    Label{text: "M" padding: 0 draw_text +: {color: #xffffff text_style: theme.font_bold{font_size: 22}}}
+                                }
+                                View{width: Fill height: 8}
+                                View{width: Fill height: Fit flow: Down spacing: 8
+                                    let market_labels = ["▤  商品" "▧  购物车" "▦  订单"]
+                                    for i in 3 {
+                                        let market_bg = #x00000000
+                                        let market_tc = muted
+                                        let market_hover = #xeee9e2
+                                        let market_down = #xddd6cb
+                                        if market.tab == i { market_bg = #x4e765d market_tc = #xffffff market_hover = #x3f6349 market_down = #x2f4d38 }
+                                        Pill{width: Fill height: 44 margin: 0 padding: 8 text: market_labels[i] on_click: || market_tab(i)
+                                            draw_bg +: {color: market_bg color_hover: market_hover color_down: market_down color_focus: market_bg border_radius: 14 border_size: 0}
+                                            draw_text +: {color: market_tc color_hover: market_tc color_down: market_tc color_focus: market_tc text_style.font_size: 12}}
+                                    }
+                                }
+                                View{width: Fill height: Fill}
+                                Hint{text: "模拟平台" draw_text.text_style.font_size: 10}
+                                StatusDot{}
+                            }
+                            View{width: Fill height: Fill flow: Down padding: Inset{left: 28 right: 28 top: 22 bottom: 18} spacing: 14
+                                View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
+                                    View{width: Fill height: Fit flow: Down spacing: 5
+                                        Label{text: "模拟买菜" padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 21}}}
+                                        View{width: Fill height: Fit flow: Right spacing: 7 align: Align{y: .5}
+                                            RoundedView{show_bg: true width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3}
+                                                draw_bg +: {color: #xf4ede4 border_radius: 9}
+                                                Label{text: "模拟平台" padding: 0 draw_text +: {color: #x8a5a2b text_style.font_size: 11}}}
+                                            Hint{text: "商品、价格与可售数量都是随包演示数据，不接任何真实购物平台。"}
+                                        }
+                                    }
+                                    Quiet{text: "← 返回管家" on_click: || close_market()}
+                                }
+                                Divider{}
+                                ScrollYView{width: Fill height: Fill flow: Down spacing: 16 padding: Inset{right: 5}
+                                    if market.tab == 0 {
+                                        let products = market_products()
+                                        if market.selected >= 0 && market.selected < products.len() {
+                                            let product = products[market.selected]
+                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                Quiet{text: "‹ 返回商品列表" on_click: || market_close_product()}
+                                                Hint{text: "模拟商品详情 · 模拟平台"}
+                                            }
+                                            Frost{width: Fill height: Fit padding: 22 spacing: 12 draw_bg.color: #xffffffc2
+                                                View{width: Fill height: Fit flow: Right spacing: 16 align: Align{y: .5}
+                                                    RoundedView{show_bg: true width: 84 height: 84 flow: Overlay align: Align{x: .5 y: .5}
+                                                        draw_bg +: {color: #xeee9e2 border_radius: 24}
+                                                        Label{text: product.emoji padding: 0 draw_text.text_style.font_size: 40}}
+                                                    View{width: Fill height: Fit flow: Down spacing: 5
+                                                        Copy{text: product.name draw_text.text_style: theme.font_bold{font_size: 26}}
+                                                        Hint{text: product.category + " · 规格 " + product.spec + " · 单位 " + product.unit}
+                                                        Copy{text: market_price(product.price_cents) + " / " + product.unit draw_text.text_style: theme.font_bold{font_size: 20}}
+                                                        Hint{text: "可售数量 " + product.stock + " " + product.unit + "（演示数据）"}
+                                                    }
+                                                }
+                                                Divider{}
+                                                Copy{text: "每 100 g 营养参考（演示数据）" draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                View{width: Fill height: Fit flow: Right spacing: 10
+                                                    Tint{draw_bg.color: #xf1ede7 Hint{text: "热量"} Copy{text: product.kcal + " kcal" draw_text.text_style: theme.font_bold{font_size: 15}}}
+                                                    Tint{draw_bg.color: #xf5f2ed Hint{text: "蛋白质"} Copy{text: product.protein + " g" draw_text.text_style: theme.font_bold{font_size: 15}}}
+                                                    Tint{draw_bg.color: #xf1ede7 Hint{text: "膳食纤维"} Copy{text: product.fiber + " g" draw_text.text_style: theme.font_bold{font_size: 15}}}
+                                                    Tint{draw_bg.color: #xf5f2ed Hint{text: "维生素 C"} Copy{text: product.vitamin_c + " mg" draw_text.text_style: theme.font_bold{font_size: 15}}}
+                                                }
+                                                Hint{text: "参考保质期 " + product.shelf_days + " 天（演示数据）"}
+                                                Hint{text: "模拟商品只用于演示，不来自网络，也不是你的库存；挑选与模拟下单在后续步骤完成。"}
+                                            }
+                                        }
+                                        if market.selected < 0 {
+                                            let lines = market_lines(choose_plan())
+                                            if lines.len() > 0 {
+                                                Frost{padding: 18 spacing: 10 draw_bg.color: #xffffffc2
+                                                    Copy{text: "本次要补齐的缺菜（已带入）" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                                    Hint{text: "从当前缺菜清单带入，只做核对，不写入存储。"}
+                                                    Divider{}
+                                                    for line in lines {
+                                                        Tint{draw_bg.color: #xf7f1df9e
+                                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                Copy{text: line.name + " · 还差 " + line.short + " g" draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                                if line.pick >= 0 { Hint{text: "已对应模拟商品：" + products[line.pick].name + " · " + products[line.pick].spec} }
+                                                                else { Hint{text: "无对应模拟商品"} }
+                                                            }
+                                                        }
+                                                    }
+                                                    Hint{text: "没有对应商品的行不会被丢弃，会留在缺菜清单里等你换一样食材。"}
+                                                }
+                                            }
+                                            View{width: Fill height: Fit flow: Down spacing: 4
+                                                Heading{text: "模拟商品" draw_text.text_style.font_size: 30}
+                                                Hint{text: "共 " + products.len() + " 条随包演示商品（名称、品类、规格、单位、价格、可售数量）" }
+                                            }
+                                            for i in products.len() {
+                                                let product = products[i]
+                                                Tint{padding: 13 draw_bg.color: #xffffffd9
+                                                    View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
+                                                        EmojiGlass{Label{text: product.emoji padding: 0 draw_text.text_style.font_size: 19}}
+                                                        View{width: Fill height: Fit flow: Down spacing: 3
+                                                            Copy{text: product.name + " · " + product.category draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                            Hint{text: "规格 " + product.spec + " · 可售 " + product.stock + " " + product.unit}
+                                                        }
+                                                        Copy{width: 120 text: market_price(product.price_cents) + " / " + product.unit draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                        Quiet{text: "查看详情" on_click: || market_open_product(i)}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if market.tab == 1 {
+                                        let lines = market_lines(choose_plan())
+                                        let products = market_products()
+                                        Heading{text: "购物车 · 待核对" draw_text.text_style.font_size: 30}
+                                        Frost{padding: 20 spacing: 10 draw_bg.color: #xffffffc2
+                                            if lines.len() == 0 { Copy{text: "当前缺菜清单没有需要补齐的食材。" draw_text.text_style: theme.font_bold{font_size: 17}} }
+                                            for line in lines {
+                                                Tint{draw_bg.color: #xf7f1df9e
+                                                    View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                        Copy{text: line.name + " · 还差 " + line.short + " g" draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                        if line.pick >= 0 { Hint{text: "已对应模拟商品：" + products[line.pick].name + " · " + market_price(products[line.pick].price_cents) + " / " + products[line.pick].unit} }
+                                                        else { Hint{text: "无对应模拟商品"} }
+                                                    }
+                                                }
+                                            }
+                                            Divider{}
+                                            Hint{text: "增减数量、替换商品与合计总价在后续步骤实现；这里先按缺菜清单把模拟商品对好给你核对。"}
+                                        }
+                                    }
+                                    if market.tab == 2 {
+                                        Heading{text: "模拟订单" draw_text.text_style.font_size: 30}
+                                        Frost{padding: 20 spacing: 10 draw_bg.color: #xffffffc2
+                                            Copy{text: "还没有模拟订单" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                            Hint{text: "确认购物车后提交模拟订单、查看订单状态与确认收货，在后续步骤实现。"}
+                                            Hint{text: "模拟下单不产生真实支付，也不会改变冰箱库存。"}
+                                        }
+                                    }
+                                }
+                                RoundedView{show_bg: true width: Fill height: Fit padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+                                    draw_bg +: {color: #xf4ede4 border_radius: 14}
+                                    Hint{text: "模拟下单：这里是模拟平台，不产生真实支付，也不改变冰箱库存。" draw_text.text_style.font_size: 11}}
+                            }
+                        }
+                        return
+                    }
                     View{width: Fill height: Fill flow: Right
                         RoundedView{show_bg: true width: 112 height: Fill flow: Down padding: Inset{left: 10 right: 10 top: 18 bottom: 18} spacing: 12
                             draw_bg +: {color: #xf7f4efcf border_radius: 30}
@@ -4066,6 +4278,9 @@ View{width: Fill height: Fill flow: Overlay
                                                         }
                                                         else { Hint{text: "库存够，不用买。"} }
                                                     }
+                                                }
+                                                if market_short_count(p) > 0 {
+                                                    Action{text: "一键补齐 · 去模拟买菜  →" on_click: || open_market()}
                                                 }
                                                 Hint{text: "清单只描述需要补齐的数量，不代表已经购买或入库。"}
                                                 if menu_executable(p) { Hint{text: "库存够，这份菜单现在可以执行。"} }

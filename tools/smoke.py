@@ -257,6 +257,7 @@ def exercise_menu_purchase(ui):
     for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
         enter(ui, label, value)
     ui.click("下一步 · 选择周期方案  →")
+    ui.scroll(700)
     ui.click("确认计划 · 去录冰箱  →")
     enter(ui, "食材名称", "鸡蛋")
     enter(ui, "数量", "2000")
@@ -352,6 +353,90 @@ def exercise_menu_purchase(ui):
         json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
 
 
+def exercise_market(ui):
+    """Issue #25: 一键补齐 opens the in-app 模拟买菜 region in the same window,
+    carrying the derived 缺菜清单 (ADR 0003), with its own 商品/购物车/订单
+    navigation, a fixed 模拟商品 catalog with list and detail, one ingredient the
+    catalog deliberately lacks, and 模拟平台/模拟下单 labels. Synthetic inventory
+    only; the manifest has no shopping network capability to call."""
+    ui.click("选择", index=1)
+    ui.click("女性")
+    for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
+        enter(ui, label, value)
+    ui.click("下一步 · 选择周期方案  →")
+    ui.scroll(700)
+    ui.click("确认计划 · 去录冰箱  →")
+    # 菠菜 is a 模拟商品; 秋葵 is deliberately absent from the catalog.
+    enter(ui, "食材名称", "菠菜")
+    enter(ui, "数量", "300")
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
+    ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
+    enter(ui, "食材名称", "秋葵")
+    enter(ui, "数量", "200")
+    ui.click("填写 / 收起包装营养参考")
+    enter(ui, "每100g热量 kcal", "30")
+    enter(ui, "每100g蛋白质 g", "2")
+    enter(ui, "每100g膳食纤维 g", "3")
+    enter(ui, "每100g维生素C mg", "20")
+    ui.click("预览并确认  →")
+    ui.click("最终确认入库")
+    ui.click("完成建档 · 开始托管  →")
+    ui.click("⚙  设置")
+    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
+    ui.click("改用本地规则")
+    ui.click("⌂  首页")
+    ui.click("生成今日菜单  →")
+    plan = ui.state()["plans"][0]
+    ui.check("the market demo menu uses a catalogued and an uncatalogued ingredient",
+             {u["name"] for m in plan["meals"] for u in m["uses"]} == {"菠菜", "秋葵"})
+    # Empty the fridge so the day menu's usage is the whole 缺菜清单.
+    ui.click("▣  冰箱")
+    ui.click("展开 / 收起")
+    ui.click("丢弃/移除")
+    ui.click("确认移除")
+    ui.click("展开 / 收起")
+    ui.click("丢弃/移除")
+    ui.click("确认移除")
+    ui.check("the synthetic fridge is empty before 一键补齐", ui.state()["foods"] == [])
+    ui.click("✦  菜单")
+    ui.scroll(-2500)
+    ui.check("the 缺菜清单 offers 一键补齐", "一键补齐" in ui.text())
+    ui.click("一键补齐 · 去模拟买菜  →")
+    page = ui.text()
+    ui.check("一键补齐 opens the 模拟买菜 region in the same window",
+             "模拟买菜" in page and "模拟平台" in page and "模拟下单" in page)
+    ui.check("the region carries the current 缺菜清单 in",
+             "本次要补齐的缺菜" in page and "菠菜" in page and "秋葵" in page)
+    ui.check("a catalogued 缺菜 names its 模拟商品", "已对应模拟商品：菠菜" in page)
+    ui.check("an uncatalogued 缺菜 is marked, not silently dropped",
+             "无对应模拟商品" in page)
+    ui.check("the product list shows the fixed catalog",
+             "模拟商品" in page and "共 24 条随包演示商品" in page and "菠菜 · 蔬菜" in page)
+    ui.click("查看详情", index=0)
+    detail = ui.text()
+    ui.check("the product detail shows 品类、规格、单位、价格、可售数量与营养参考",
+             "模拟商品详情" in detail and "规格" in detail and "单位" in detail
+             and "可售数量" in detail and "每 100 g 营养参考" in detail
+             and "参考保质期" in detail)
+    ui.click("‹ 返回商品列表")
+    ui.click("▧  购物车")
+    ui.check("the region has its own 购物车 page",
+             "购物车 · 待核对" in ui.text() and "无对应模拟商品" in ui.text())
+    ui.click("▦  订单")
+    ui.check("the region has its own 订单 page with 模拟下单 labelling",
+             "还没有模拟订单" in ui.text() and "模拟下单" in ui.text())
+    ui.click("← 返回管家")
+    back = ui.text()
+    ui.check("返回管家 restores the butler and keeps its 菜单 tab",
+             "▧  购物车" not in back and "模拟商品详情" not in back
+             and "今日菜单" in back and "缺菜清单" in back)
+    (ui.profile / "expected-state.json").write_text(
+        json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
+    (ui.profile / "checks.json").write_text(
+        json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=18442)
@@ -360,6 +445,8 @@ def main():
     parser.add_argument("--recipe", action="store_true")
     parser.add_argument("--menu-purchase", action="store_true",
                         help="Issue #23/#24 daily menu: three meals, nutrition, over-limit refusal, derived 缺菜清单")
+    parser.add_argument("--market", action="store_true",
+                        help="Issue #25 模拟买菜: 一键补齐 entry, carried 缺菜清单, catalog list/detail, 模拟 labels")
     args = parser.parse_args()
     ui = UI(args.port, args.profile.resolve())
     if args.restart:
@@ -368,6 +455,8 @@ def main():
         ui.check("重启进入首页", "今天想吃点什么？" in ui.text())
     elif args.menu_purchase:
         exercise_menu_purchase(ui)
+    elif args.market:
+        exercise_market(ui)
     elif args.recipe:
         exercise_recipe(ui)
     else:

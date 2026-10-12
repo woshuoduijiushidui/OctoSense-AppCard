@@ -121,6 +121,21 @@ class ReleaseMetadataTests(unittest.TestCase):
             for forbidden in ("network", "http", "shop", "purchase", "payment"):
                 self.assertNotIn(forbidden, name)
 
+    def test_market_region_is_in_bundle_not_a_second_unit(self):
+        # Offline guard only: qa_release.py --market drives the real behaviour.
+        script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
+        for marker in ("fn market_products(){", "fn market_match(", "fn market_lines(",
+                       "fn market_short_count(", "fn open_market(){", "fn close_market(){",
+                       "fn market_price("):
+            self.assertIn(marker, script)
+        for label in ("一键补齐", "模拟平台", "模拟下单", "无对应模拟商品", "模拟商品"):
+            self.assertIn(label, script)
+        # The fixed demo catalog ships in the bundle; the region is not a second
+        # bundle unit, so it lives in the same splash and manifest id.
+        self.assertEqual(script.count("price_cents:"), 24)
+        manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["id"], "pantry-steward")
+
     def test_shortfall_list_is_derived_and_editable(self):
         # Offline guard only: qa_release.py --menu-purchase drives the real behaviour.
         script = (BUNDLE / "main.splash").read_text(encoding="utf-8")
