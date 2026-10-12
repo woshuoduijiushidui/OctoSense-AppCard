@@ -31,7 +31,7 @@ shell to provide this app with additional privileges.
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues on `woshuoduijiushidui/OctoSense-AppCard`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues on `woshuoduijiushidui/pantry-steward`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
