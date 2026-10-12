@@ -1,0 +1,131 @@
+{
+  "suite": "native model request control",
+  "checks_passed": 54,
+  "live_provider_called": false,
+  "cases": [
+    {
+      "case": "legacy-disabled",
+      "checks": [
+        "saved opt-out survives load",
+        "discard, menu, nutrition and image send no model requests",
+        "subsequent save keeps disabled",
+        "real restart preserves opt-out",
+        "explicit enable persists without sending a request",
+        "explicitly enabled menu estimates then generates",
+        "explicit disable survives restart"
+      ]
+    },
+    {
+      "case": "current-disabled",
+      "checks": [
+        "saved opt-out survives load",
+        "discard, menu, nutrition and image send no model requests",
+        "subsequent save keeps disabled",
+        "real restart preserves opt-out",
+        "explicit enable persists without sending a request",
+        "explicitly enabled menu estimates then generates",
+        "explicit disable survives restart"
+      ]
+    },
+    {
+      "case": "auto-success",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    },
+    {
+      "case": "manual-success",
+      "checks": [
+        "auto-off retains explicit manual generation",
+        "manual generation does not confirm consumption"
+      ]
+    },
+    {
+      "case": "auto-error",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    },
+    {
+      "case": "manual-error",
+      "checks": [
+        "auto-off retains explicit manual generation",
+        "manual generation does not confirm consumption"
+      ]
+    },
+    {
+      "case": "auto-malformed",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    },
+    {
+      "case": "manual-malformed",
+      "checks": [
+        "auto-off retains explicit manual generation",
+        "manual generation does not confirm consumption"
+      ]
+    },
+    {
+      "case": "auto-timeout",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    },
+    {
+      "case": "manual-timeout",
+      "checks": [
+        "auto-off retains explicit manual generation",
+        "manual generation does not confirm consumption"
+      ]
+    },
+    {
+      "case": "auto-off-on",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    },
+    {
+      "case": "trial-auto",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    },
+    {
+      "case": "stock-auto",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    },
+    {
+      "case": "model-off",
+      "checks": [
+        "nutrition request is held before the menu",
+        "cancelled flow sends no second request",
+        "cancelled response writes no nutrition or menu",
+        "confirmed history untouched"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+Pantry Steward / 冰箱管家
+Copyright 2026 The Pantry Steward Authors
+
+Application source is licensed under Apache License 2.0; see LICENSE.txt.
+Publisher display names: leoniaodo, zix, power胖丸, Roooy.
+
+This bundle runs in the official OctoSense host. The host and its dependencies
+are not included here and retain their own licenses and attribution.
+Screenshots are historical native Windows captures, not Android evidence.
+
+Asset provenance — author declaration, 2026-10-08:
+The app author confirmed that assets/sunlit-pantry-bg.png is their own
+original artwork, supplied for this app. It is preserved without editing.
+No third-party source or license is asserted. This records the author's
+declaration, not independent verification or Hub approval.

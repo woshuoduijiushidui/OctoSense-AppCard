@@ -1,0 +1,3 @@
+ancestorEntries = ["GLOSSARY.md", "README.md", "README.zh-CN.md", "VALIDATION.md", "bundle/main.splash", "bundle/manifest.json", "tools/qa_release.py", "tools/smoke.py", "tools/test_release.py"]
+ourEntries = ["GLOSSARY.md", "README.md", "README.zh-CN.md", "VALIDATION.md", "bundle/main.splash", "bundle/manifest.json", "tools/qa_release.py", "tools/smoke.py", "tools/test_release.py"]
+theirEntries = ["GLOSSARY.md", "README.md", "README.zh-CN.md", "VALIDATION.md", "bundle/main.splash", "bundle/manifest.json", "tools/qa_release.py", "tools/smoke.py", "tools/test_release.py"]
