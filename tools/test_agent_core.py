@@ -60,7 +60,7 @@ class AgentCoreVmTests(unittest.TestCase):
         work.mkdir(parents=True, exist_ok=True)
         manifest = work / "Cargo.toml"
         manifest.write_text(
-            '[package]\nname = "pantry-agent-core-vm"\nversion = "0.1.0"\n'
+            '[workspace]\n[package]\nname = "pantry-agent-core-vm"\nversion = "0.1.0"\n'
             'edition = "2021"\n[[bin]]\nname = "pantry-agent-core-vm"\n'
             'path = "../../tools/agent_core_vm.rs"\n[dependencies]\n'
             f'makepad-script = {{ path = "{SCRIPT_CRATE.as_posix()}" }}\n',

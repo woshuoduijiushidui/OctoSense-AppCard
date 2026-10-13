@@ -1,0 +1,1 @@
+{"app_id":"pantry-steward","digest":"041be3b30945a23cc4788a357c156bb693a7d879169ac2618973c8863e2d61f6","findings":[{"check":"publisher-signature","detail":"unsigned: accountability rests on the hub alone","severity":"warning"}],"passed":true,"resources":[],"schema":1,"stage":"structural","version":"0.8.0"}
