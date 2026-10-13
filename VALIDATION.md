@@ -1,5 +1,22 @@
 # Migration validation
 
+## Image contract review, 2026-10-13 — source and package checks
+
+The app now discovers the host's `model.complete@2` image input through
+`runtime.describe` instead of calling an app-specific probe. It declares
+version 2 as optional, so hosts without it retain manual entry. Existing-image
+selection uses `files.import`; the callback checks the returned byte count and
+removes an imported file above 10 MiB before any model call. A provider may
+still reject image input after host discovery.
+
+The pinned App Hub stamped digest
+`69a1df657406ecf8b69d4d76946f5b5a2c1c540a902cbf47694fea5646acb1f4`
+and checked the unsigned editable bundle; 35 launcher/release Python tests
+and the launcher check passed in an isolated test run. This changed
+contract has not yet been replayed in a foreground window with a real
+provider or camera. The earlier user-reported foreground checks below apply
+to a preceding digest only.
+
 ## Issue #43 裁决：菜单只在生成时使用库存（承认现状）— 2026-10-12
 
 产品负责人选择 #43 的**方案 1**：承认已合并实现的严格 stock-only（#21 把它钉为

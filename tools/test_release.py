@@ -16,7 +16,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["version"], "0.8.0")
         self.assertEqual(set(manifest["capabilities"]), {"storage", "model", "camera", "files"})
         self.assertEqual(manifest["requires"], ["host-api-v1"])
-        self.assertEqual(manifest["host_api"]["optional"], {"camera.permission.request": 1})
+        self.assertEqual(manifest["host_api"]["optional"], {"camera.permission.request": 1, "model.complete": 2})
         self.assertRegex(manifest["integrity"]["bundle_blake3"], r"^[0-9a-f]{64}$")
 
     def test_listing_links_assets_and_platform(self):
