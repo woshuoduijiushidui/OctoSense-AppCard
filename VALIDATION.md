@@ -1,5 +1,25 @@
 # Migration validation
 
+## Issue #3 M1 当日会话、权威上下文与软记忆 — 2026-10-13
+
+在 Pantry `origin/main` `c6f4d80` 上补齐 M1：每轮 Agent 输入从已确认档案、`current_stage()`、
+库存批次、今日已接受 `state.plans` 菜单和本地软记忆重建。菜单未接受时不进入投影；
+今天已有实际摄入记录时投影标为锁定。投影不带购物车、订单、原始执行记录、
+图片／音频路径或模型配置。
+
+- 压缩前与每次压缩后均按完整 `input.to_json()` 的 UTF-8 字节数检查 24 KiB。
+  超量且无法继续压缩时保留当前消息与 UI 历史，提示用户缩短输入。
+- 用户在现有在线日菜单入口明确输入普通偏好、生成菜单通过 Issue #5 校验后，
+  候选只暂存在内存。用户接受同一份、未改动的菜单后写入独立
+  `agent-memory.json`；删除、修改或跨日菜单不会写入。记忆写入失败不回滚菜单。
+- 生产 Splash 函数 VM 覆盖 24 个场景，包括跨日生成、真实 `accept()`、失败写入、
+  最终输入预算、多批压缩和 UI 消息保留。`python -X utf8 -m unittest discover -s tools
+  -p 'test_*.py'` 在正常本机权限下 **36 passed**；固定 App Hub 盖章与
+  `hub check bundle --allow-unsigned` **PASSED**（digest
+  `342f1bf84930d684ddc1e906ed932042b76fb062fc5b62a6dda51e4cefdbeb42`，仅 unsigned 提示）。
+- 本次没有运行真实模型生成／压缩输出和原生 UI。Agent 可执行菜单提案属于 M3，
+  本次记忆确认验证使用现有日菜单生成与接受路径。
+
 ## Issue #3 分支同步 Issue #5 主线 — 2026-10-13
 
 `feat/issue-3-global-agent-voice` 合入 `origin/main` 的 #40、#42、#44。`plan()` 同时保留

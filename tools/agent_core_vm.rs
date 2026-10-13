@@ -8,6 +8,12 @@ fn main() {
     let start = source.find("fn agent_empty_session(day)").unwrap();
     let end = source.find("fn canonical_unit(unit)").unwrap();
     let helpers = &source[start..end];
+    let save_start = source.find("fn save_day_menu(meals, reason, source, numeric)").unwrap();
+    let save_end = source.find("fn rule_plan(reason)").unwrap();
+    let menu_save = &source[save_start..save_end];
+    let accept_start = source.find("fn accept(){").unwrap();
+    let accept_end = source.find("fn begin_consume(){").unwrap();
+    let menu_accept = &source[accept_start..accept_end];
     let prelude = r#"
         use mod.std.assert
         use mod.math.floor
@@ -25,9 +31,14 @@ fn main() {
         let agent_batch = nil
         let agent_reply = nil
         let agent_error = ""
+        let agent_memory_pending = nil
+        let goal = ""
+        let selected = 0
+        let message = ""
         let state = {profile: {done: true scene: "日常健康" sex: "女" age: "30" height: "165"
             weight: "60" activity: "轻活动" allergies: "" avoidances: "" preferences: "" special: ""}
-            foods: [] plans: [] revision: 1 profile_revision: 1}
+            foods: [] plans: [] stages: [] execution_records: [] active: 0
+            next_id: 1 revision: 1 profile_revision: 1}
         let disk = {session: "" memory: "" fail: false}
         let fs = {
             exists: |path| { if path == "agent-session.json" { disk.session != "" } else { disk.memory != "" } }
@@ -59,7 +70,20 @@ fn main() {
         let storage_blocked = false
         let use_ai = true
         fn today_day(){ fake_day }
+        fn health_day(){ fake_day }
         fn time_now(){ fake_time }
+        fn current_stage(){ if state.stages.len() == 0 { return nil } state.stages[0] }
+        fn program_expired(){ false }
+        fn program_remaining_daily(stage){ stage.daily_kcal - stage.consumed_kcal }
+        fn menu_meals(menu){ menu.meals }
+        fn menu_issue(menu){ if menu == nil || menu.consumed { return "invalid" } "" }
+        fn menu_title(menu){ menu.title }
+        fn active_plan(){ nil }
+        fn choose_plan(){ if selected >= state.plans.len() { return nil } state.plans[selected] }
+        fn validate(menu){ true }
+        fn prune_menus(){ }
+        fn record(text){ }
+        fn commit(before){ true }
         fn redraw(){ }
     "#;
     let cases: &[(&str, &str)] = &[
@@ -81,9 +105,11 @@ fn main() {
             agent_session = nil
             agent_load_session()
             assert(agent_session.messages.len() == 1)
+            agent_input = "今天刚输入"
             fake_day = 101
             agent_ensure_today()
             assert(agent_session.day == 101 && agent_session.messages.len() == 0)
+            assert(agent_input == "今天刚输入")
             fake_day = 100
             agent_load_session()
             assert(agent_session.messages.len() == 0)
@@ -146,7 +172,8 @@ fn main() {
                 activity: "轻活动" allergies: "花生" avoidances: "" preferences: "清淡" special: ""}
                 foods: [{id: 7 name: "米" canonical_quantity: 500 canonical_unit: "g"
                     expires_on_day: 120 expiry_precision: "exact" average_item_grams: 0
-                    source_image_path: "/private/photo.jpg"}] log: ["private-log"]}
+                    source_image_path: "/private/photo.jpg"}] plans: [] stages: []
+                    execution_records: [] active: 0 log: ["private-log"]}
             agent_memory = agent_memory_after_confirm(agent_empty_memory(), "少放辣", "平时少放辣", true, true, 100)
             let projection = agent_projection_base("inventory")
             assert(projection.current_day == 100 && projection.entry_context == "inventory")
@@ -154,6 +181,40 @@ fn main() {
             assert(projection.profile.allergies == "花生" && projection.soft_memories[0] == "少放辣")
             assert(projection.to_json().search("private") < 0)
             assert(agent_projection_base("unknown") == nil)
+            true
+        "#),
+        ("projection_real_stage_and_accepted_menu", r#"
+            state.stages = [{id: 4 kind: "health" name: "均衡阶段" started: 8640000
+                days: 7 daily_kcal: 1800 kcal_goal: 12600 protein_goal: 350
+                fiber_goal: 175 vitamin_c_goal: 500 consumed_kcal: 300
+                intake: [{day: 100 title: "私人执行记录"}]}]
+            state.plans = [{id: 7 day: 100 accepted: true consumed: false stage_id: 4
+                meals: [{slot: "早餐" title: "米粥" uses: [{food_id: 7 name: "米" grams: 80}]
+                    steps: "私人做法"}]}
+                {id: 8 day: 100 accepted: false consumed: false stage_id: 4
+                    meals: [{slot: "早餐" title: "未确认草稿" uses: []}]}]
+            state.active = 7
+            let projection = agent_projection_base("menu")
+            assert(projection.current_stage.stage_id == 4)
+            assert(projection.current_stage.remaining_daily_kcal == 1500)
+            assert(projection.daily_menu.menu_id == 7 && projection.daily_menu.status == "accepted")
+            assert(projection.daily_menu.meals[0].uses[0].food_id == 7)
+            assert(projection.to_json().search("未确认草稿") < 0)
+            assert(projection.to_json().search("私人") < 0)
+            state.execution_records.push({day: 100 title: "私人摄入"})
+            projection = agent_projection_base("menu")
+            assert(projection.daily_menu.locked && projection.daily_menu.status == "locked")
+            state.active = 0
+            state.plans = [{id: 9 day: 100 accepted: true consumed: false
+                meals: [{slot: "午餐" title: "豆腐" uses: []}]}]
+            projection = agent_projection_base("menu")
+            assert(projection.daily_menu.menu_id == 0)
+            state.plans[0].consumed = true
+            projection = agent_projection_base("menu")
+            assert(projection.daily_menu.stage_id == 0)
+            fake_day = 101
+            projection = agent_projection_base("menu")
+            assert(projection.daily_menu.menu_id == 0 && projection.current_stage.stage_id == 4)
             true
         "#),
         ("byte_trigger_under_fifteen", r#"
@@ -166,6 +227,33 @@ fn main() {
             assert(agent_context_plan({current_day: 100}, s, 8, "当前原文").status == "compact")
             assert(agent_context_plan({large: long + long + long + long + long + long + long}, agent_empty_session(100), 0, "当前原文").status == "too_large")
             assert(agent_context_plan({}, s, 8, long + long).status == "too_large")
+            true
+        "#),
+        ("final_input_budget_never_truncates", r#"
+            let large = ""
+            for i in 8400 { large = large + "中" }
+            let s = agent_empty_session(100)
+            s = agent_append_to_session(s, "user", "当前要求", 1)
+            let plan = agent_context_plan({profile: {allergies: "花生"} large: large}, s, 1, "当前要求")
+            assert(plan.status == "too_large")
+            assert(s.messages[0].text == "当前要求")
+            let pending = agent_empty_session(100)
+            let long = ""
+            for i in 1200 { long = long + "中" }
+            for i in 8 { pending = agent_append_to_session(pending, "user", long, i) }
+            pending = agent_append_to_session(pending, "user", "原文", 8)
+            plan = agent_context_plan({profile: {allergies: "花生"}}, pending, 9, "原文")
+            assert(plan.status == "compact")
+            let after = agent_apply_summary(pending, {summary: "保留花生过敏和明确要求"}, plan.batch.through_id)
+            assert(after.messages.len() == 9 && after.summary_through_id > 0)
+            plan = agent_context_plan({profile: {allergies: "花生"}}, after, 9, "原文")
+            while plan.status == "compact" {
+                after = agent_apply_summary(after, {summary: "保留花生过敏和明确要求"}, plan.batch.through_id)
+                plan = agent_context_plan({profile: {allergies: "花生"}}, after, 9, "原文")
+            }
+            assert(plan.status == "ready" && agent_input_bytes(plan.input) < 24576)
+            assert(plan.input.profile.allergies == "花生" && plan.input.current_user_message == "原文")
+            assert(after.messages.len() == 9)
             true
         "#),
         ("summary_failure_and_success", r#"
@@ -239,6 +327,83 @@ fn main() {
             assert(agent_memory_after_confirm(m, "米饭", "今晚想吃米饭", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "少放辣", "模型建议少放辣", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "少放辣", "少放辣", true, false, 100) == nil)
+            true
+        "#),
+        ("menu_memory_final_confirmation", r#"
+            agent_memory = agent_empty_memory()
+            let menu = {id: 10 accepted: false consumed: false meals: []}
+            agent_stage_menu_memory(menu, "平时少放辣", "用户请求")
+            assert(agent_memory_pending.menu_id == 10 && agent_memory.items.len() == 0)
+            agent_confirm_menu_memory(menu)
+            assert(agent_memory.items.len() == 0 && agent_memory_pending == nil)
+            agent_stage_menu_memory(menu, "平时少放辣", "用户请求")
+            menu.accepted = true
+            agent_confirm_menu_memory(menu)
+            assert(agent_memory.items.len() == 1 && agent_memory.items[0].text == "平时少放辣")
+            assert(agent_memory.items[0].expires_day == 130)
+            agent_confirm_menu_memory(menu)
+            assert(agent_memory.items.len() == 1)
+            agent_stage_menu_memory({id: 11 accepted: false consumed: false meals: []}, "平时少放辣", "用户请求")
+            agent_confirm_menu_memory({id: 12 accepted: true consumed: false})
+            assert(agent_memory.items.len() == 1)
+            agent_stage_menu_memory({id: 13 accepted: false consumed: false meals: []}, "花生过敏，平时少放辣", "用户请求")
+            assert(agent_memory_pending == nil)
+            agent_stage_menu_memory({id: 14 accepted: false consumed: false meals: []}, "平时少放辣", "库存移除")
+            assert(agent_memory_pending == nil)
+            let changed = {id: 16 accepted: false consumed: false meals: []}
+            agent_stage_menu_memory(changed, "平时少放辣", "用户请求")
+            changed.meals.push({title: "菜单已被改动"})
+            changed.accepted = true
+            agent_confirm_menu_memory(changed)
+            assert(agent_memory.items.len() == 1)
+            agent_stage_menu_memory({id: 15 accepted: false consumed: false meals: []}, "平时少放辣", "用户请求")
+            fake_day = 101
+            agent_ensure_today()
+            assert(agent_memory_pending == nil)
+            true
+        "#),
+        ("menu_memory_write_failure_keeps_confirmation", r#"
+            agent_memory = agent_empty_memory()
+            let menu = {id: 20 accepted: false consumed: false meals: []}
+            agent_stage_menu_memory(menu, "平时少放辣", "用户请求")
+            menu.accepted = true
+            disk.fail = true
+            agent_confirm_menu_memory(menu)
+            assert(menu.accepted && agent_memory.items.len() == 0 && agent_memory_pending == nil)
+            disk.fail = false
+            true
+        "#),
+        ("production_menu_save_and_accept", r#"
+            agent_session = agent_empty_session(100)
+            agent_memory = agent_empty_memory()
+            agent_input = "昨日未发送"
+            agent_current_id = 3
+            agent_memory_pending = {menu_id: 99 day: 100 candidate: "旧偏好" user_text: "旧偏好"}
+            fake_day = 101
+            let meals = [{slot: "早餐" title: "米粥" uses: [{food_id: 7 name: "米" grams: 80}]}]
+            let menu = save_day_menu(meals, "用户请求", "在线 AI", true)
+            assert(menu.id == 1 && menu.day == 101)
+            assert(agent_session.day == 101 && agent_session.messages.len() == 0)
+            assert(agent_input == "" && agent_current_id == 0)
+            assert(agent_memory_pending == nil && agent_memory.items.len() == 0)
+            agent_stage_menu_memory(menu, "平时少放辣", "用户请求")
+            assert(agent_memory_pending.menu_id == menu.id)
+            accept()
+            assert(state.plans[0].accepted && state.active == 1)
+            assert(agent_memory.items.len() == 1 && agent_memory.items[0].text == "平时少放辣")
+            assert(agent_memory_pending == nil)
+            true
+        "#),
+        ("production_accept_memory_failure", r#"
+            agent_session = agent_empty_session(100)
+            agent_memory = agent_empty_memory()
+            let meals = [{slot: "午餐" title: "豆腐" uses: [{food_id: 8 name: "豆腐" grams: 90}]}]
+            let menu = save_day_menu(meals, "用户请求", "在线 AI", true)
+            agent_stage_menu_memory(menu, "平时少放辣", "用户请求")
+            disk.fail = true
+            accept()
+            assert(state.plans[0].accepted && state.active == 1)
+            assert(agent_memory.items.len() == 0 && agent_memory_pending == nil)
             true
         "#),
         ("text_entry_and_contract", r#"
@@ -341,6 +506,7 @@ fn main() {
             let callback = nil
             host = {request: |name, args, cb| { calls.push(args) callback = cb 1 }}
             agent_open_panel()
+            let business_before = state.to_json()
             for i in 14 { assert(agent_append("user", "旧消息") > 0) }
             agent_input = "当前原文"
             agent_send()
@@ -350,6 +516,7 @@ fn main() {
             assert(calls.len() == 1 && agent_phase == "idle")
             assert(agent_session.summary_through_id == 0 && agent_session.messages.len() == 15)
             assert(agent_input == "当前原文" && agent_current_id == 15)
+            assert(state.to_json() == business_before)
             true
         "#),
         ("text_invalid_provider_and_stale_reply", r#"
@@ -418,7 +585,7 @@ fn main() {
         let mut host = ScriptVmHost::new((), ());
         let mut vm = ScriptVm { host: &mut host, bx: Box::new(ScriptVmBase::new()) };
         vm.bx.captured_errors = Some(Vec::new());
-        let code = format!("{prelude}\n{helpers}\n{script}\n;");
+        let code = format!("{prelude}\n{helpers}\n{menu_save}\n{menu_accept}\n{script}\n;");
         let result = vm.with_instruction_limit(2_000_000, |vm| vm.eval(ScriptMod {
             file: format!("agent_core_{name}.splash"), code, ..Default::default()
         }));

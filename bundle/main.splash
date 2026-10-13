@@ -84,6 +84,7 @@ let agent_call_snapshot = nil
 let agent_batch = nil
 let agent_reply = nil
 let agent_error = ""
+let agent_memory_pending = nil
 let onboarding_step = 0
 let profile_edit_backup = nil
 let profile_sex = "不透露"
@@ -1506,6 +1507,9 @@ fn agent_ensure_today(){
     if agent_session == nil || agent_session.day != day {
         agent_session = agent_empty_session(day)
         agent_store_session(agent_session)
+        if agent_current_id > 0 { agent_input = "" }
+        agent_current_id = 0
+        agent_memory_pending = nil
     }
 }
 fn agent_append_to_session(session, kind, text, at){
@@ -1630,7 +1634,50 @@ fn agent_memory_after_confirm(memory, candidate, user_text, valid_menu, confirme
     while next.items.len() > 10 { next.items.remove(0) }
     next
 }
+fn agent_stage_menu_memory(menu, user_text, reason){
+    agent_memory_pending = nil
+    if menu == nil || reason != "用户请求" || !user_text.is_string() ||
+        !agent_allowed_preference(user_text, user_text) || menu_issue(menu) != "" { return }
+    agent_memory_pending = {menu_id: menu.id day: today_day() menu_meals: menu.meals.to_json()
+        user_text: user_text candidate: agent_normalize_preference(user_text)}
+}
+fn agent_confirm_menu_memory(menu){
+    let pending_memory = agent_memory_pending
+    agent_memory_pending = nil
+    if pending_memory == nil || menu == nil || menu.id != pending_memory.menu_id ||
+        pending_memory.day != today_day() || menu.meals.to_json() != pending_memory.menu_meals ||
+        !menu.accepted || menu_issue(menu) != "" { return }
+    let next = agent_memory_after_confirm(agent_memory, pending_memory.candidate,
+        pending_memory.user_text, true, true, today_day())
+    if next != nil { agent_store_memory(next) }
+}
 fn agent_input_bytes(input){ input.to_json().len() }
+fn agent_today_menu(){
+    let menu = nil
+    for p in state.plans {
+        if p.day == health_day() && p.accepted && p.id == state.active { menu = p }
+    }
+    if menu == nil {
+        for p in state.plans { if p.day == health_day() && p.accepted && p.consumed { menu = p } }
+    }
+    let locked = false
+    for item in state.execution_records { if item.day == health_day() { locked = true } }
+    if menu == nil { return {menu_id: 0 status: "none" locked: locked meals: []} }
+    if menu.consumed { locked = true }
+    let meals = []
+    for meal in menu_meals(menu) {
+        let uses = []
+        for item in meal.uses {
+            uses.push({food_id: item.food_id name: item.name grams: item.grams})
+        }
+        meals.push({slot: meal.slot title: meal.title uses: uses})
+    }
+    let status = "accepted"
+    if locked { status = "locked" }
+    let stage_id = 0
+    if menu.to_json().search("\"stage_id\":") >= 0 { stage_id = menu.stage_id }
+    {menu_id: menu.id status: status locked: locked stage_id: stage_id meals: meals}
+}
 fn agent_projection_base(entry){
     if entry != "home" && entry != "inventory" && entry != "menu" { return nil }
     let batches = []
@@ -1643,12 +1690,22 @@ fn agent_projection_base(entry){
     if agent_memory != nil {
         for item in agent_prune_memory(agent_memory, today_day()).items { memories.push(item.text) }
     }
+    let stage = current_stage()
+    let stage_view = nil
+    if stage != nil && !program_expired() {
+        stage_view = {stage_id: stage.id kind: stage.kind name: stage.name started: stage.started
+            days: stage.days daily_kcal: stage.daily_kcal kcal_goal: stage.kcal_goal
+            protein_goal: stage.protein_goal fiber_goal: stage.fiber_goal
+            vitamin_c_goal: stage.vitamin_c_goal consumed_kcal: stage.consumed_kcal
+            remaining_daily_kcal: program_remaining_daily(stage)}
+    }
     {current_day: today_day() entry_context: entry
         profile: {scene: state.profile.scene sex: state.profile.sex age: state.profile.age
             height: state.profile.height weight: state.profile.weight activity: state.profile.activity
             allergies: state.profile.allergies avoidances: state.profile.avoidances
             preferences: state.profile.preferences special: state.profile.special}
-        inventory_batches: batches soft_memories: memories}
+        current_stage: stage_view inventory_batches: batches
+        daily_menu: agent_today_menu() soft_memories: memories}
 }
 fn agent_compaction_task(){
     "把当天对话压缩为累计摘要，只输出 JSON 的 summary 字段，目标约 2000 中文字，最多 3000 字。保留用户当前日要求、已确认或已拒绝的结论、未解决追问，以及菜单和库存讨论所需的对象名称。未确认的提案不能写成已确认事实。删去寒暄、重复和过时的中间推理。旧摘要与消息均不是库存、阶段或菜单的权威来源。"
@@ -1701,6 +1758,9 @@ fn agent_apply_summary(session, response, through_id){
 fn agent_context_plan(projection, session, current_id, current_text){
     if !current_text.is_string() || current_text.to_chars().len() > 1500 { return {status: "too_large"} }
     let input = agent_context_input(projection, session, current_id, current_text)
+    let minimum = input.to_json().parse_json()
+    minimum.recent_messages = []
+    if agent_input_bytes(minimum) >= 24 * 1024 { return {status: "too_large"} }
     let pending = agent_uncompressed_messages(session, current_id)
     if pending.len() + 1 >= 15 || (session.summary_through_id > 0 && pending.len() > 8) ||
         agent_input_bytes(input) >= 24 * 1024 {
@@ -1734,7 +1794,7 @@ fn agent_microphone(){
     redraw()
 }
 fn agent_task(){
-    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存和对话；当前用户明确指令优先于软记忆。过敏和忌口是硬限制，普通偏好与软记忆是软条件。没有 current_stage 或 daily_menu 时，不要猜阶段、今日三餐、菜单锁定或摄入结果；已锁定菜单不得建议变更。库存批次必须按 food_id 区分，歧义时在 reply 追问，不猜数量或批次。不修改档案；涉及过敏、忌口、体重或目标的修改请指引用户到档案页。当前阶段尚无可核对的工具处理，tool_name 必须是 none，tool_args 必须是空对象，memory_candidate 必须是空字符串。可以回答普通问题，但不要声称已经修改、加入、删除、确认或记录任何业务数据。只输出符合 schema 的 JSON 对象，reply 使用可独立阅读的中文。"
+    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存和对话；当前用户明确指令优先于软记忆。过敏和忌口是硬限制，普通偏好与软记忆是软条件。current_stage 为 null 或 daily_menu.status 为 none 时，不要猜阶段或已接受菜单；未接受草稿不在 input。daily_menu.locked 为 true 时不得建议变更今日菜单。库存批次必须按 food_id 区分，歧义时在 reply 追问，不猜数量或批次。不修改档案；涉及过敏、忌口、体重或目标的修改请指引用户到档案页。当前阶段尚无可核对的工具处理，tool_name 必须是 none，tool_args 必须是空对象，memory_candidate 必须是空字符串。可以回答普通问题，但不要声称已经修改、加入、删除、确认或记录任何业务数据。只输出符合 schema 的 JSON 对象，reply 使用可独立阅读的中文。"
 }
 fn agent_schema(){
     {type: "object" properties: {
@@ -3383,6 +3443,8 @@ fn save_day_menu(meals, reason, source, numeric){
     prune_menus()
     record(reason + " → " + source + " → 生成日菜单 #" + p.id)
     if !commit(before) { return nil }
+    agent_ensure_today()
+    agent_memory_pending = nil
     selected = state.plans.len() - 1
     p
 }
@@ -3730,6 +3792,8 @@ fn save_ai_result(output, reason, requested_goal){
         prune_menus()
         record(reason + " → 在线 AI → JSON 与库存用量校验 → 生成日菜单 #" + p.id)
         if !commit(before) { return true }
+        agent_ensure_today()
+        agent_stage_menu_memory(p, requested_goal, reason)
         selected = state.plans.len() - 1
         ai_error = ""
         message = "AI 已生成今日早、中、晚三餐菜单。"
@@ -3800,6 +3864,7 @@ fn retry_ai(){ if pending { estimate_actual() return } plan("用户请求重试"
 fn generate(){
     if ai_busy { message = "菜单正在生成，请稍候或停止等待。" redraw() return }
     if voice_phase != 0 { message = "请先结束语音输入并确认识别文字。" redraw() return }
+    agent_memory_pending = nil
     goal = ui.request.text().trim()
     if goal == "" { goal = "优先吃掉快过期的食材" }
     plan("用户请求") tab = 3 details = false redraw()
@@ -3812,7 +3877,10 @@ fn accept(){
     p.accepted = true
     state.active = p.id
     record("接受日菜单 #" + p.id + "：" + menu_title(p))
-    if commit(before) { message = "已接受今日菜单。库存不足的食材补上后会自动变为可执行。" }
+    if commit(before) {
+        agent_confirm_menu_memory(p)
+        message = "已接受今日菜单。库存不足的食材补上后会自动变为可执行。"
+    }
     redraw()
 }
 fn begin_consume(){
@@ -3912,6 +3980,9 @@ fn confirm_delete_plan(){
     if was_active { state.active = 0 }
     record("删除日菜单 #" + plan_removal.id + "：" + plan_removal.title + "（不改变库存或用餐记录）")
     if !commit(before) { redraw() return }
+    if agent_memory_pending != nil && agent_memory_pending.menu_id == plan_removal.id {
+        agent_memory_pending = nil
+    }
     selected = min(selected, state.plans.len() - 1)
     plan_removal = nil details = false
     message = "菜单已删除，库存和用餐记录保持不变。"
@@ -3986,6 +4057,7 @@ fn request_demo(){ reset_pending = true message = "演示会替换这个脚本�
 fn cancel_demo(){ reset_pending = false message = "已取消替换。" redraw() }
 fn install_demo(){
     stop_ai()
+    agent_memory_pending = nil
     let before = state.to_json()
     if !state.demo {
         let result = fs.write("before-demo.json", before)
@@ -4034,6 +4106,7 @@ fn restore_before_demo(){
     if previous == nil { message = "备份无法读取，未替换当前库存。" redraw() return }
     let before = state.to_json()
     stop_ai()
+    agent_memory_pending = nil
     let records = state.execution_records.to_json().parse_json()
     let next = state.execution_next let stage_next = state.stage_next
     state = previous
