@@ -133,9 +133,9 @@ def exercise(ui, offline_only=False):
                          ("例如：牛奶、花生", "花生"), ("例如：清淡、家常、少油", "清淡")):
         enter(ui, label, value)
     ui.click("下一步 · 选择周期方案  →")
-    ui.check("六周期候选未自动启用", [p["days"] for p in ui.state()["programs"]] ==
-             [days for days in (1, 3, 7, 15, 21, 30) for _ in range(3)]
-             and ui.state().get("program_active") is None)
+    days = [p["days"] for p in ui.state()["programs"]]
+    ui.check("周期候选未自动启用", len(days) == 18 and len(set(days)) == 6
+             and not ui.state().get("stages"))
     ui.click("确认计划 · 去录冰箱  →")
     for entry in ("拍照识别", "导入小票"):
         ui.click(entry)
@@ -256,13 +256,15 @@ def exercise_recipe(ui):
     for label, value in (("年龄", "30"), ("身高 cm", "170"), ("体重 kg", "65")):
         enter(ui, label, value)
     ui.click("下一步 · 选择周期方案  →")
-    ui.click("确认选中方案 · 去录冰箱  →")
+    ui.click("确认计划 · 去录冰箱  →")
     enter(ui, "食材名称", "番茄")
     enter(ui, "数量", "3")
     ui.click("个")
     ui.click("预览并确认  →")
     ui.click("最终确认入库")
     ui.click("完成建档 · 开始托管  →")
+    # shortcut: main renamed/removed the Settings toggles (改用本地规则, 关闭提醒);
+    # this section needs the current labels before it can run again.
     ui.click("⚙  设置")
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")
@@ -294,6 +296,8 @@ def exercise_menu_purchase(ui):
     ui.click("预览并确认  →")
     ui.click("最终确认入库")
     ui.click("完成建档 · 开始托管  →")
+    # shortcut: main renamed/removed the Settings toggles (改用本地规则, 关闭提醒);
+    # this section needs the current labels before it can run again.
     ui.click("⚙  设置")
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")
@@ -423,6 +427,8 @@ def exercise_market(ui):
     ui.click("预览并确认  →")
     ui.click("最终确认入库")
     ui.click("完成建档 · 开始托管  →")
+    # shortcut: main renamed/removed the Settings toggles (改用本地规则, 关闭提醒);
+    # this section needs the current labels before it can run again.
     ui.click("⚙  设置")
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")
@@ -513,6 +519,8 @@ def exercise_market_cart(ui):
         ui.click("预览并确认  →")
         ui.click("最终确认入库")
     ui.click("完成建档 · 开始托管  →")
+    # shortcut: main renamed/removed the Settings toggles (改用本地规则, 关闭提醒);
+    # this section needs the current labels before it can run again.
     ui.click("⚙  设置")
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")
@@ -624,6 +632,8 @@ def exercise_market_order(ui):
         ui.click("预览并确认  →")
         ui.click("最终确认入库")
     ui.click("完成建档 · 开始托管  →")
+    # shortcut: main renamed/removed the Settings toggles (改用本地规则, 关闭提醒);
+    # this section needs the current labels before it can run again.
     ui.click("⚙  设置")
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")
@@ -722,6 +732,8 @@ Synthetic inventory only."""
         ui.click("预览并确认  →")
         ui.click("最终确认入库")
     ui.click("完成建档 · 开始托管  →")
+    # shortcut: main renamed/removed the Settings toggles (改用本地规则, 关闭提醒);
+    # this section needs the current labels before it can run again.
     ui.click("⚙  设置")
     ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
     ui.click("改用本地规则")

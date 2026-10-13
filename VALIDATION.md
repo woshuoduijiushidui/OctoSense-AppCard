@@ -1,8 +1,25 @@
 # Migration validation
 
+## Issue #3 PR baseline sync — 2026-10-13
+
+The Issue #3 branch merged `origin/main` at `900c0c3`, retaining the current
+`model.complete@2` image discovery/import contract and the optional local-host
+microphone/transcription contract in the same bundle. The restamped 0.8.0
+bundle digest is `9cce08f308fdfbe9d3f124c36ac93fb54e8dd4ad53be752b68c57c59b6edac5e`.
+The pinned Hub's offline bundle gate passed with only the expected unsigned
+warning; the launcher check passed; all 36 Python tests passed. A synthetic
+Agent-panel screenshot from the pre-sync candidate is in
+`docs/qa/issue-3-agent-panel.png`; the panel code had no text merge conflict.
+Real model, camera and microphone calls have not been replayed on the merged
+digest. Earlier foreground evidence remains tied to its recorded digest.
+The standalone `card-host` rejected this digest at admission because it does
+not implement `app_policy.device_consent@1`; its offline smoke did not reach
+the app. That path requires the full desktop host, so it is not counted as a
+passed native regression for this digest.
+
 ## Issue #3 chat follow-up — 2026-10-13
 
-The final bundle digest is `e223fff9ac368106af591be2346df5e4289a20750bc6136883fd92579d24a308`.
+The bundle digest before the PR baseline sync was `e223fff9ac368106af591be2346df5e4289a20750bc6136883fd92579d24a308`.
 The chat panel now keeps the latest message visible and offers older/newer pages;
 opening it again keeps the selected history page. Message bubbles have horizontal
 and bottom insets. A two-step `清空` action deletes only today's visible messages
@@ -211,6 +228,71 @@ Agent 在线操作排它检查与菜单自动纠正状态初始化；按宿主�
 - `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`：36 passed。本机沙箱内的
   Windows 临时目录 ACL 使 6 个测试无法创建临时文件；在正常本机权限下重跑通过。
 - 未运行本次同步后的原生 UI、真实 provider 与麦克风测试；这些结果不能由离线测试替代。
+
+
+## 0.8.0 bundle 合并丢失定义与官方 rc.6 实测 — 2026-10-13
+
+在未改动宿主的前提下，用官方预编译 rc.6（`%LOCALAPPDATA%\OctoSense\octosense.exe`；
+安装包 sha256 `4cced00c…` 与官方 `SHA256SUMS` 一致；旧 alpha.3 安装目录已整目录备份）
+做了一次完整走查，发现并修复 0.8.0 bundle 里被合并吃掉的一块代码。宿主侧没有问题；
+此前「rc.6 存储不可用」的判断是错的——那是我塞进去的非法种子文件触发了应用自带的
+`storage_blocked` 保护，应用拒绝一切写入是设计行为。
+
+- 缺失或被改动处（旧副本 `target/main.splash` 与 `.local-state/qa-29/bundle/main.splash`
+  仍保留原文）：`let cycle_days`（+`cycle_view`）、`fn profile_ready()`、
+  `base_daily_kcal()` 的函数体被留在重复的 `fn make_programs()` 名下、
+  `plan_draft`/`draft_swap`/`stage_edit` 声明、`confirm_health_plan` 里的 `entries` 列表、
+  `valid_state` 的 `programs` 上限被收窄成 `>3`（生成器实际给 18 = 6 周期 × 3 变体）、
+  6 处 `active_program()` 调用（函数已改名，当前阶段取 `current_stage()`）、
+  `ensure_extended_state()` 用 `program_active > 0` 判完成态而 `program_active` 从不被置位
+  （旧副本用 `state.stages.len() > 0`）。宿主 API 与 provider 通路均未改动。
+- 症状对应：`下一步 · 选择周期方案` 点了没反应（`save_profile()` 抛错，而该页不渲染
+  `message`）；录入库存被拒 `库存操作未通过完整校验。`；首页 `on_render closure failed`；
+  重启后被弹回周期选择页。
+- 修后在 rc.6 的隔离 app-data 里实测（真实 provider，脚本错误 0 条）：首次建档 1/4 → 4/4、
+  18 个候选、4 批库存、`生成 / 更新未确认三餐` 拿到真实 AI 三餐、状态跨重启保留；新入库
+  「牛油果 120 g」得到真实估算 `kcal 160 / protein 2 / fiber 6.7 / vitamin_c 10`，
+  `source: "AI 估算"`。个人库存与 provider 凭据未被读取或复制，真实档案未改动。
+- 宿主级独立证据（与 bundle 同 manifest id 的最小探针，同一 rc.6 宿主与同一 provider）：
+  `model.complete` 回 `{"is_ok":true,…}`（今日 1/100 次、input 310 / output 91 tokens），
+  `fs` 读写正常，jail 内文件真实落盘。
+- 未验证：三餐生成的实时延迟——同一流程两次撞上应用自带的 95 s 等待上限、一次按时返回；
+  `tools/qa_day.py` 因此只在 provider 及时回答时继续走核对与账本断言，否则断言
+  「未写入任何东西」并注明。
+- 未修复（仅记录）：`valid_state` 丢掉了 `cycle_seed` 长度校验；三餐请求延迟与 95 s
+  上限的关系需要产品决定；`tools/qa_actual_feedback.py`、`tools/qa_online.py`、
+  `tools/qa_review_feedback.py` 仍在用旧控件名（`food_name`/`food_grams`/`food_days`），
+  `qa_ai_nutrition.py` 只做了标签/字段对齐、尚未重跑。
+- Bundle digest（合并 main 之前的工作区修复版）: `f26f33139ee34cf9fdc9cb3d50493bf6ce94901dbb3228aa0df0c1fe12e2a0d7`（版本保持 0.8.0；`hub stamp bundle` + `hub check bundle
+  --allow-unsigned` 在 rc.6 固定的 App Hub `386359153ed6377b5f047bd9ed2767a6a2ac2bc7`
+  上 PASSED，只有预期的未签名警告）。
+- 合并 `origin/main` 后的回归（同一 rc.6 宿主、隔离 app-data、真实 provider）：
+  `bundle/` 取主线版本（`hub check --allow-unsigned` 通过；脚本错误 0 条），
+  `tools/qa_day.py` 10 项断言全过（建档 → 4 批库存 → `生成 / 更新未确认三餐` → 未写入任何东西）。
+  回归同时发现三处主线漂移并已修：状态里已没有 `program_active`（改看 `stages`）、
+  周期确认按钮改名 `确认计划 · 去录冰箱  →`、设置页的「改用本地规则/关闭提醒」已不存在
+  （`smoke.py` 该段留了 `shortcut:` 注释，尚未重写）。三餐生成本次仍在应用自带的 95 s
+  上限内没返回（状态停在「在线 AI · 正在规划」），与本轮前几次一致，属 provider 延迟。
+- 合并 `origin/main` 后：主线上本来就带着这些定义（`cycle_days`/`profile_ready`/`base_daily_kcal`、
+  `stages.len() > 0` 完成态判据、`>20` 候选上限），并已含 PR #45 的图片接口改造，所以合并时
+  `bundle/` 取主线版本；本节记录的工作区症状只存在于工作区回退版里。
+
+## Image contract review, 2026-10-13 — source and package checks
+
+The app now discovers the host's `model.complete@2` image input through
+`runtime.describe` instead of calling an app-specific probe. It declares
+version 2 as optional, so hosts without it retain manual entry. Existing-image
+selection uses `files.import`; the callback checks the returned byte count and
+removes an imported file above 10 MiB before any model call. A provider may
+still reject image input after host discovery.
+
+The pinned App Hub stamped digest
+`69a1df657406ecf8b69d4d76946f5b5a2c1c540a902cbf47694fea5646acb1f4`
+and checked the unsigned editable bundle; 35 launcher/release Python tests
+and the launcher check passed in an isolated test run. This changed
+contract has not yet been replayed in a foreground window with a real
+provider or camera. The earlier user-reported foreground checks below apply
+to a preceding digest only.
 
 ## Issue #43 裁决：菜单只在生成时使用库存（承认现状）— 2026-10-12
 

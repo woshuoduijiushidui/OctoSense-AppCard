@@ -3499,7 +3499,7 @@ fn probe_vision(){
     vision_sequence = vision_sequence + 1
     let token = vision_sequence
     vision_phase = 0
-    try { host.request("model.vision_capability", {}, |r| { vision_reply = {token: token reply: r} }) }
+    try { host.request("runtime.describe", {method: "model.complete"}, |r| { vision_reply = {token: token reply: r} }) }
     catch { vision_phase = 2 }
 }
 fn begin_recognition(mode){
@@ -3615,6 +3615,10 @@ fn apply_recognition_reply(envelope){
             recognition_failed("图片导入失败：" + r.error) return
         }
         if r.data.cancelled == true { cancel_recognition() return }
+        if r.data.bytes != nil && r.data.bytes > 10 * 1024 * 1024 {
+            try { fs.remove(r.data.path) } catch {}
+            recognition_failed("图片超过 10 MiB，请选择较小的照片") return
+        }
         recognize_image(r.data.path) return
     }
     if envelope.action != "model" || recognition_phase != "model" { return }
@@ -4100,7 +4104,8 @@ fn ai_watchdog(){
         let received = vision_reply vision_reply = nil
         if received.token == vision_sequence {
             vision_phase = 2
-            if received.reply.is_ok && received.reply.data.schema == 1 && received.reply.data.supported == true { vision_phase = 1 }
+            if received.reply.is_ok && received.reply.data != nil && received.reply.data.supported == true &&
+                received.reply.data.descriptor != nil && received.reply.data.descriptor.version == 2 { vision_phase = 1 }
         }
     }
     if recognition_reply != nil {

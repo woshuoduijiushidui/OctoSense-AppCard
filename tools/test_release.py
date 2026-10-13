@@ -19,7 +19,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(manifest["host_api"]["optional"], {name: 1 for name in (
             "camera.permission.request", "microphone.permission.status", "microphone.permission.request",
             "microphone.record_start", "microphone.record_stop", "microphone.record_status",
-            "microphone.record_cancel", "model.transcribe_capability", "model.transcribe")})
+            "microphone.record_cancel", "model.transcribe_capability", "model.transcribe")}
+            | {"model.complete": 2})
         self.assertRegex(manifest["integrity"]["bundle_blake3"], r"^[0-9a-f]{64}$")
 
     def test_listing_links_assets_and_platform(self):
