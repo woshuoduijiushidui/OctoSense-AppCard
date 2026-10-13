@@ -119,7 +119,8 @@ def exercise(ui):
                          ("例如：牛奶、花生", "花生"), ("例如：清淡、家常、少油", "清淡")):
         enter(ui, label, value)
     ui.click("下一步 · 选择周期方案  →")
-    ui.check("周期候选未自动启用", [p["days"] for p in ui.state()["programs"]] == [7, 21, 30]
+    days = [p["days"] for p in ui.state()["programs"]]
+    ui.check("周期候选未自动启用", len(days) == 18 and len(set(days)) == 6
              and ui.state()["program_active"] == 0)
     ui.click("确认选中方案 · 去录冰箱  →")
     for entry in ("拍照识别", "导入小票"):

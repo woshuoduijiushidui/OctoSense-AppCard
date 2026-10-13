@@ -1,5 +1,42 @@
 # Migration validation
 
+## 0.8.0 bundle 合并丢失定义与官方 rc.6 实测 — 2026-10-13
+
+在未改动宿主的前提下，用官方预编译 rc.6（`%LOCALAPPDATA%\OctoSense\octosense.exe`；
+安装包 sha256 `4cced00c…` 与官方 `SHA256SUMS` 一致；旧 alpha.3 安装目录已整目录备份）
+做了一次完整走查，发现并修复 0.8.0 bundle 里被合并吃掉的一块代码。宿主侧没有问题；
+此前「rc.6 存储不可用」的判断是错的——那是我塞进去的非法种子文件触发了应用自带的
+`storage_blocked` 保护，应用拒绝一切写入是设计行为。
+
+- 缺失或被改动处（旧副本 `target/main.splash` 与 `.local-state/qa-29/bundle/main.splash`
+  仍保留原文）：`let cycle_days`（+`cycle_view`）、`fn profile_ready()`、
+  `base_daily_kcal()` 的函数体被留在重复的 `fn make_programs()` 名下、
+  `plan_draft`/`draft_swap`/`stage_edit` 声明、`confirm_health_plan` 里的 `entries` 列表、
+  `valid_state` 的 `programs` 上限被收窄成 `>3`（生成器实际给 18 = 6 周期 × 3 变体）、
+  6 处 `active_program()` 调用（函数已改名，当前阶段取 `current_stage()`）、
+  `ensure_extended_state()` 用 `program_active > 0` 判完成态而 `program_active` 从不被置位
+  （旧副本用 `state.stages.len() > 0`）。宿主 API 与 provider 通路均未改动。
+- 症状对应：`下一步 · 选择周期方案` 点了没反应（`save_profile()` 抛错，而该页不渲染
+  `message`）；录入库存被拒 `库存操作未通过完整校验。`；首页 `on_render closure failed`；
+  重启后被弹回周期选择页。
+- 修后在 rc.6 的隔离 app-data 里实测（真实 provider，脚本错误 0 条）：首次建档 1/4 → 4/4、
+  18 个候选、4 批库存、`生成 / 更新未确认三餐` 拿到真实 AI 三餐、状态跨重启保留；新入库
+  「牛油果 120 g」得到真实估算 `kcal 160 / protein 2 / fiber 6.7 / vitamin_c 10`，
+  `source: "AI 估算"`。个人库存与 provider 凭据未被读取或复制，真实档案未改动。
+- 宿主级独立证据（与 bundle 同 manifest id 的最小探针，同一 rc.6 宿主与同一 provider）：
+  `model.complete` 回 `{"is_ok":true,…}`（今日 1/100 次、input 310 / output 91 tokens），
+  `fs` 读写正常，jail 内文件真实落盘。
+- 未验证：三餐生成的实时延迟——同一流程两次撞上应用自带的 95 s 等待上限、一次按时返回；
+  `tools/qa_day.py` 因此只在 provider 及时回答时继续走核对与账本断言，否则断言
+  「未写入任何东西」并注明。
+- 未修复（仅记录）：`valid_state` 丢掉了 `cycle_seed` 长度校验；三餐请求延迟与 95 s
+  上限的关系需要产品决定；`tools/qa_actual_feedback.py`、`tools/qa_online.py`、
+  `tools/qa_review_feedback.py` 仍在用旧控件名（`food_name`/`food_grams`/`food_days`），
+  `qa_ai_nutrition.py` 只做了标签/字段对齐、尚未重跑。
+- Bundle digest: `f26f33139ee34cf9fdc9cb3d50493bf6ce94901dbb3228aa0df0c1fe12e2a0d7`（版本保持 0.8.0；`hub stamp bundle` + `hub check bundle
+  --allow-unsigned` 在 rc.6 固定的 App Hub `386359153ed6377b5f047bd9ed2767a6a2ac2bc7`
+  上 PASSED，只有预期的未签名警告）。
+
 ## Issue #43 裁决：菜单只在生成时使用库存（承认现状）— 2026-10-12
 
 产品负责人选择 #43 的**方案 1**：承认已合并实现的严格 stock-only（#21 把它钉为
