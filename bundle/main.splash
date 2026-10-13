@@ -83,6 +83,15 @@ let profile_preferences = ""
 let profile_special = ""
 let profile_activity = "轻活动"
 let program_selected = 0
+// The cycles a candidate batch is built for: one seed per entry in
+// state.cycle_seed, in the same order the cycle views list them.
+let cycle_days = [1 3 7 15 21 30]
+let cycle_view = 7
+// A composed plan is the ordered candidate ids stacked before confirmation; the two
+// index variables are UI-only (an in-flight swap, the stage being edited).
+let plan_draft = []
+let draft_swap = -1
+let stage_edit = -1
 let extra_kcal_text = "0"
 // Issue #25: the 模拟买菜 region replaces the butler dashboard in the same
 // window while it is open; nil means the dashboard. The 购物车 itself lives in
@@ -257,7 +266,14 @@ fn program_option(days, key, name, plan_goal, trait, difference, kcal_day, prote
     state.program_next = state.program_next + 1
     p
 }
-fn make_programs(){
+fn profile_ready(){
+    let age = state.profile.age.to_f64()
+    let height = state.profile.height.to_f64()
+    let weight = state.profile.weight.to_f64()
+    state.profile.special == "" && age >= 19 && age <= 78 && height >= 80 && height <= 230 && weight >= 25 && weight <= 300 && (state.profile.sex == "女性" || state.profile.sex == "男性")
+}
+fn base_daily_kcal(){
+    if !profile_ready() { return 0 }
     let age = state.profile.age.to_f64()
     let height = state.profile.height.to_f64()
     let weight = state.profile.weight.to_f64()
@@ -662,6 +678,12 @@ fn confirm_health_plan(){
         message = "当前档案不能自动推算安全的数值目标，请由专业人员确认后再使用数值追踪。"
         redraw() return
     }
+    let entries = []
+    if plan_draft.len() > 0 {
+        for id in plan_draft { let c = program_by_id(id) if c != nil { entries.push(c) } }
+    } else {
+        entries.push(chosen)
+    }
     let before = state.to_json()
     let saved_draft = plan_draft
     let saved_step = onboarding_step
@@ -709,7 +731,7 @@ fn renew_programs(){
     experience_selected = false
     if pending || ai_busy || plan_removal != nil { message = "请先结束当前确认或方案生成。" redraw() return }
     let before = state.to_json()
-    let old = active_program()
+    let old = current_stage()
     if old != nil {
         if state.program_history.len() >= 12 { state.program_history.remove(0) }
         state.program_history.push(old.to_json().parse_json())
@@ -1387,7 +1409,7 @@ fn valid_legacy_state(value){
         if value.health.meals_per_day < 1 || value.health.meals_per_day > 4 || value.health.meals_week < 0 || value.health.meals_today < 0 { return false }
         if value.health.protein_goal < 0 || value.health.fiber_goal < 0 || value.health.calcium_goal < 0 || value.health.iron_goal < 0 { return false }
         if value.health.protein_week < 0 || value.health.fiber_week < 0 { return false }
-        if value.programs.len() > 3 || value.program_history.len() > 12 || value.program_next < 1 { return false }
+        if value.programs.len() > 20 || value.program_history.len() > 12 || value.program_next < 1 { return false }
         for program in value.programs {
             if program.days < 7 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 || program.consumed_kcal < 0 || program.intake.len() > 150 { return false }
             if program.protein_goal < 0 || program.fiber_goal < 0 || program.vitamin_c_goal < 0 { return false }
@@ -1492,7 +1514,7 @@ fn valid_state(value){
         if value.health.meals_per_day < 1 || value.health.meals_per_day > 4 || value.health.meals_week < 0 || value.health.meals_today < 0 { return false }
         if value.health.protein_goal < 0 || value.health.fiber_goal < 0 || value.health.calcium_goal < 0 || value.health.iron_goal < 0 { return false }
         if value.health.protein_week < 0 || value.health.fiber_week < 0 { return false }
-        if value.programs.len() > 3 || value.program_history.len() > 12 || value.program_next < 1 { return false }
+        if value.programs.len() > 20 || value.program_history.len() > 12 || value.program_next < 1 { return false }
         for program in value.programs {
             if program.days < 1 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 { return false }
             if program.protein_goal < 0 || program.fiber_goal < 0 || program.vitamin_c_goal < 0 { return false }
@@ -1721,12 +1743,12 @@ fn migrate_state(value){
 }
 fn ensure_extended_state(){
     if state.profile.basics_done && state.programs.len() == 0 { make_programs() }
-    if state.profile.done && state.program_active > 0 && state.profile.plan_approved { onboarding_step = 4 }
+    if state.profile.done && state.stages.len() > 0 && state.profile.plan_approved { onboarding_step = 4 }
     else {
         onboarding_step = 0
         if state.profile.scene != "" { onboarding_step = 1 }
         if state.profile.basics_done { onboarding_step = 2 }
-        if state.profile.plan_approved && state.program_active > 0 { onboarding_step = 3 }
+        if state.profile.plan_approved && state.stages.len() > 0 { onboarding_step = 3 }
     }
     if state.profile.sex != "" { profile_sex = state.profile.sex }
     profile_age = state.profile.age
@@ -1808,7 +1830,7 @@ fn restart_profile(){
         message = "请先结束当前操作，再修改用户画像。" redraw() return
     }
     profile_edit_backup = state.to_json()
-    let old = active_program()
+    let old = current_stage()
     if old != nil {
         if state.program_history.len() >= 12 { state.program_history.remove(0) }
         state.program_history.push(old.to_json().parse_json())
@@ -1848,7 +1870,7 @@ fn meal_kcal(p){
     estimate.kcal
 }
 fn remaining_budget(){
-    program_remaining_daily(active_program())
+    program_remaining_daily(current_stage())
 }
 fn nutrition_percent(){
     if is_experience() { return trial_progress() }
@@ -1857,7 +1879,7 @@ fn nutrition_percent(){
     min(100, floor(p.consumed_kcal * 100 / p.kcal_goal))
 }
 fn unquantified_meals(){
-    let p = active_program()
+    let p = current_stage()
     if p == nil { return 0 }
     let count = 0
     for meal in p.intake {
@@ -5475,7 +5497,7 @@ View{width: Fill height: Fill flow: Overlay
                                         stage_remain = "选择下一份计划后重新开始累计。"
                                     }
                                     Frost{padding: 20 spacing: 10
-                                        let program = active_program()
+                                        let program = current_stage()
                                         Heading{text: "当前周期方案"}
                                         Copy{text: program.name + " · 第 " + program_day_index(program) + " / " + program.days + " 天"}
                                         Hint{text: "周期已核算热量 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
@@ -5497,7 +5519,7 @@ View{width: Fill height: Fill flow: Overlay
                                             View{width: Fill height: Fit flow: Right spacing: 14 align: Align{y: .5}
                                                 View{width: 100 height: 100 flow: Overlay align: Align{x: .5 y: .5}
                                                     ProgressRing{width: 100 height: 100 draw_bg.progress: nutrition_percent() / 100}
-                                                    Label{text: "" + program_today_kcal(active_program()) padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 20}}}
+                                                    Label{text: "" + program_today_kcal(current_stage()) padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 20}}}
                                                 }
                                                 View{width: Fill height: Fit flow: Down spacing: 5
                                                     Copy{text: "/ " + state.daily_target + " kcal" draw_text.text_style: theme.font_bold{font_size: 17}}
