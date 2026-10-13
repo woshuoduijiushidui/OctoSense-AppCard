@@ -75,7 +75,7 @@ def exercise(ui):
     ui.check('correcting reference never rewrites history',s['execution_records'][-1]==first)
     ui.click('⚙  设置');ui.click('选择下一周期方案…');ui.click('先体验 1 天轻食流程');ui.click('确认选中方案 · 去录冰箱  →');ui.click('完成建档 · 开始托管  →');ui.click('✦  菜单')
     fixture(ui,trial());ui.click('生成 / 更新未确认三餐');time.sleep(1)
-    ui.check('three meals generated with estimated available stock',len(next(p for p in ui.state()['programs'] if p['id']==ui.state()['program_active'])['meals'])==3)
+    ui.check('three meals generated with estimated available stock',len(ui.state()['stages'][-1]['meals'])==3)
     ui.shot('ai-estimated-three-meals.png')
     ui.click('我吃完了 · 核对');ui.click('确认实际食用并保存');saved=copy.deepcopy(ui.state()['execution_records'][-1])
     fixture(ui,trial((1,2)));ui.click('生成 / 更新未确认三餐');time.sleep(1)

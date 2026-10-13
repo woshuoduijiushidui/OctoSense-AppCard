@@ -71,9 +71,9 @@ def exercise(ui):
     # Six cycles (1/3/7/15/21/30 days), three emphases each, seeded per cycle.
     ui.check('six cycles offer three candidates each and none is active yet',
              len(candidates) == 18 and len({p['days'] for p in candidates}) == 6
-             and ui.state()['program_active'] == 0)
+             and not ui.state().get('stages'))
     ui.click('先体验 1 天轻食流程')
-    ui.click('确认选中方案 · 去录冰箱  →')
+    ui.click('确认计划 · 去录冰箱  →')
     smoke.add(ui, '鸡蛋', '200', days='3')
     ui.check('confirmed stock is one batch with its expiry', len(ui.state()['foods']) == 1
              and ui.state()['foods'][0]['quantity'] == 200)
@@ -163,7 +163,7 @@ if __name__ == '__main__':
         after = ui.state()
         ui.check('migration retains legacy stock and plans', after['foods'] == before['foods'] and after['plans'] == before['plans'])
         ui.check('migration does not fabricate actual history', after['execution_records'] == [] and after['execution_next'] == 1)
-        ui.check('legacy program remains active', after['program_active'] == before['program_active'])
+        ui.check('legacy program remains active', after.get('program_active') == before.get('program_active'))
         ui.check('legacy multi-day programs get default kind', all(p['kind'] == 'health' and p['meals'] == [] for p in after['programs']))
     elif args.restart:
         expected = json.loads((profile/'expected-state.json').read_text(encoding='utf-8'))

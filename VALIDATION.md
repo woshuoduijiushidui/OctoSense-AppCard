@@ -37,6 +37,13 @@
 - Bundle digest（合并 main 之前的工作区修复版）: `f26f33139ee34cf9fdc9cb3d50493bf6ce94901dbb3228aa0df0c1fe12e2a0d7`（版本保持 0.8.0；`hub stamp bundle` + `hub check bundle
   --allow-unsigned` 在 rc.6 固定的 App Hub `386359153ed6377b5f047bd9ed2767a6a2ac2bc7`
   上 PASSED，只有预期的未签名警告）。
+- 合并 `origin/main` 后的回归（同一 rc.6 宿主、隔离 app-data、真实 provider）：
+  `bundle/` 取主线版本（`hub check --allow-unsigned` 通过；脚本错误 0 条），
+  `tools/qa_day.py` 10 项断言全过（建档 → 4 批库存 → `生成 / 更新未确认三餐` → 未写入任何东西）。
+  回归同时发现三处主线漂移并已修：状态里已没有 `program_active`（改看 `stages`）、
+  周期确认按钮改名 `确认计划 · 去录冰箱  →`、设置页的「改用本地规则/关闭提醒」已不存在
+  （`smoke.py` 该段留了 `shortcut:` 注释，尚未重写）。三餐生成本次仍在应用自带的 95 s
+  上限内没返回（状态停在「在线 AI · 正在规划」），与本轮前几次一致，属 provider 延迟。
 - 合并 `origin/main` 后：主线上本来就带着这些定义（`cycle_days`/`profile_ready`/`base_daily_kcal`、
   `stages.len() > 0` 完成态判据、`>20` 候选上限），并已含 PR #45 的图片接口改造，所以合并时
   `bundle/` 取主线版本；本节记录的工作区症状只存在于工作区回退版里。

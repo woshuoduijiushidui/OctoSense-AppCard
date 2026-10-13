@@ -56,7 +56,7 @@ Live AI requires the locally modified OctoSense host and a provider configured i
 
 ## AI, privacy and limitations
 
-- storage saves this app's inventory, profile, menus, history, backups, and selected images.
+- storage saves this app's inventory, profile, plans, history, backups, and selected images.
 - model sends goals, the entered profile (including allergies, avoidances, and preferences), and eligible batch names with native units and quantities through the official host to the person's configured provider. Numerical planning also sends gram estimates, nutrition references, and cycle budgets; unquantified recipe planning sends only whether each nutrition reference is complete. Credentials stay with the host. No ai.env or key input.
 - Configure the host's own AI providers panel. model.budget success is not provider readiness. On failure, check the host provider settings and retry; no local menu fallback is used. Already-sent calls may incur charges despite stopping the wait.
 - Image recognition requests camera/files permission. The Windows local host accepts one app-local JPEG, PNG, or WebP image up to 10 MiB and sends it with the recognition prompt through the person's configured image-capable, OpenAI-compatible chat route. Host discovery does not guarantee provider support. `选择已有图片` uses `files.import` (desktop service limit 64 MiB, app storage limit 16 MiB), then rejects images over 10 MiB before a model call; it does not use the 1 MiB `files.pick_photo` route. The result is an editable draft. Hosts without `model.complete@2` show a manual-entry fallback. There are no direct network hosts, microphone grant, independent app-agent tools, voice capture, or execution after the host closes.
