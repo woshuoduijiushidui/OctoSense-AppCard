@@ -12,6 +12,8 @@ HOST = Path(os.environ.get("OCTOSENSE_HOST_WORKSPACE", APP.parent / "OctoSense")
 SCRIPT_CRATE = HOST / ".sources" / "makepad" / "platform" / "script"
 CASES = (
     "session_restart_and_local",
+    "clear_today_keeps_business_and_memory",
+    "history_keeps_older_page_when_messages_arrive",
     "session_file_and_failed_write",
     "session_cap",
     "budget_and_current_once",

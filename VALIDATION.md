@@ -1,5 +1,44 @@
 # Migration validation
 
+## Issue #3 chat follow-up — 2026-10-13
+
+The final bundle digest is `e223fff9ac368106af591be2346df5e4289a20750bc6136883fd92579d24a308`.
+The chat panel now keeps the latest message visible and offers older/newer pages;
+opening it again keeps the selected history page. Message bubbles have horizontal
+and bottom insets. A two-step `清空` action deletes only today's visible messages
+and context summary; inventory, menu and confirmed soft preferences remain.
+Successful Agent replies also clear the native text field, while a failed model
+call retains the draft for retry.
+
+The screenshot's `18262` is an internal day count for 2020-01-01. Both isolated
+test profiles had a synthetic egg batch with that expired date. Agent input now
+uses a calendar date and expiry status; the app does not silently edit stored
+inventory. The model receives the formatted date, expiry status and quantity
+label, while previous assistant messages and the summary are sanitized before
+normal replies and context compaction. The model task now explicitly requires readable dates,
+units and nutrition explanations. User-facing replies and old assistant bubbles
+also filter repeated internal field names, numeric IDs and `piece`;
+actual-consumption review text and the stock picker use the same readable terms.
+
+- Production Script VM cases passed, including session clearing without business
+  writes, history paging after an incoming message, repeated internal-field
+  filtering in model context, expiry display and clearing the native text field
+  on success.
+  Full Python suite passed 36/36 in a task-owned Windows temporary directory.
+- Pinned Hub stamp/check and `tools/launch.py --check --offline` passed with the
+  expected unsigned warning. Isolated official native offline smoke passed 19
+  checks; quit/relaunch restart checks passed 2.
+- In an isolated official native profile with synthetic chat history, the panel
+  opened on the latest item, older/newer navigation returned to it, and `清空`
+  showed a separate confirmation. After confirmation, messages and summary were
+  empty and the business-state file SHA-256 was unchanged. A persisted old
+  assistant reply containing repeated `18262`, `piece`, `menu_candidates`,
+  `nutrition_kcal`, `uses` and `food_id` rendered without those raw tokens.
+  The native bubble inset and scrollbar were inspected from a real screenshot.
+- This follow-up did not call a real model or microphone. The successful-send
+  input clear was verified in the production Script VM; a real-provider repeat
+  remains unverified because the configured host reached its model budget.
+
 ## Issue #3 M6 end-to-end checkpoint — 2026-10-13
 
 The Issue #3 candidate uses one Pantry bundle in two isolated Windows host

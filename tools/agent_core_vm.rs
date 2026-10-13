@@ -47,6 +47,8 @@ fn main() {
         let agent_batch = nil
         let agent_reply = nil
         let agent_error = ""
+        let agent_clear_pending = false
+        let agent_history_end = 0
         let agent_memory_pending = nil
         let agent_proposal = nil
         let agent_review = nil
@@ -131,6 +133,8 @@ fn main() {
         fn meal_label(slot){ if slot == 0 { return "早餐" } if slot == 1 { return "午餐" } "晚餐" }
         fn recipe_display_text(value){ value }
         fn calendar_day(text){ 100 }
+        fn calendar_text(day){ if day == 18262 { return "2020-01-01" } "2026-10-13" }
+        fn freshness(food){ if food.expires_on_day == 0 { return "保质期未知" } "已过期" }
         fn has_field(value, name){ let wanted = name.to_json() for key item in value { if key.to_json() == wanted { return true } } false }
         fn active_plan(){ nil }
         fn choose_plan(){ if selected >= state.plans.len() { return nil } state.plans[selected] }
@@ -151,6 +155,49 @@ fn main() {
             assert(agent_uncompressed_messages(restored, 0).len() == 2)
             assert(agent_decode_session(s.to_json(), 101).messages.len() == 0)
             assert(agent_decode_session("{bad", 100).messages.len() == 0)
+            true
+        "#),
+        ("clear_today_keeps_business_and_memory", r#"
+            agent_load_session()
+            agent_open_panel()
+            agent_append("user", "今天想吃什么")
+            agent_session.context_summary = "旧摘要"
+            assert(agent_store_session(agent_session))
+            agent_memory = agent_empty_memory()
+            agent_memory.items.push({id: 1 text: "清淡" created_day: 100 last_used_day: 100 expires_day: 130})
+            let business_before = state.to_json()
+            let memory_before = agent_memory.to_json()
+            agent_input = "未发送草稿" ui_state.text = agent_input
+            agent_clear_pending = true
+            agent_clear_today()
+            assert(agent_session.messages.len() == 0 && agent_session.context_summary == "")
+            assert(agent_decode_session(disk.session, 100).messages.len() == 0)
+            assert(agent_input == "" && ui_state.text == "" && agent_current_id == 0)
+            assert(!agent_clear_pending && state.to_json() == business_before)
+            assert(agent_memory.to_json() == memory_before)
+            agent_append("user", "新消息")
+            disk.fail = true agent_clear_pending = true
+            agent_clear_today()
+            assert(agent_session.messages.len() == 1 && agent_clear_pending)
+            assert(disk.session.parse_json().messages.len() == 1)
+            true
+        "#),
+        ("history_keeps_older_page_when_messages_arrive", r#"
+            agent_load_session()
+            for i in 5 { agent_append("user", "消息" + i) }
+            let page = agent_history_window()
+            assert(page.start == 4 && page.end == 5 && page.count == 5)
+            agent_history_older()
+            page = agent_history_window()
+            assert(page.start == 2 && page.end == 4)
+            agent_open_panel() agent_close_panel() agent_open_panel()
+            assert(agent_history_window().end == 4)
+            agent_append("assistant", "新回复")
+            page = agent_history_window()
+            assert(page.start == 2 && page.end == 4 && page.count == 6)
+            agent_history_newer()
+            page = agent_history_window()
+            assert(agent_history_end == 0 && page.start == 5 && page.end == 6)
             true
         "#),
         ("session_file_and_failed_write", r#"
@@ -224,18 +271,38 @@ fn main() {
         ("projection_known_fields_only", r#"
             state = {profile: {scene: "日常" sex: "女" age: "30" height: "165" weight: "60"
                 activity: "轻活动" allergies: "花生" avoidances: "" preferences: "清淡" special: ""}
-                foods: [{id: 7 name: "米" canonical_quantity: 500 canonical_unit: "g"
-                    expires_on_day: 120 expiry_precision: "exact" average_item_grams: 0
+                foods: [{id: 7 name: "鸡蛋" canonical_quantity: 3 canonical_unit: "piece"
+                    expires_on_day: 18262 expiry_precision: "exact" average_item_grams: 0
                     quantity: 500 unit: "g" package_size: 0 package_size_unit: ""
                     source_image_path: "/private/photo.jpg"}] plans: [] stages: []
                     execution_records: [] active: 0 log: ["private-log"]}
             agent_memory = agent_memory_after_confirm(agent_empty_memory(), "少放辣", "平时少放辣", true, true, 100)
             let projection = agent_projection_base("inventory")
-            assert(projection.current_day == 100 && projection.entry_context == "inventory")
+            assert(projection.current_day == "2026-10-13" && projection.entry_context == "inventory")
             assert(projection.inventory_batches[0].food_id == 7)
+            assert(projection.inventory_batches[0].expiry_date == "2020-01-01")
+            assert(projection.inventory_batches[0].expiry_status == "已过期")
+            assert(projection.inventory_batches[0].quantity_label == "3个")
+            assert(agent_unit_label("piece") == "个" && agent_unit_label("g") == "g")
+            assert(projection.to_json().search("18262") < 0)
             assert(projection.profile.allergies == "花生" && projection.soft_memories[0] == "少放辣")
             assert(projection.to_json().search("private") < 0)
             assert(agent_projection_base("unknown") == nil)
+            let s = agent_empty_session(100)
+            s = agent_append_to_session(s, "assistant", "鸡蛋到期日 18262，库存 3 piece；menu_candidates 缺少 nutrition_kcal", 1)
+            s.context_summary = "旧摘要：鸡蛋到期日 18262，库存 3 piece"
+            assert(s.context_summary.search("18262") >= 0)
+            assert(agent_public_reply(s.context_summary).search("18262") < 0)
+            let model_input = agent_context_input(projection, s, 0, "鸡蛋还能吃吗？")
+            assert(model_input.context_summary.search("18262") < 0)
+            assert(model_input.context_summary.search("3 个") >= 0)
+            assert(model_input.recent_messages[0].text.search("18262") < 0)
+            assert(model_input.recent_messages[0].text.search("menu_candidates") < 0)
+            assert(model_input.recent_messages[0].text.search("nutrition_kcal") < 0)
+            assert(model_input.recent_messages[0].text.search("2020-01-01") >= 0)
+            let compact_input = agent_compaction_batch(s, 0)
+            assert(compact_input.summary.search("18262") < 0)
+            assert(compact_input.messages[0].text.search("menu_candidates") < 0)
             true
         "#),
         ("projection_real_stage_and_accepted_menu", r#"
@@ -520,6 +587,7 @@ fn main() {
             host = {request: |name, args, cb| { calls.push({name: name args: args}) callback = cb 1 }}
             agent_open_panel()
             agent_input = "  冰箱里有什么  "
+            ui_state.text = agent_input
             agent_send()
             assert(agent_phase == "answering" && calls.len() == 1)
             assert(calls[0].name == "model.complete" && calls[0].args.class == "strong")
@@ -534,6 +602,7 @@ fn main() {
             assert(agent_phase == "idle" && agent_session.messages.len() == 2)
             assert(agent_session.messages[1].text == "目前没有已确认的库存。")
             assert(agent_input == "" && agent_current_id == 0)
+            assert(ui_state.text == "")
             agent_close_panel()
             tab = 3
             agent_open_panel()
@@ -721,7 +790,17 @@ fn main() {
             assert(agent_task().len() < 4096)
             assert(agent_public_reply("豆腐（food_id: 7）请核对") == "豆腐请核对")
             assert(agent_public_reply("豆腐 230 克，内部 food_id 为 1。") == "豆腐 230 克。")
-            assert(agent_public_reply("menu_candidates 里的菠菜") == "当前可用食材 里的菠菜")
+            let candidates_reply = agent_public_reply("menu_candidates 里的菠菜")
+            assert(candidates_reply.search("menu_candidates") < 0 && candidates_reply.search("菠菜") >= 0)
+            let expiry_reply = agent_public_reply("鸡蛋到期日 18262，库存 2 piece")
+            assert(expiry_reply.search("18262") < 0 && expiry_reply.search("2 个") >= 0)
+            let public_reply = agent_public_reply("menu_candidates 的 nutrition_kcal 缺失，uses 中 food_id 1 豆腐 70g")
+            assert(public_reply.search("menu_candidates") < 0 && public_reply.search("nutrition_kcal") < 0 &&
+                public_reply.search("uses") < 0 && public_reply.search("food_id") < 0)
+            assert(public_reply.search("豆腐 70g") >= 0)
+            let repeated = agent_public_reply("menu_candidates 中 2 piece；menu_candidates 中 nutrition_kcal 缺失，2 piece")
+            assert(repeated.search("menu_candidates") < 0 && repeated.search("nutrition_kcal") < 0 &&
+                repeated.search("piece") < 0 && repeated.search("2 个") >= 0)
             let handoff = {tool_name: "handoff_consumption"}
             assert(agent_safe_proposal_reply("已记录午餐菠菜 80g", handoff) ==
                 "建议记录实际食用；请核对，最终确认前不会修改业务数据。")
