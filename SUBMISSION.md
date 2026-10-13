@@ -1,8 +1,8 @@
 # 0.8.0 publication checkpoint / 发布检查点
 
 本人已确认版本0.8.0、新仓库pantry-steward及发布者名称：leoniaodo、zix、
-power胖丸、Roooy。本人随后授权提交发布修复、推送新分支和创建PR；没有授权
-合并PR、推送版本标签、创建公开Release或修改App Hub Issue。
+power胖丸、Roooy。本人先授权提交发布修复、推送新分支和创建PR；PR #48合并后，
+本人另行授权创建精确的v0.8.0标签并公开发布Release。历史标签未被移动。
 
 ## Source / 源码
 
@@ -23,22 +23,32 @@ sequence16尚无pantry-steward条目。因此按首次正式准入准备，不�
 首次上架前在该Issue补新版评论并更新标题／版本，不重复开申请。
 不得修改catalog.json、catalog-v2.json、index/或artifacts/。发布前重查当前目录。
 
+## Completed / 已完成（2026-10-14）
+
+1. 审阅修改、四张新截图、PRIVACY.md与Windows有限验证范围。
+2. 提交发布修复、推送分支与创建PR；PR #48已合并，未覆盖队友的新main提交。
+3. 已创建并推送精确注释标签v0.8.0（main HEAD 5b273b00d5eebe4b5c6d11afbb93090a926d37cb），
+   未移动v0.6.1／v0.6.2；不需要开发者签名私钥。
+4. 发布工作流运行38452092377成功，公开Release
+   <https://github.com/woshuoduijiushidui/pantry-steward/releases/tag/v0.8.0>
+   含app.bundle.pack.json、octosense-app-manifest.json、release-receipt.json。
+   已下载并核对：包SHA256 0737f960d5f6848b6b38b0433454665965d0b30ac70c32aad37bdc22ab03eb45
+   与回执一致，封存manifest摘要041be3b30945a23cc4788a357c156bb693a7d879169ac2618973c8863e2d61f6
+   与源码摘要一致。记录见VALIDATION.md。
+
 ## Human checkpoints / 待本人确认
 
-1. 审阅修改、四张新截图、PRIVACY.md与Windows有限验证范围。图片／语音依赖
-   实际宿主；配套改版宿主测试不等于官方发布版或真实模型验收。
-2. 提交发布修复、推送分支与创建PR已获授权；不覆盖队友的新main提交。
-3. PR合并并复核后，另行确认精确v0.8.0标签和公开Release。推标签触发工作流，
-   不移动或覆盖历史标签；不需要开发者签名私钥。
-4. 工作流成功后下载app.bundle.pack.json、规范manifest和release-receipt.json，
-   核对SHA256、最终摘要及publisher-unpack／publisher-verify（用当前认证目录）。
-   不给封存包重盖章。
-5. 修改原Issue正文前先评论拟修改内容和理由；下载验证完成后再更新标题／正文，
+1. 用当前认证目录对下载的封存包执行publisher-unpack／publisher-verify；不给封存包重盖章。
+2. 在官方发布版宿主上安装封存包；当前未验证。
+3. 修改原Issue #166正文前先评论拟修改内容和理由；下载验证完成后再更新标题／正文，
    添加最终提交与发布链接。当前申请草稿仍标pending。
-6. App Hub审批与目录publication由维护者负责，不保证结果或时间。
+4. App Hub审批与目录publication由维护者负责，不保证结果或时间。
 
-English: local preparation and branch/PR publication are authorized. Review
-source/screenshots/privacy and host limits; separately authorize merging and the immutable v0.8.0 tag.
-Verify final downloaded artifacts before updating existing request #166.
-No publisher private key is needed. Competition review and workflow success
-are not catalog admission. Recheck catalog identity before release.
+English: local preparation, branch/PR publication, the immutable v0.8.0 tag and
+the public release are authorized and done on 2026-10-14; the workflow run
+38452092377 succeeded and the downloaded pack matches its receipt. Remaining
+human steps: publisher-unpack/publisher-verify against the current
+authenticated catalog, sealed-pack install on an official released host, a
+comment before editing request #166, and maintainer admission. No publisher
+private key is needed. Competition review and workflow success are not
+catalog admission.

@@ -73,7 +73,7 @@ python -B -X utf8 -m unittest discover -s tools -p "test_*.py"
 
 只提交 bundle/；模型配置、库存、密钥、测试档案和审核包留在包外。工作流和 publisher-toolchain.json 固定当前官方工具提交，使用 [官方 GitHub 发布流程](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/SUBMITTING.md)。
 
-源码提交、版本标签和公开 Release 需要发布者确认。工作流成功后下载并验证最终包与发布回执，再补充原审核申请；本次尚未执行这些外部步骤。操作清单见 [SUBMISSION.md](SUBMISSION.md)，申请草稿见 [review/APP-HUB-ISSUE.md](review/APP-HUB-ISSUE.md)。
+发布者已于 2026-10-14 授权精确标签与公开发布：在 main HEAD `5b273b0` 推送注释标签 `v0.8.0`，工作流运行 [38452092377](https://github.com/woshuoduijiushidui/pantry-steward/actions/runs/38452092377) 成功，Release [v0.8.0](https://github.com/woshuoduijiushidui/pantry-steward/releases/tag/v0.8.0) 含封存包、发布者 manifest 和发布回执；已下载的包 SHA256 与回执一致。`v0.6.1`／`v0.6.2` 未被移动。仍未完成：用当前认证目录执行 publisher-unpack／publisher-verify、在官方发布版宿主安装封存包、修改 #166 前先评论、以及 Hub 准入。操作清单见 [SUBMISSION.md](SUBMISSION.md)，验证记录见 [VALIDATION.md](VALIDATION.md)，申请草稿见 [review/APP-HUB-ISSUE.md](review/APP-HUB-ISSUE.md)。
 
 ## 许可证与支持
 

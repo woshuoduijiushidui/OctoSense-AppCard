@@ -1,5 +1,38 @@
 # Migration validation
 
+## v0.8.0 tag, workflow and public release — 2026-10-14
+
+The publisher separately authorized the exact immutable `v0.8.0` tag and a
+public release. PR #48 was already merged into main, so the annotated tag
+`v0.8.0` was created on main HEAD `5b273b00d5eebe4b5c6d11afbb93090a926d37cb`
+and pushed. No earlier tag was moved; `v0.6.1` and `v0.6.2` are untouched.
+
+- Publish workflow run `38452092377` (`Publish OctoSense app`, tag `v0.8.0`)
+  completed **success**; `prepare` and `publish` both passed. The only
+  annotations were upstream Node.js 20 deprecation notices.
+- Release `v0.8.0` exists at
+  <https://github.com/woshuoduijiushidui/pantry-steward/releases/tag/v0.8.0>
+  with assets `app.bundle.pack.json`, `octosense-app-manifest.json` and
+  `release-receipt.json`, created by `github-actions[bot]`.
+- Receipt `release-receipt.json` records app `pantry-steward`, version `0.8.0`,
+  commit `5b273b00d5eebe4b5c6d11afbb93090a926d37cb`, run `38452092377`,
+  `pack_sha256` `0737f960d5f6848b6b38b0433454665965d0b30ac70c32aad37bdc22ab03eb45`
+  and `hub_admission: not granted by this workflow`. The downloaded
+  `app.bundle.pack.json` (9,260,687 bytes) hashes to exactly that SHA256, so
+  the downloaded asset matches the receipt.
+- The sealed subject `octosense-app-manifest.json` carries bundle digest
+  `041be3b30945a23cc4788a357c156bb693a7d879169ac2618973c8863e2d61f6`, identical
+  to the editable source digest in `bundle/manifest.json` and `review/GATE.json`,
+  plus the GitHub publisher identity and attestation. It is a sealed manifest,
+  not a restamped one.
+
+Not verified here: `publisher-unpack` / `publisher-verify` against the current
+authenticated catalog (no official hub binary was run locally for that),
+installation of the sealed pack on an official released host, App Hub
+maintainer admission, catalog publication and any live provider, ASR or camera
+request. A successful workflow and this release are not Hub admission or
+competition qualification.
+
 ## Issue #3 PR review repair — 2026-10-13
 
 The Agent menu tools now return a bounded, editable `goal` intent. After the

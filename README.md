@@ -73,7 +73,7 @@ Restamp edited source with `hub stamp bundle` and recheck, never restamp a seale
 
 Submit bundle/ only. Credentials, inventory, keys, test profiles and review packets stay outside it. The workflow and publisher-toolchain.json pin current official tools and follow [GitHub publishing](https://github.com/OctoSense-org/OctoSense-App-Hub/blob/main/docs/SUBMITTING.md).
 
-Source commits, release tags and public releases need publisher confirmation. After the workflow succeeds, download/verify the pack and receipt, then update the existing submission. Those external steps have not run. See [SUBMISSION.md](SUBMISSION.md) and [the issue draft](review/APP-HUB-ISSUE.md).
+The publisher authorized the exact immutable tag and a public release on 2026-10-14. Tag `v0.8.0` was pushed on main HEAD `5b273b0`, workflow run [38452092377](https://github.com/woshuoduijiushidui/pantry-steward/actions/runs/38452092377) succeeded, and release [v0.8.0](https://github.com/woshuoduijiushidui/pantry-steward/releases/tag/v0.8.0) carries the sealed pack, the publisher manifest and the release receipt; the downloaded pack SHA256 matches the receipt. `v0.6.1` and `v0.6.2` were not moved. Still pending: `publisher-unpack`/`publisher-verify` against the current authenticated catalog, sealed-pack install on an official released host, the comment before editing request #166, and Hub admission. See [SUBMISSION.md](SUBMISSION.md), [VALIDATION.md](VALIDATION.md) and [the issue draft](review/APP-HUB-ISSUE.md).
 
 ## License and support
 
