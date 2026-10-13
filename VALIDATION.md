@@ -1,5 +1,41 @@
 # Migration validation
 
+## Issue #3 M3 本地提案与业务确认集成 — 2026-10-13
+
+在 `feat/issue-3-global-agent-voice` 上接入七个文字 Agent 工具值：`none`、库存
+add/edit/remove、完整三餐 generate/adjust 和实际摄入 handoff。模型只返回一份提案；
+本地逐字段校验并显示固定卡片。点击卡片进入现有核对页，取消或状态快照变化时
+丢弃内存提案。库存仅在最终确认时走 `apply_inventory_operation()`；菜单复用
+`build_ai_menu()`、`save_day_menu()` 和 `accept()`；实际摄入仍由用户核对后走
+`confirm_consume()`/`finalize_actual()`。普通偏好只在接受同一份有效菜单后写入
+M1 软记忆。内部 `food_id` 等编号从用户可见回复中剔除。
+
+已合入的业务契约使用 `state.plans[]` 三餐，而非设计稿中的独立 `daily_menu`。
+本次补齐常规日菜单逐餐确认：第一餐记录 slot/menu_id 并扣对应实际库存，
+保留三餐菜单；任意一餐确认后锁定当日菜单，三餐确认完才结束 active 菜单。
+
+- 从生产 `bundle/main.splash` 提取的函数 VM：**30 个场景通过**，覆盖七种工具值、
+  批次歧义、非法参数与旧快照、核对/取消、菜单一次纠正、完整三餐接受和记忆。
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`：正常本机权限下
+  **36/36 passed**。默认沙箱的 Windows 临时目录 ACL 会使其中 6 项文件测试出现
+  `PermissionError`；正常权限复跑全部通过。
+- 固定 App Hub `hub stamp bundle` digest
+  `4bd53dd902385ec7b76fbbd2b22e53109d621eac0af39fbb7a93e867241cad2c`；
+  `python -X utf8 tools/launch.py --hub ..\OctoSense\target\release\hub.exe --check`：
+  **PASSED**，仅有 unsigned editable bundle 提示，版本仍为 0.8.0。
+- 任务专用官方 OctoSense 宿主与真实已配置提供方：新增鸡蛋 2 个在核对前零写入，
+  最终确认只产生一次 `add`；新增菠菜 200 g 后取消，`pantry.json` 字节不变。
+  生成与调整完整三餐在核对前零写入，接受后仅菜单变化，库存未提前扣减。
+  豆腐 250→230 g 编辑及菠菜移除各在核对前零写入，确认后分别只产生一次
+  `edit`/`discard`；移除不计实际摄入。
+- 真实模型的“我吃了早餐的豆腐”进入摄入核对；用户取消建议的菠菜后确认豆腐
+  80 g，豆腐库存 250→170 g，执行记录带 slot 0/menu_id，完整三餐菜单仍在，
+  随后备选菜单被本地锁定。最终代码还在官方宿主再次调用真实模型：模型回复
+  “内部 food_id 为 1” 时，保存的 assistant 消息只含公开的“豆腐 230 克”，
+  业务 revision 仍为 5。部分摄入 `recorded_kcal` 的最后展示修补通过代码检查、
+  全量测试与 App Hub gate，最终版的原生逐餐回放 **not run**。M4 麦克风/ASR
+  亦 **not run**。测试结束后已恢复任务专用 profile 的原始业务及会话文件。
+
 ## Issue #3 M2 阶段与菜单回调快照补齐 — 2026-10-13
 
 在已有 M2 纯文字 Agent 主流程上，发送前显式记录当前确认阶段 ID/完整阶段快照、

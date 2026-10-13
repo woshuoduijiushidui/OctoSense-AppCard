@@ -36,6 +36,11 @@ CASES = (
     "text_snapshot_changes",
     "text_stage_and_callback_guard",
     "text_day_rollover",
+    "proposal_inventory_contract_and_review",
+    "proposal_specific_batch_and_handoff",
+    "proposal_menu_lock_and_revision",
+    "proposal_menu_one_correction",
+    "proposal_menu_confirm_memory",
 )
 
 

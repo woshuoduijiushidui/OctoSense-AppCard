@@ -14,8 +14,21 @@ fn main() {
     let accept_start = source.find("fn accept(){").unwrap();
     let accept_end = source.find("fn begin_consume(){").unwrap();
     let menu_accept = &source[accept_start..accept_end];
+    let builder_start = source.find("fn build_ai_menu(output, requested_goal, recipe_only)").unwrap();
+    let builder_end = source.find("fn online_plan(reason)").unwrap();
+    let menu_builder = &source[builder_start..builder_end];
+    let recipe_start = source.find("fn recipe_titles()").unwrap();
+    let recipe_end = source.find("fn trial_meal_calories(m)").unwrap();
+    let recipe_helpers = &source[recipe_start..recipe_end];
+    let batch_start = source.find("fn canonical_unit(unit)").unwrap();
+    let batch_end = source.find("fn valid_state(value)").unwrap();
+    let batch_helpers = &source[batch_start..batch_end];
+    let draft_start = source.find("fn draft_batch(row, mode, image_path, edit_id)").unwrap();
+    let draft_end = source.find("fn preview_food()").unwrap();
+    let draft_helper = &source[draft_start..draft_end];
     let prelude = r#"
         use mod.std.assert
+        use mod.std.regex
         use mod.math.floor
         use mod.math.max
         let agent_session = nil
@@ -32,6 +45,11 @@ fn main() {
         let agent_reply = nil
         let agent_error = ""
         let agent_memory_pending = nil
+        let agent_proposal = nil
+        let agent_review = nil
+        let agent_answer_input = nil
+        let agent_correction = 0
+        let ai_validation_error = ""
         let goal = ""
         let selected = 0
         let message = ""
@@ -78,6 +96,18 @@ fn main() {
         fn menu_meals(menu){ menu.meals }
         fn menu_issue(menu){ if menu == nil || menu.consumed { return "invalid" } "" }
         fn menu_title(menu){ menu.title }
+        fn auto_plan_eligible(food){ if has_field(food, "eligible") { return food.eligible } false }
+        fn recipe_eligible(food){ false }
+        fn batch_grams(food){ food.canonical_quantity }
+        fn plan_use(food, grams){
+            if !auto_plan_eligible(food) || grams > food.canonical_quantity { return nil }
+            {food_id: food.id name: food.name quantity: grams unit: "g" grams: grams}
+        }
+        fn recipe_use(food, quantity){ nil }
+        fn meal_label(slot){ if slot == 0 { return "早餐" } if slot == 1 { return "午餐" } "晚餐" }
+        fn recipe_display_text(value){ value }
+        fn calendar_day(text){ 100 }
+        fn has_field(value, name){ let wanted = name.to_json() for key item in value { if key.to_json() == wanted { return true } } false }
         fn active_plan(){ nil }
         fn choose_plan(){ if selected >= state.plans.len() { return nil } state.plans[selected] }
         fn validate(menu){ true }
@@ -172,6 +202,7 @@ fn main() {
                 activity: "轻活动" allergies: "花生" avoidances: "" preferences: "清淡" special: ""}
                 foods: [{id: 7 name: "米" canonical_quantity: 500 canonical_unit: "g"
                     expires_on_day: 120 expiry_precision: "exact" average_item_grams: 0
+                    quantity: 500 unit: "g" package_size: 0 package_size_unit: ""
                     source_image_path: "/private/photo.jpg"}] plans: [] stages: []
                     execution_records: [] active: 0 log: ["private-log"]}
             agent_memory = agent_memory_after_confirm(agent_empty_memory(), "少放辣", "平时少放辣", true, true, 100)
@@ -660,12 +691,188 @@ fn main() {
             assert(agent_input == "" && agent_current_id == 0)
             true
         "#),
+        ("proposal_inventory_contract_and_review", r#"
+            assert(agent_task().len() < 4096)
+            assert(agent_public_reply("豆腐（food_id: 7）请核对") == "豆腐请核对")
+            assert(agent_public_reply("豆腐 230 克，内部 food_id 为 1。") == "豆腐 230 克。")
+            agent_load_session()
+            let row = {name: "鸡蛋" quantity_text: "2" unit: "个" package_size_text: ""
+                package_size_unit: "" average_item_grams_text: "" remaining_days_text: "2"
+                printed_expires_on: "" kcal_text: "" protein_text: "" fiber_text: "" vitamin_c_text: ""}
+            let snap = {day: 100 profile_revision: 1 inventory_revision: 1
+                authority: agent_authority_marker() message_text: "加入两个鸡蛋"}
+            let output = {reply: "请核对鸡蛋" tool_name: "propose_inventory_add"
+                tool_args: {rows: [row]} memory_candidate: ""}
+            let before = state.to_json()
+            let proposal = agent_proposal_from(output, snap)
+            assert(proposal != nil && proposal.rows.len() == 1 && state.to_json() == before)
+            output.tool_args = {rows: []}
+            assert(agent_proposal_from(output, snap) == nil)
+            output.tool_args = {rows: "not an array"}
+            assert(agent_proposal_from(output, snap) == nil)
+            output.tool_args = {rows: [row] extra: 1}
+            assert(agent_proposal_from(output, snap) == nil)
+            output.tool_args = {rows: [row]}
+            output.memory_candidate = "少盐"
+            assert(agent_proposal_from(output, snap) == nil)
+            output.memory_candidate = ""
+            agent_proposal = agent_proposal_from(output, snap)
+            agent_open_review()
+            assert(tab == 2 && intake_draft.rows.len() == 1 && agent_review != nil)
+            assert(!agent_entry_allowed())
+            assert(state.to_json() == before)
+            agent_finish_review("已取消")
+            assert(agent_review == nil && tab == 0 && state.to_json() == before)
+            assert(agent_session.messages[0].kind == "local")
+            true
+        "#),
+        ("proposal_specific_batch_and_handoff", r#"
+            state.foods = [{id: 7 name: "豆腐" canonical_unit: "g" quantity: 100 unit: "g"}
+                {id: 8 name: "豆腐" canonical_unit: "g" quantity: 80 unit: "g"}]
+            let row = {name: "豆腐" quantity_text: "90" unit: "g" package_size_text: ""
+                package_size_unit: "" average_item_grams_text: "" remaining_days_text: ""
+                printed_expires_on: "" kcal_text: "" protein_text: "" fiber_text: "" vitamin_c_text: ""}
+            let snap = {day: 100 profile_revision: 1 inventory_revision: 1
+                authority: agent_authority_marker() message_text: "修改第二批豆腐"}
+            let edit = {reply: "请核对" tool_name: "propose_inventory_edit"
+                tool_args: {food_id: 8 row: row} memory_candidate: ""}
+            assert(agent_proposal_from(edit, snap).food.id == 8)
+            let vague = snap.to_json().parse_json()
+            vague.message_text = "修改豆腐"
+            assert(agent_proposal_from(edit, vague) == nil)
+            edit.tool_args.food_id = 99
+            assert(agent_proposal_from(edit, snap) == nil)
+            edit.tool_args.food_id = "8"
+            assert(agent_proposal_from(edit, snap) == nil)
+            edit.tool_args.food_id = 8
+            edit.tool_args.row.name = "鸡蛋"
+            assert(agent_proposal_from(edit, snap) == nil)
+            let remove = {reply: "请核对" tool_name: "propose_inventory_remove"
+                tool_args: {food_id: 7 reason: "变质"} memory_candidate: ""}
+            let remove_snap = snap.to_json().parse_json()
+            remove_snap.message_text = "移除第一批豆腐"
+            assert(agent_proposal_from(remove, remove_snap).food.id == 7)
+            remove.tool_args.reason = ""
+            assert(agent_proposal_from(remove, remove_snap) == nil)
+            remove.tool_args = {food_id: 99 reason: "变质"}
+            assert(agent_proposal_from(remove, remove_snap) == nil)
+            remove.tool_args = {food_id: 7 reason: "变质" extra: true}
+            assert(agent_proposal_from(remove, remove_snap) == nil)
+            let eat = {reply: "请记录" tool_name: "handoff_consumption"
+                tool_args: {text: "我吃了两个鸡蛋" food_hints: ["鸡蛋"]} memory_candidate: ""}
+            assert(agent_proposal_from(eat, snap).tool_name == "handoff_consumption")
+            eat.tool_args = {text: "我吃了两个鸡蛋"}
+            assert(agent_proposal_from(eat, snap) == nil)
+            eat.tool_args = {text: "我吃了两个鸡蛋" food_hints: ["鸡蛋"]}
+            eat.tool_args.food_hints = [7]
+            let invalid = nil
+            try { invalid = agent_proposal_from(eat, snap) } catch { }
+            assert(invalid == nil)
+            true
+        "#),
+        ("proposal_menu_lock_and_revision", r#"
+            state.stages = [{id: 4 daily_kcal: 1800}]
+            state.foods = [{id: 7 name: "豆腐" canonical_quantity: 300 canonical_unit: "g" eligible: true}]
+            let snap = {day: 100 profile_revision: 1 inventory_revision: 1
+                authority: agent_authority_marker() message_text: "安排三餐"}
+            let step1 = {action: "清洗" food_ids: [7] minutes: 1}
+            let step2 = {action: "充分煮熟" food_ids: [7] minutes: 10}
+            let menu = {feasible: true reason: "家常" meals: [
+                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 50}] steps: [step1 step2]}
+                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 60}] steps: [step1 step2]}
+                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 70}] steps: [step1 step2]}]}
+            let output = {reply: "请核对" tool_name: "propose_menu_generate"
+                tool_args: menu memory_candidate: ""}
+            let before = state.to_json()
+            let proposal = agent_proposal_from(output, snap)
+            assert(proposal != nil && proposal.menu.meals.len() == 3)
+            assert(proposal.menu.meals[0].slot == "早餐" && state.to_json() == before)
+            assert(agent_marker_matches(proposal.marker))
+            state.revision = 2
+            assert(!agent_marker_matches(proposal.marker))
+            state.revision = 1
+            output.tool_args = {feasible: true reason: "家常" meals: [menu.meals[0]]}
+            assert(agent_proposal_from(output, snap) == nil)
+            output.tool_args = menu.to_json().parse_json()
+            output.tool_args.meals[0].uses[0].grams = 301
+            assert(agent_proposal_from(output, snap) == nil)
+            output.tool_args = menu
+            output.tool_args = {feasible: true reason: "家常" meals: "wrong"}
+            assert(agent_proposal_from(output, snap) == nil)
+            output.tool_args = menu
+            state.execution_records.push({day: 100})
+            assert(agent_proposal_from(output, snap) == nil)
+            state.execution_records = []
+            output.tool_name = "propose_menu_adjust"
+            assert(agent_proposal_from(output, snap) == nil)
+            state.plans = [{id: 9 day: 100 accepted: true consumed: false stage_id: 4 title: "旧菜单"
+                meals: [{slot: "早餐" title: "旧早餐" uses: [{food_id: 7 name: "豆腐" grams: 50}]}]}]
+            state.active = 9
+            assert(agent_proposal_from(output, snap) != nil)
+            state.execution_records.push({day: 100})
+            assert(agent_proposal_from(output, snap) == nil)
+            assert(!agent_valid_envelope({reply: "改档案" tool_name: "profile_edit"
+                tool_args: {} memory_candidate: ""}))
+            true
+        "#),
+        ("proposal_menu_one_correction", r#"
+            state.stages = [{id: 4 kind: "health" name: "当前阶段" started: 8640000
+                days: 7 daily_kcal: 1800 kcal_goal: 12600 protein_goal: 350
+                fiber_goal: 175 vitamin_c_goal: 500 consumed_kcal: 0}]
+            agent_open_panel()
+            agent_input = "请安排完整三餐"
+            let calls = 0
+            let callback = nil
+            host = {request: |name, args, cb| { calls = calls + 1 callback = cb calls }}
+            agent_send()
+            assert(calls == 1 && agent_phase == "answering")
+            let invalid = {reply: "请核对" tool_name: "propose_menu_generate"
+                tool_args: {feasible: true reason: "家常" meals: []} memory_candidate: ""}
+            callback({is_ok: true data: {output: invalid}})
+            agent_watchdog()
+            assert(calls == 2 && agent_correction == 1 && agent_phase == "answering")
+            callback({is_ok: true data: {output: invalid}})
+            agent_watchdog()
+            assert(calls == 2 && agent_phase == "idle" && agent_proposal == nil)
+            assert(agent_session.messages.len() == 1 && state.plans.len() == 0)
+            true
+        "#),
+        ("proposal_menu_confirm_memory", r#"
+            state.stages = [{id: 4 daily_kcal: 1800}]
+            state.foods = [{id: 7 name: "豆腐" canonical_quantity: 300 canonical_unit: "g" eligible: true}]
+            agent_load_session()
+            agent_memory = agent_empty_memory()
+            let step1 = {action: "清洗" food_ids: [7] minutes: 1}
+            let step2 = {action: "充分煮熟" food_ids: [7] minutes: 10}
+            let output = {feasible: true reason: "少油家常" meals: [
+                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 50}] steps: [step1 step2]}
+                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 60}] steps: [step1 step2]}
+                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 70}] steps: [step1 step2]}]}
+            let draft = agent_menu_from_output(output, "平时少油安排三餐")
+            assert(draft != nil)
+            let marker = {day: 100 profile_revision: 1 inventory_revision: 1
+                authority: agent_authority_marker()}
+            assert(agent_marker_matches(marker))
+            assert(menu_issue(draft) == "" && validate(draft))
+            agent_review = {tool_name: "propose_menu_generate" marker: marker menu: draft
+                user_text: "平时少油安排三餐" memory_candidate: "少油" origin: 2}
+            let foods_before = state.foods.to_json()
+            agent_confirm_menu_review()
+            assert(state.plans.len() == 1)
+            assert(state.plans[0].accepted)
+            assert(state.active == state.plans[0].id)
+            assert(state.foods.to_json() == foods_before)
+            assert(agent_memory.items.len() == 1)
+            assert(agent_memory.items[0].text == "少油")
+            assert(tab == 2 && agent_review == nil)
+            true
+        "#),
     ];
     for (name, script) in cases {
         let mut host = ScriptVmHost::new((), ());
         let mut vm = ScriptVm { host: &mut host, bx: Box::new(ScriptVmBase::new()) };
         vm.bx.captured_errors = Some(Vec::new());
-        let code = format!("{prelude}\n{helpers}\n{menu_save}\n{menu_accept}\n{script}\n;");
+        let code = format!("{prelude}\n{helpers}\n{menu_save}\n{menu_accept}\n{recipe_helpers}\n{menu_builder}\n{batch_helpers}\n{draft_helper}\n{script}\n;");
         let result = vm.with_instruction_limit(2_000_000, |vm| vm.eval(ScriptMod {
             file: format!("agent_core_{name}.splash"), code, ..Default::default()
         }));
