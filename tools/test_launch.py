@@ -1,5 +1,6 @@
 """Offline guards: no custom host, no accidental key generation or secret copying."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -136,7 +137,15 @@ class LaunchTests(unittest.TestCase):
         files = list((launch.APP / "bundle").rglob("*"))
         self.assertFalse(any(p.name == "ai.env" or p.suffix == ".key" for p in files))
         source = (launch.APP / "bundle/main.splash").read_text(encoding="utf-8")
-        self.assertNotIn('host.request("microphone.', source)
+        manifest = json.loads((launch.APP / "bundle/manifest.json").read_text(encoding="utf-8"))
+        self.assertIn("microphone", manifest["capabilities"])
+        self.assertEqual(manifest["host_api"]["optional"]["model.transcribe_capability"], 1)
+        self.assertEqual(manifest["host_api"]["optional"]["microphone.record_start"], 1)
+        self.assertIn('host.request("model.transcribe_capability", {}', source)
+        self.assertIn('voice_request("permission_status", "microphone.permission.status", {})', source)
+        self.assertIn('voice_request("start", "microphone.record_start"', source)
+        self.assertIn('voice_request("transcribe", "model.transcribe"', source)
+        self.assertIn("当前宿主暂不支持语音识别，请使用文字输入。", source)
         self.assertIn('host.request("model.complete"', source)
         self.assertIn("不读取 ai.env", source)
 

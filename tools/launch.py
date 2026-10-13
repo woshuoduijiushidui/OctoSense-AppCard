@@ -211,7 +211,7 @@ def main():
     else:
         profile = (args.app_data or STATE).resolve()
         mirror, data, anchor = local_install(hub, installer, args.prepare_local_test, profile)
-        env.update(OCTOSENSE_HUB=str(mirror), OCTOSENSE_HUB_ANCHOR=anchor,
+        env.update(OCTOSENSE_HUB=str(mirror), OCTOSENSE_HUB_CATALOG="legacy", OCTOSENSE_HUB_ANCHOR=anchor,
                    OCTOSENSE_APP_DATA=str(data), OCTOSENSE_HOME=str(profile / "desktop-home"))
         desktop = ROOT / "target/release" / ("octosense" + EXE)
         command_build = ["cargo", "build", "--release", "--locked", "-p", "octosense"]

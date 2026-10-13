@@ -11,28 +11,37 @@ not independently captured. Sealed release and Store publication are unverified.
    previews manual food-batch intake, groups exact-name batches without losing
    per-batch actions, proposes local-rule or official model candidates, and
    deducts inventory only after a separate consumption confirmation. Quantity
-   and unit checks reject incompatible or unconfirmed conversions. Nutrition
-   and calories are prototype estimates. See README.md and VALIDATION.md.
+   and unit checks reject incompatible or unconfirmed conversions. The global
+   Agent keeps same-day text context and offers bounded inventory, menu and
+   intake handoffs through the existing review screens. On the modified
+   Windows host its microphone fills an editable draft. Nutrition and calories
+   are prototype estimates. See README.md and VALIDATION.md.
 2. **Platforms/category.** Only Windows is listed. The same bundle passed an
    isolated local test-signature installation in the unmodified official shell
    and the locally modified shell. The user reported live Pantry image recognition
    passed in the foreground. A sealed release, publication, and other platforms
    have not been tested. The lifestyle
    category matches pantry and meal planning.
-3. **Grants/hosts.** The manifest requests storage, model, camera, and files,
-   plus the full shell's device-consent broker. There is no direct outbound host
-   or microphone grant. Image calls require a positive local-host vision probe;
-   the official host shows manual fallback. PRIVACY.md describes model inputs,
-   optional automatic triggers, retention, and the host-managed provider key.
+3. **Grants/hosts.** The manifest requests storage, model, camera, files and
+   microphone, plus optional host speech methods. There is no direct outbound
+   host. Image and voice calls first probe the local host's capability; the
+   unmodified official host keeps manual image intake and text Agent input.
+   Recording requires foreground device consent. The host sends the app-local
+   WAV to the configured MiniMax speech provider; the app never sees its key.
+   PRIVACY.md describes model inputs, triggers and retention.
 4. **Deception.** No app secret, login or payment field is present. The image
-   buttons open a chooser only on a positive vision probe; voice does not
-   record. The four bundle screenshots and linked video show the earlier 0.7.0
-   manual-flow candidate, not this 0.8.0 image UI or a live model result.
+   buttons open a chooser only on a positive vision probe. The local Windows
+   host records only after a microphone click and consent; its transcript is
+   editable and needs a separate Send action. The official host states that
+   speech is unsupported. The four bundle screenshots and linked video show
+   the earlier 0.7.0 manual-flow candidate, not this 0.8.0 voice or image UI.
    The current synthetic inventory comparison illustrates UI changes only.
-   Recording a new video is outside this PR.
+   No new release video or App Hub approval is claimed.
 5. **Instructions.** The online planning prompt requests meal JSON for the
-   visible feature and passes profile/inventory as task data. No tools.json,
-   AGENT.md or independent app-agent skill ships in the bundle.
+   visible feature and passes profile/inventory as task data. The global Agent
+   accepts one bounded proposal at a time; local validation and the existing
+   review screens control every business write. No tools.json, AGENT.md or
+   independent app-agent skill ships in the bundle.
 6. **Abuse.** Local source review and synthetic native tests found no abusive
    content directed at a private person; this is not external review approval.
 7. **Human route.** Before any release, review current public support/privacy

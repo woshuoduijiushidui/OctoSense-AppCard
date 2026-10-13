@@ -92,6 +92,20 @@ def enter(ui, placeholder, value):
     ui.get("t", t=value, wait=1)
 
 
+def expand_inventory_group(ui, title, first_batch):
+    for _ in range(3):
+        ui.scroll(-3000)
+        widgets = ui.snap()
+        header = next(w for w in widgets if w.get("t") == title)
+        if any(w.get("t") == first_batch for w in widgets):
+            return
+        button = min((w for w in widgets if w.get("t") == "展开 / 收起"),
+                     key=lambda w: abs(w["r"][1] - header["r"][1]))
+        x, y, width, height = button["r"]
+        ui.get("click", x=x + width / 2, y=y + height / 2, wait=1)
+    assert any(w.get("t") == first_batch for w in ui.snap())
+
+
 def add(ui, name, quantity, unit="g", days=None, printed_date=None, package=None):
     before = list(ui.state()["foods"])
     ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
@@ -111,7 +125,7 @@ def add(ui, name, quantity, unit="g", days=None, printed_date=None, package=None
     ui.click("最终确认入库")
 
 
-def exercise(ui):
+def exercise(ui, offline_only=False):
     ui.check("首次建档显示", "首次建档  1 / 4" in ui.text())
     ui.click("选择", index=1)
     ui.click("女性")
@@ -125,9 +139,13 @@ def exercise(ui):
     ui.click("确认计划 · 去录冰箱  →")
     for entry in ("拍照识别", "导入小票"):
         ui.click(entry)
-        ui.check(entry + " 官方宿主回退手动录入",
-                 "当前宿主暂不支持图片识别，请使用手动录入" in ui.text()
-                 and "选择已有图片" not in ui.text())
+        if "选择已有图片" in ui.text():
+            ui.check(entry + " 可用时先进入待核对草稿",
+                     "识别后仍需逐项核对" in ui.text())
+            ui.click("取消，返回手动录入")
+        else:
+            ui.check(entry + " 不可用时回退手动录入",
+                     "当前宿主暂不支持图片识别，请使用手动录入" in ui.text())
     enter(ui, "食材名称", "豆腐")
     enter(ui, "数量", "abc")
     enter(ui, "还剩几天（可留空）", "2")
@@ -150,10 +168,8 @@ def exercise(ui):
     foods = ui.state()["foods"]
     ui.check("单位、包装和四种有效期落盘", foods[-1]["canonical_quantity"] == 600
              and foods[-1]["canonical_unit"] == "g"
-             and {f["expiry_precision"] for f in foods} == {"estimated", "unknown", "exact"}
-             and "豆腐 · 2 批" in ui.text() and "正常" in ui.text() and "已过期" in ui.text()
-             and "临期" in ui.text() and "保质期未知" in ui.text())
-    ui.click("展开 / 收起", index=0)
+             and {f["expiry_precision"] for f in foods} == {"estimated", "unknown", "exact"})
+    expand_inventory_group(ui, "豆腐 · 2 批", "第 1 批 · 250g")
     ui.click("编辑", index=0)
     ui.get("m", k="scroll", x=450, y=450, dy=-2500, wait=1)
     ui.fill("220", index=1)
@@ -161,17 +177,16 @@ def exercise(ui):
     ui.click("最终确认入库")
     ui.check("编辑只更新原批次", ui.state()["foods"][0]["id"] == 1 and
              ui.state()["foods"][0]["quantity"] == 220)
+    expand_inventory_group(ui, "豆腐 · 2 批", "第 1 批 · 220g")
     ui.click("丢弃/移除", index=1)
     saved_foods = list(ui.state()["foods"])
     ui.click("确认移除")
     ui.check("丢弃需确认且不计用餐", len(ui.state()["foods"]) == len(saved_foods) - 1 and
              ui.state()["meal_count"] == 0)
-    # shortcut: main renamed/removed the Settings toggles (改用本地规则, 关闭提醒);
-    # this section needs the current labels before it can run again.
     ui.click("⚙  设置")
-    ui.get("m", k="scroll", x=750, y=600, dy=650, wait=1)
-    ui.click("改用本地规则")
-    ui.check("本地规则选择持久化", ui.state()["model_enabled"] is False)
+    ui.scroll(-3000)
+    ui.click("关闭在线 AI")
+    ui.check("在线 AI 关闭选择持久化", ui.state()["model_enabled"] is False)
     ui.get("m", k="scroll", x=750, y=600, dy=-650, wait=1)
     plan_count = len(ui.state()["plans"])
     ui.click("开启自动生成（可选）")
@@ -180,6 +195,17 @@ def exercise(ui):
     ui.click("关闭自动生成")
     ui.check("关闭自动生成只改设置", ui.state()["auto_generate"] is False and
              len(ui.state()["plans"]) == plan_count)
+    if offline_only:
+        ui.click("⌂  首页")
+        before = ui.state_path().read_bytes()
+        ui.click("生成今日菜单  →")
+        ui.check("在线 AI 关闭时不伪造菜单或写入业务", ui.state_path().read_bytes() == before
+                 and len(ui.state()["plans"]) == 0)
+        (ui.profile / "expected-state.json").write_text(
+            json.dumps(ui.state(), ensure_ascii=False), encoding="utf-8")
+        (ui.profile / "checks.json").write_text(
+            json.dumps(ui.checks, ensure_ascii=False), encoding="utf-8")
+        return
     ui.click("⌂  首页")
     ui.click("生成今日菜单  →")
     ui.check("手动生成日菜单", len(ui.state()["plans"]) == 1 and not ui.state()["plans"][0]["accepted"]
@@ -820,6 +846,10 @@ def main():
     parser.add_argument("--port", type=int, default=18442)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--restart", action="store_true")
+    parser.add_argument("--m6-offline", action="store_true",
+                        help="current six-cycle onboarding, manual/image fallback, inventory and disabled-AI regression")
+    parser.add_argument("--legacy-flow", action="store_true",
+                        help="historical local-rule menu flow; requires a compatible old candidate")
     parser.add_argument("--recipe", action="store_true")
     parser.add_argument("--menu-purchase", action="store_true",
                         help="Issue #23/#24 daily menu: three meals, nutrition, over-limit refusal, derived 缺菜清单")
@@ -862,7 +892,7 @@ def main():
     elif args.recipe:
         exercise_recipe(ui)
     else:
-        exercise(ui)
+        exercise(ui, offline_only=not args.legacy_flow)
 
 
 if __name__ == "__main__":

@@ -66,11 +66,42 @@ let host_request_id = 0
 let config_reply = nil
 let model_reply = nil
 let retry_reason = "用户请求"
-// Push-to-talk audio stays in the trusted host; the script only receives text.
-let voice_phase = 0 // 0 idle, 1 opening, 2 recording, 3 transcribing
+// Audio stays in the trusted host; only its transcription enters the editable draft.
+let voice_phase = 0 // 0 idle, 1 permission, 2 recording, 3 transcribing, 4 starting, 5 stopping
 let voice_sequence = 0
 let voice_deadline = 0
 let voice_reply = nil
+let voice_capability = "checking"
+let voice_probe_sequence = 0
+let voice_probe_reply = nil
+let voice_probe_deadline = 0
+let voice_probe_next = 0
+let voice_probe_attempts = 0
+let voice_action = ""
+let voice_session = ""
+let voice_next_poll = 0
+let voice_path = "/agent/voice-latest.wav"
+let agent_session = nil
+let agent_memory = nil
+let agent_open = false
+let agent_origin_tab = 0
+let agent_input = ""
+let agent_phase = "idle"
+let agent_sequence = 0
+let agent_deadline = 0
+let agent_current_id = 0
+let agent_call_snapshot = nil
+let agent_batch = nil
+let agent_reply = nil
+let agent_error = ""
+let agent_clear_pending = false
+let agent_history_end = 0
+let agent_memory_pending = nil
+let agent_menu_intent_memory = nil
+let agent_proposal = nil
+let agent_review = nil
+let agent_answer_input = nil
+let agent_correction = 0
 let onboarding_step = 0
 let profile_edit_backup = nil
 let profile_sex = "不透露"
@@ -1447,6 +1478,984 @@ fn valid_legacy_state(value){
     } catch { false }
 }
 fn today_day(){ floor(now() / 86400) }
+fn agent_empty_session(day){
+    {schema: 1 day: day next_message_id: 1 context_summary: "" summary_through_id: 0 messages: []}
+}
+fn agent_valid_session(value, day){
+    try {
+        if !value.is_object() || value.schema != 1 || value.day != day ||
+            !(value.next_message_id >= 1) || value.next_message_id != floor(value.next_message_id) ||
+            !(value.summary_through_id >= 0) || value.summary_through_id != floor(value.summary_through_id) ||
+            !value.context_summary.is_string() || value.context_summary.to_chars().len() > 3000 ||
+            !value.messages.is_array() || value.messages.len() > 120 { return false }
+        let previous = 0
+        for item in value.messages {
+            if !item.is_object() || !(item.id > previous) || item.id != floor(item.id) ||
+                (item.kind != "user" && item.kind != "assistant" && item.kind != "local") ||
+                !item.text.is_string() || item.text.to_chars().len() > 1500 ||
+                !(item.created_at >= 0) { return false }
+            previous = item.id
+        }
+        value.next_message_id > previous && value.summary_through_id < value.next_message_id
+    } catch { false }
+}
+fn agent_decode_session(raw, day){
+    try {
+        let parsed = raw.parse_json()
+        if agent_valid_session(parsed, day) { return parsed }
+    } catch { }
+    agent_empty_session(day)
+}
+fn agent_load_session(){
+    let raw = ""
+    try { if fs.exists("agent-session.json") { raw = fs.read("agent-session.json") } } catch { }
+    agent_session = agent_decode_session(raw, today_day())
+}
+fn agent_store_session(next){
+    try {
+        if !agent_valid_session(next, today_day()) { return false }
+        if fs.write("agent-session.json", next.to_json()) != nil { return false }
+        agent_session = next
+        return true
+    } catch { false }
+}
+fn agent_ensure_today(){
+    let day = today_day()
+    if agent_session == nil || agent_session.day != day {
+        agent_session = agent_empty_session(day)
+        agent_store_session(agent_session)
+        if agent_current_id > 0 { agent_input = "" }
+        agent_current_id = 0
+        agent_history_end = 0
+        agent_memory_pending = nil
+    }
+}
+fn agent_append_to_session(session, kind, text, at){
+    if (kind != "user" && kind != "assistant" && kind != "local") ||
+        !text.is_string() || text.to_chars().len() > 1500 || !(at >= 0) { return nil }
+    let next = session.to_json().parse_json()
+    if next.messages.len() >= 120 {
+        let oldest = next.messages[0]
+        if oldest.kind != "local" && oldest.id > next.summary_through_id { return nil }
+        next.messages.remove(0)
+    }
+    next.messages.push({id: next.next_message_id kind: kind text: text created_at: at})
+    next.next_message_id = next.next_message_id + 1
+    next
+}
+fn agent_append(kind, text){
+    agent_ensure_today()
+    let next = agent_append_to_session(agent_session, kind, text, time_now())
+    if next == nil || !agent_store_session(next) { return 0 }
+    next.next_message_id - 1
+}
+fn agent_empty_memory(){ {schema: 1 next_id: 1 items: []} }
+fn agent_valid_memory(value){
+    try {
+        if !value.is_object() || value.schema != 1 || !(value.next_id >= 1) ||
+            value.next_id != floor(value.next_id) || !value.items.is_array() || value.items.len() > 120 { return false }
+        let highest = 0
+        for item in value.items {
+            if !item.is_object() || !(item.id > 0) || item.id != floor(item.id) ||
+                !item.text.is_string() || item.text.trim() == "" || item.text.to_chars().len() > 120 ||
+                !(item.created_day >= 0) || item.created_day != floor(item.created_day) ||
+                !(item.last_used_day >= item.created_day) || item.last_used_day != floor(item.last_used_day) ||
+                !(item.expires_day >= item.created_day) || item.expires_day != floor(item.expires_day) { return false }
+            highest = max(highest, item.id)
+        }
+        value.next_id > highest
+    } catch { false }
+}
+fn agent_prune_memory(memory, day){
+    let next = agent_empty_memory()
+    next.next_id = memory.next_id
+    for item in memory.items {
+        if item.expires_day >= day {
+            let ordered = []
+            let inserted = false
+            for earlier in next.items {
+                if !inserted && (item.last_used_day < earlier.last_used_day ||
+                    (item.last_used_day == earlier.last_used_day && item.created_day < earlier.created_day)) {
+                    ordered.push(item) inserted = true
+                }
+                ordered.push(earlier)
+            }
+            if !inserted { ordered.push(item) }
+            next.items = ordered
+        }
+    }
+    while next.items.len() > 10 { next.items.remove(0) }
+    next
+}
+fn agent_decode_memory(raw, day){
+    try {
+        let parsed = raw.parse_json()
+        if agent_valid_memory(parsed) { return agent_prune_memory(parsed, day) }
+    } catch { }
+    agent_empty_memory()
+}
+fn agent_load_memory(){
+    let raw = ""
+    try { if fs.exists("agent-memory.json") { raw = fs.read("agent-memory.json") } } catch { }
+    agent_memory = agent_decode_memory(raw, today_day())
+    agent_store_memory(agent_memory)
+}
+fn agent_store_memory(next){
+    try {
+        if !agent_valid_memory(next) { return false }
+        let cleaned = agent_prune_memory(next, today_day())
+        if fs.write("agent-memory.json", cleaned.to_json()) != nil { return false }
+        agent_memory = cleaned
+        return true
+    } catch { false }
+}
+fn agent_normalize_preference(text){
+    let result = text.trim()
+    while result.search("  ") >= 0 { result = result.replace("  ", " ") }
+    result
+}
+fn agent_allowed_preference(candidate, user_text){
+    if !candidate.is_string() || !user_text.is_string() { return false }
+    let text = agent_normalize_preference(candidate)
+    if text == "" || text.to_chars().len() > 120 || user_text.search(text) < 0 { return false }
+    let explicit = false
+    for signal in ["喜欢" "偏好" "口味" "平时" "以后" "通常" "经常" "尽量" "少放" "少油" "少盐" "清淡" "多放"] {
+        if user_text.search(signal) >= 0 { explicit = true }
+    }
+    if !explicit { return false }
+    for forbidden in ["过敏" "忌口" "不吃" "不能吃" "不喜欢" "不要" "避开" "禁食" "医生" "医疗" "药" "病" "血糖" "体重" "目标" "模型建议" "AI建议" "建议我"] {
+        if text.search(forbidden) >= 0 || user_text.search(forbidden) >= 0 { return false }
+    }
+    let durable = false
+    for signal in ["喜欢" "偏好" "平时" "以后" "通常" "经常"] {
+        if user_text.search(signal) >= 0 { durable = true }
+    }
+    for contextual in ["库存" "还剩" "今天" "这次" "明天" "本次" "这顿" "当前" "克" "千卡" "一份" "两份" "半份"] {
+        if text.search(contextual) >= 0 || (!durable && user_text.search(contextual) >= 0) { return false }
+    }
+    for digit in ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"] {
+        if text.search(digit) >= 0 { return false }
+    }
+    true
+}
+fn agent_memory_after_confirm(memory, candidate, user_text, valid_menu, confirmed, day){
+    if valid_menu != true || confirmed != true || !agent_allowed_preference(candidate, user_text) { return nil }
+    let text = agent_normalize_preference(candidate)
+    let next = agent_prune_memory(memory, day)
+    let existing = nil
+    let kept = []
+    for item in next.items {
+        if agent_normalize_preference(item.text) == text { existing = item }
+        else { kept.push(item) }
+    }
+    next.items = kept
+    if existing == nil {
+        existing = {id: next.next_id text: text created_day: day last_used_day: day expires_day: day + 30}
+        next.next_id = next.next_id + 1
+    } else {
+        existing.last_used_day = day existing.expires_day = day + 30
+    }
+    next.items.push(existing)
+    while next.items.len() > 10 { next.items.remove(0) }
+    next
+}
+fn agent_stage_menu_memory(menu, user_text, reason){
+    agent_memory_pending = nil
+    if menu == nil || reason != "用户请求" || !user_text.is_string() ||
+        !agent_allowed_preference(user_text, user_text) || menu_issue(menu) != "" { return }
+    agent_memory_pending = {menu_id: menu.id day: today_day() menu_meals: menu.meals.to_json()
+        user_text: user_text candidate: agent_normalize_preference(user_text)}
+}
+fn agent_confirm_menu_memory(menu){
+    let pending_memory = agent_memory_pending
+    agent_memory_pending = nil
+    if pending_memory == nil || menu == nil || menu.id != pending_memory.menu_id ||
+        pending_memory.day != today_day() || menu.meals.to_json() != pending_memory.menu_meals ||
+        !menu.accepted || menu_issue(menu) != "" { return }
+    let next = agent_memory_after_confirm(agent_memory, pending_memory.candidate,
+        pending_memory.user_text, true, true, today_day())
+    if next != nil { agent_store_memory(next) }
+}
+fn agent_input_bytes(input){ input.to_json().len() }
+fn agent_unit_label(unit){ if unit == "piece" { return "个" } unit }
+fn agent_today_menu(){
+    let menu = nil
+    for p in state.plans {
+        if p.day == health_day() && p.accepted && p.id == state.active { menu = p }
+    }
+    if menu == nil {
+        for p in state.plans { if p.day == health_day() && p.accepted && p.consumed { menu = p } }
+    }
+    let locked = false
+    for item in state.execution_records { if item.day == health_day() { locked = true } }
+    if menu == nil { return {menu_id: 0 status: "none" locked: locked meals: []} }
+    if menu.consumed { locked = true }
+    let meals = []
+    for meal in menu_meals(menu) {
+        let uses = []
+        for item in meal.uses {
+            uses.push({food_id: item.food_id name: item.name grams: item.grams})
+        }
+        meals.push({slot: meal.slot title: meal.title uses: uses})
+    }
+    let status = "accepted"
+    if locked { status = "locked" }
+    let stage_id = 0
+    if menu.to_json().search("\"stage_id\":") >= 0 { stage_id = menu.stage_id }
+    {menu_id: menu.id status: status locked: locked stage_id: stage_id meals: meals}
+}
+fn agent_projection_base(entry){
+    if entry != "home" && entry != "inventory" && entry != "menu" { return nil }
+    let batches = []
+    for food in state.foods {
+        let expiry_date = "未知"
+        if food.expires_on_day > 0 { expiry_date = calendar_text(food.expires_on_day) }
+        batches.push({food_id: food.id name: food.name canonical_quantity: food.canonical_quantity
+            canonical_unit: food.canonical_unit quantity_label: food.canonical_quantity + agent_unit_label(food.canonical_unit)
+            expiry_date: expiry_date expiry_status: freshness(food)
+            expiry_precision: food.expiry_precision average_item_grams: food.average_item_grams
+            quantity: food.quantity unit: food.unit package_size: food.package_size
+            package_size_unit: food.package_size_unit})
+    }
+    let memories = []
+    if agent_memory != nil {
+        for item in agent_prune_memory(agent_memory, today_day()).items { memories.push(item.text) }
+    }
+    let stage = current_stage()
+    let stage_view = nil
+    if stage != nil && !program_expired() {
+        stage_view = {stage_id: stage.id kind: stage.kind name: stage.name started: stage.started
+            days: stage.days daily_kcal: stage.daily_kcal kcal_goal: stage.kcal_goal
+            protein_goal: stage.protein_goal fiber_goal: stage.fiber_goal
+            vitamin_c_goal: stage.vitamin_c_goal consumed_kcal: stage.consumed_kcal
+            remaining_daily_kcal: program_remaining_daily(stage)}
+    }
+    let menu_candidates = []
+    for food in state.foods {
+        if auto_plan_eligible(food) {
+            let n = nutrient_reference(food.name, food.id)
+            menu_candidates.push({food_id: food.id name: food.name grams: batch_grams(food)
+                quantity: food.canonical_quantity unit: food.canonical_unit
+                quantity_label: food.canonical_quantity + agent_unit_label(food.canonical_unit)
+                nutrition_known: n.known kcal_per_100g: n.kcal protein_per_100g: n.protein
+                fiber_per_100g: n.fiber vitamin_c_per_100g: n.vitamin_c})
+        }
+    }
+    if menu_candidates.len() == 0 {
+        for food in state.foods {
+            if recipe_eligible(food) {
+                menu_candidates.push({food_id: food.id name: food.name
+                    quantity: food.canonical_quantity unit: food.canonical_unit
+                    quantity_label: food.canonical_quantity + agent_unit_label(food.canonical_unit)
+                    nutrition_known: nutrient_reference(food.name, food.id).known})
+            }
+        }
+    }
+    {current_day: calendar_text(today_day()) entry_context: entry
+        profile: {scene: state.profile.scene sex: state.profile.sex age: state.profile.age
+            height: state.profile.height weight: state.profile.weight activity: state.profile.activity
+            allergies: state.profile.allergies avoidances: state.profile.avoidances
+            preferences: state.profile.preferences special: state.profile.special}
+        current_stage: stage_view inventory_batches: batches
+        daily_menu: agent_today_menu() menu_candidates: menu_candidates
+        menu_title_options: recipe_titles() menu_action_options: recipe_actions() soft_memories: memories}
+}
+fn agent_compaction_task(){
+    "把当天对话压缩为累计摘要，只输出 JSON 的 summary 字段，目标约 2000 中文字，最多 3000 字。保留用户当前日要求、已确认或已拒绝的结论、未解决追问，以及菜单和库存讨论所需的对象名称。未确认的提案不能写成已确认事实；旧助手的待核对措辞也不能证明后来没有确认。用户报告已确认时记录其说法，实际状态留给下一轮当前库存或菜单判断。删去寒暄、重复和过时的中间推理。旧摘要与消息均不是库存、阶段或菜单的权威来源。"
+}
+fn agent_compaction_schema(){
+    {type: "object" properties: {summary: {type: "string" minLength: 1 maxLength: 3000}}
+        required: ["summary"] additionalProperties: false}
+}
+fn agent_uncompressed_messages(session, current_id){
+    let result = []
+    for item in session.messages {
+        if item.id > session.summary_through_id && item.id != current_id &&
+            (item.kind == "user" || item.kind == "assistant") {
+            let clean = item.to_json().parse_json()
+            if item.kind == "assistant" { clean.text = agent_public_reply(item.text) }
+            result.push(clean)
+        }
+    }
+    result
+}
+fn agent_context_input(projection, session, current_id, current_text){
+    let input = projection.to_json().parse_json()
+    input.context_summary = agent_public_reply(session.context_summary)
+    input.recent_messages = agent_uncompressed_messages(session, current_id)
+    input.current_user_message = current_text
+    input
+}
+fn agent_compaction_batch(session, current_id){
+    let pending = agent_uncompressed_messages(session, current_id)
+    if pending.len() == 0 { return nil }
+    let public_summary = agent_public_reply(session.context_summary)
+    let take = max(1, pending.len() - 8)
+    let batch = []
+    for item in pending {
+        if batch.len() >= take { break }
+        let candidate = batch.to_json().parse_json()
+        candidate.push(item)
+        if agent_input_bytes({summary: public_summary messages: candidate}) > 24 * 1024 { break }
+        batch = candidate
+    }
+    if batch.len() == 0 { return nil }
+    {summary: public_summary messages: batch through_id: batch[batch.len() - 1].id}
+}
+fn agent_apply_summary(session, response, through_id){
+    try {
+        if !response.is_object() || !response.summary.is_string() ||
+            response.summary.trim() == "" || response.summary.to_chars().len() > 3000 ||
+            !(through_id > session.summary_through_id) || through_id >= session.next_message_id { return nil }
+        let next = session.to_json().parse_json()
+        next.context_summary = agent_public_reply(response.summary.trim())
+        next.summary_through_id = through_id
+        next
+    } catch { nil }
+}
+fn agent_context_plan(projection, session, current_id, current_text){
+    if !current_text.is_string() || current_text.to_chars().len() > 1500 { return {status: "too_large"} }
+    let input = agent_context_input(projection, session, current_id, current_text)
+    let minimum = input.to_json().parse_json()
+    minimum.recent_messages = []
+    if agent_input_bytes(minimum) >= 24 * 1024 { return {status: "too_large"} }
+    let pending = agent_uncompressed_messages(session, current_id)
+    if pending.len() + 1 >= 15 || (session.summary_through_id > 0 && pending.len() > 8) ||
+        agent_input_bytes(input) >= 24 * 1024 {
+        let batch = agent_compaction_batch(session, current_id)
+        if batch == nil { return {status: "too_large"} }
+        return {status: "compact" batch: batch}
+    }
+    {status: "ready" input: input}
+}
+fn agent_entry_allowed(){
+    booted && !storage_blocked && onboarding_step == 4 && state.profile.done &&
+        (tab == 0 || tab == 2 || tab == 3) && recognition_phase == "" && agent_review == nil &&
+        intake_draft == nil && editing_id == 0 && removal == nil &&
+        !pending && plan_removal == nil && !reset_pending && market == nil && receipt == nil
+}
+fn agent_entry_context(index){
+    if index == 2 { return "inventory" }
+    if index == 3 { return "menu" }
+    "home"
+}
+fn agent_open_panel(){
+    if !agent_entry_allowed() { return }
+    agent_ensure_today()
+    agent_origin_tab = tab
+    agent_clear_pending = false
+    agent_open = true
+    redraw()
+}
+fn agent_close_panel(){
+    if voice_phase != 0 { voice_cancel() }
+    agent_clear_pending = false
+    agent_open = false redraw()
+}
+fn agent_clear_today(){
+    if !agent_clear_pending || !agent_open || agent_phase != "idle" || voice_phase != 0 ||
+        agent_proposal != nil || agent_review != nil || ai_busy { return }
+    if !agent_store_session(agent_empty_session(today_day())) {
+        agent_error = "清空今日对话失败，请重试。" redraw() return
+    }
+    agent_sequence = agent_sequence + 1
+    agent_reply = nil agent_call_snapshot = nil agent_batch = nil agent_answer_input = nil
+    agent_current_id = 0 agent_input = ""
+    agent_history_end = 0
+    ui.agent_input_field.set_text("")
+    agent_clear_pending = false
+    agent_error = "今日对话和摘要已清空；库存、菜单和已确认偏好仍保留。"
+    redraw()
+}
+fn agent_history_window(){
+    let count = agent_session.messages.len()
+    let end = agent_history_end
+    if end == 0 || end > count { return {start: max(0, count - 1) end: count count: count} }
+    {start: max(0, end - 2) end: end count: count}
+}
+fn agent_history_older(){
+    let page = agent_history_window()
+    if page.start > 0 { agent_history_end = page.start redraw() }
+}
+fn agent_history_newer(){
+    let page = agent_history_window()
+    if page.end < page.count {
+        agent_history_end = page.end + 2
+        if agent_history_end >= page.count { agent_history_end = 0 }
+        redraw()
+    }
+}
+fn agent_microphone(){
+    if agent_proposal != nil { agent_error = "请先核对或取消当前建议。" redraw() return }
+    if voice_phase == 2 { voice_stop() return }
+    if voice_phase != 0 { return }
+    if !agent_open || !agent_entry_allowed() || agent_phase != "idle" || ai_busy ||
+        recognition_phase != "" || storage_blocked || !use_ai {
+        agent_error = "请先结束当前操作并启用在线 AI，再使用语音。" redraw() return
+    }
+    if voice_capability == "unsupported" {
+        agent_error = "当前宿主暂不支持语音识别，请使用文字输入。" redraw() return
+    }
+    if voice_capability == "unconfigured" {
+        agent_error = "语音识别需要在宿主中配置 MiniMax；文字 Agent 仍可使用。" redraw() return
+    }
+    if voice_capability != "ready" {
+        agent_error = "正在检查语音能力，请稍后再试。" redraw() return
+    }
+    agent_error = ""
+    voice_phase = 1 voice_deadline = time_now() + 180
+    voice_sequence = voice_sequence + 1
+    voice_request("permission_status", "microphone.permission.status", {})
+    redraw()
+}
+fn agent_exact_keys(value, fields){
+    if value == nil || !value.is_object() { return false }
+    let count = 0
+    for key item in value { count = count + 1 }
+    if count != fields.len() { return false }
+    for key in fields { if !has_field(value, key) { return false } }
+    true
+}
+fn agent_food(id){
+    try {
+        if !(id > 0) || id != floor(id) { return nil }
+        for food in state.foods { if food.id == id { return food } }
+    } catch { return nil }
+    nil
+}
+fn agent_batch_specified(food, user_text){
+    let same = 0
+    let ordinal = 0
+    for item in state.foods {
+        if item.name == food.name {
+            same = same + 1
+            if item.id == food.id { ordinal = same }
+        }
+    }
+    if same <= 1 { return true }
+    let label = "" + ordinal
+    if user_text.search("第" + label + "批") >= 0 || user_text.search("第 " + label + " 批") >= 0 ||
+        user_text.search("#" + food.id) >= 0 { return true }
+    let words = ["" "一" "二" "三" "四" "五" "六" "七" "八" "九" "十"]
+    if ordinal < words.len() && user_text.search("第" + words[ordinal] + "批") >= 0 { return true }
+    false
+}
+fn agent_row(value, id, edit_id){
+    let fields = ["name" "quantity_text" "unit" "package_size_text" "package_size_unit"
+        "average_item_grams_text" "remaining_days_text" "printed_expires_on"
+        "kcal_text" "protein_text" "fiber_text" "vitamin_c_text"]
+    if !agent_exact_keys(value, fields) { return nil }
+    for item in [value.name value.quantity_text value.unit value.package_size_text value.package_size_unit
+        value.average_item_grams_text value.remaining_days_text value.printed_expires_on
+        value.kcal_text value.protein_text value.fiber_text value.vitamin_c_text] {
+        if !item.is_string() || item.len() > 120 { return nil }
+    }
+    if value.name.trim() == "" || value.name.trim().len() > 40 ||
+        !(value.quantity_text.trim().to_f64() > 0) ||
+        (canonical_unit(value.unit) == "" && !package_unit(value.unit)) { return nil }
+    let row = {row_id: id selected: true name: value.name.trim()
+        quantity_text: value.quantity_text.trim() unit: value.unit
+        package_size_text: value.package_size_text.trim() package_size_unit: value.package_size_unit
+        average_item_grams_text: value.average_item_grams_text.trim()
+        remaining_days_text: value.remaining_days_text.trim() printed_expires_on: value.printed_expires_on.trim()
+        kcal_text: value.kcal_text.trim() protein_text: value.protein_text.trim()
+        fiber_text: value.fiber_text.trim() vitamin_c_text: value.vitamin_c_text.trim()}
+    if draft_batch(row, "manual", "", edit_id) == nil { return nil }
+    row
+}
+fn agent_marker(snapshot){
+    {day: snapshot.day profile_revision: snapshot.profile_revision
+        inventory_revision: snapshot.inventory_revision authority: snapshot.authority}
+}
+fn agent_marker_matches(marker){
+    marker != nil && marker.day == today_day() && marker.profile_revision == state.profile_revision &&
+        marker.inventory_revision == state.revision &&
+        marker.authority.to_json() == agent_authority_marker().to_json() && !storage_blocked
+}
+fn agent_proposal_from(output, snapshot){
+    let name = output.tool_name
+    let args = output.tool_args
+    let rows = []
+    let food = nil
+    let intent = ""
+    let memory_candidate = output.memory_candidate
+    if name == "propose_inventory_add" {
+        if !agent_exact_keys(args, ["rows"]) || !args.rows.is_array() ||
+            args.rows.len() < 1 || args.rows.len() > 10 || output.memory_candidate != "" {
+            ai_validation_error = "添加建议需要 1–10 行完整草稿。" return nil
+        }
+        for item in args.rows {
+            let row = agent_row(item, rows.len() + 1, 0)
+            if row == nil { ai_validation_error = "添加草稿的字段或数量无效。" return nil }
+            rows.push(row)
+        }
+    }
+    if name == "propose_inventory_edit" {
+        if !agent_exact_keys(args, ["food_id" "row"]) || output.memory_candidate != "" {
+            ai_validation_error = "编辑建议需要具体批次和完整替换草稿。" return nil
+        }
+        food = agent_food(args.food_id)
+        if food == nil { ai_validation_error = "目标批次已不存在。" return nil }
+        if !agent_batch_specified(food, snapshot.message_text) {
+            ai_validation_error = "同名食材有多批，请先指定第几批。" return nil
+        }
+        let row = agent_row(args.row, 1, food.id)
+        if row == nil { ai_validation_error = "替换草稿的字段、数量或日期无效。" return nil }
+        if row.name != food.name { ai_validation_error = "编辑草稿的食材名称与指定批次不一致。" return nil }
+        let normalized = normalize_batch(draft_batch(row, "manual", "", food.id), food.id)
+        if normalized == nil || normalized.canonical_unit != food.canonical_unit {
+            ai_validation_error = "编辑草稿的单位族与指定批次不一致。" return nil
+        }
+        rows.push(row)
+    }
+    if name == "propose_inventory_remove" {
+        if !agent_exact_keys(args, ["food_id" "reason"]) || output.memory_candidate != "" ||
+            !args.reason.is_string() || args.reason.trim() == "" || args.reason.len() > 120 {
+            ai_validation_error = "移除建议需要具体批次与可见理由。" return nil
+        }
+        food = agent_food(args.food_id)
+        if food == nil { ai_validation_error = "目标批次已不存在。" return nil }
+        if !agent_batch_specified(food, snapshot.message_text) {
+            ai_validation_error = "同名食材有多批，请先指定第几批。" return nil
+        }
+    }
+    if name == "propose_menu_generate" || name == "propose_menu_adjust" {
+        if agent_today_menu().locked || current_stage() == nil || program_expired() {
+            ai_validation_error = "今日菜单已锁定或当前阶段无效。" return nil
+        }
+        if name == "propose_menu_adjust" && agent_today_menu().menu_id == 0 {
+            ai_validation_error = "当前没有已接受菜单可调整。" return nil
+        }
+        if !agent_exact_keys(args, ["goal"]) || !args.goal.is_string() ||
+            args.goal.trim() == "" || args.goal.to_chars().len() > 500 {
+            ai_validation_error = "菜单要求需要一段不超过 500 字的待核对文字。" return nil
+        }
+        intent = args.goal.trim()
+        if memory_candidate != "" && !agent_allowed_preference(memory_candidate, snapshot.message_text) {
+            memory_candidate = ""
+        }
+    }
+    if name == "handoff_consumption" {
+        if !agent_exact_keys(args, ["text" "food_hints"]) || output.memory_candidate != "" ||
+            !args.text.is_string() || args.text.trim() == "" || args.text.len() > 300 ||
+            !args.food_hints.is_array() || args.food_hints.len() > 5 {
+            ai_validation_error = "实际摄入建议仅需描述和食材提示。" return nil
+        }
+        for hint in args.food_hints {
+            if !hint.is_string() || hint.trim() == "" || hint.len() > 40 {
+                ai_validation_error = "食材提示应为简短名称。" return nil
+            }
+        }
+    }
+    {tool_name: name args: args rows: rows food: food intent: intent
+        marker: agent_marker(snapshot) user_text: snapshot.message_text
+        memory_candidate: memory_candidate origin: -1}
+}
+fn agent_task(){
+    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存、阶段、菜单和对话。当前 input 的已确认业务状态高于旧对话和摘要：旧助手说待核对，不代表用户后来没有确认；若当前库存已有对应批次，不得仍称该批次未写入。当前明确指令优先于软记忆；过敏与忌口是硬限制。库存批次按 food_id 区分，多个同名批次或缺少数量时选 none 并在 reply 追问。不修改档案；过敏、忌口、体重、目标修改指引档案页。只能输出一个 reply、tool_name、tool_args、memory_candidate 对象。reply 只用用户可读中文，不提 input 字段名、JSON 状态码或内部编号。提到库存到期时用 expiry_date 和 expiry_status，不输出 expires_on_day 日序号；提到库存数量时用 quantity_label，piece 对用户说“个”；解释营养不足时用日常中文，不提 menu_candidates、nutrition_kcal、uses 等字段名。reply 不得声称本轮待核对提案已修改、加入、删除、确认或记录。无需操作选 none、空对象和空 memory_candidate。库存添加用 propose_inventory_add，参数为 rows 数组，每行完整字符串字段 name、quantity_text、unit、package_size_text、package_size_unit、average_item_grams_text、remaining_days_text、printed_expires_on、kcal_text、protein_text、fiber_text、vitamin_c_text；所有行字段都是字符串，未知字段填空字符串，最多10行。库存编辑用 propose_inventory_edit，参数 food_id 与完整 row；请从 inventory_batches 的同一批次原字段构造完整替换行，数量写 quantity_text，单位写 unit，未提供的营养四项均填空串，名称与单位族保持不变。移除用 propose_inventory_remove，参数 food_id 与 reason。菜单生成或调整只输出待核对意图，tool_args 仅有 goal 字符串，不生成三餐明细；goal 用用户可读中文概括当前要求，最多 500 字，保留本轮调整和明确限制。用户确认意图后由菜单模块根据当前档案、阶段和库存重新生成，菜单页还要再次核对接受。菜单已锁或阶段为空时选 none；确认任意一餐后今日菜单不能解锁或调整，reply 只能解释锁定并可建议明日，不得建议解锁。实际摄入用 handoff_consumption，参数 text 和 food_hints 字符串数组，不把吃掉误当移除。工具仅提出待核对建议，不直接写入。用户在菜单提案中明确请求确认后记住普通饮食偏好时，把原话中的偏好短句填入 memory_candidate；其他情况为空。只有该字段通过本地校验且菜单最终确认后才可能保存，reply 不得承诺一定记住。"
+}
+fn agent_schema(){
+    {type: "object" properties: {
+        reply: {type: "string" minLength: 1 maxLength: 1200}
+        tool_name: {type: "string" enum: ["none" "propose_inventory_add" "propose_inventory_edit"
+            "propose_inventory_remove" "propose_menu_generate" "propose_menu_adjust" "handoff_consumption"]}
+        tool_args: {type: "object"}
+        memory_candidate: {type: "string" maxLength: 120}}
+        required: ["reply" "tool_name" "tool_args" "memory_candidate"] additionalProperties: false}
+}
+fn agent_valid_envelope(output){
+    try {
+        if !output.is_object() || agent_input_bytes(output) > 16 * 1024 ||
+            !output.reply.is_string() || output.reply.trim() == "" ||
+            output.reply.to_chars().len() > 1200 || !output.tool_name.is_string() ||
+            !output.tool_args.is_object() || !output.memory_candidate.is_string() ||
+            output.memory_candidate.to_chars().len() > 120 { return false }
+        let field_count = 0
+        for key value in output { field_count = field_count + 1 }
+        if field_count != 4 { return false }
+        let known = false
+        for name in ["none" "propose_inventory_add" "propose_inventory_edit"
+            "propose_inventory_remove" "propose_menu_generate" "propose_menu_adjust" "handoff_consumption"] {
+            if output.tool_name == name { known = true }
+        }
+        if !known { return false }
+        if output.tool_name == "none" {
+            return output.tool_args.to_json() == "{}" && output.memory_candidate == ""
+        }
+        true
+    } catch { false }
+}
+fn agent_public_reply(value){
+    let text = value
+    for food in state.foods {
+        if has_field(food, "expires_on_day") && food.expires_on_day > 0 {
+            text = text.replace(regex("到期日\\s*" + food.expires_on_day, "g"),
+                "到期日 " + calendar_text(food.expires_on_day))
+        }
+    }
+    text = text.replace(regex("menu_candidates\\s*(?:中|内|里)", "gi"), "可用于菜单的食材中")
+    text = text.replace(regex("menu_candidates", "gi"), "可用于菜单的食材")
+    text = text.replace(regex("inventory_batches", "gi"), "库存批次")
+    text = text.replace(regex("nutrition_kcal\\s*参考完整", "gi"), "热量参考齐全")
+    text = text.replace(regex("nutrition_kcal\\s*缺失", "gi"), "缺少热量参考")
+    text = text.replace(regex("nutrition_kcal", "gi"), "热量参考")
+    text = text.replace(regex("nutrition_known", "gi"), "营养参考状态")
+    text = text.replace(regex("uses\\s*中", "gi"), "列出的")
+    text = text.replace(regex("uses", "gi"), "食材用量")
+    text = text.replace(regex("canonical_quantity", "gi"), "库存数量")
+    text = text.replace(regex("canonical_unit", "gi"), "单位")
+    text = text.replace(regex("expires_on_day", "gi"), "到期日")
+    text = text.replace(regex("current_day", "gi"), "今天")
+    text = text.replace(regex("piece", "gi"), "个")
+    text = text.replace(regex("按本地校验规则", "g"), "根据现有食材条件")
+    text = text.replace(regex("到期日\\s*[:：=为是]?\\s*\\d{5,6}", "g"), "到期时间请以库存页为准")
+    for key in ["food_id" "batch_id" "menu_id" "stage_id"] {
+        let id = key + "\\s*(?:[:：=]|为|是)?\\s*\\d+"
+        text = text.replace(regex("[（(]\\s*(?:内部\\s*)?" + id + "\\s*[）)]", "gi"), "")
+        text = text.replace(regex("[,，]?\\s*(?:内部\\s*)?" + id, "gi"), "")
+    }
+    text.trim()
+}
+fn agent_safe_proposal_reply(reply, proposal){
+    let visible = agent_public_reply(reply)
+    if proposal == nil { return visible }
+    for claim in ["已记录" "已经记录" "已加入" "已经加入" "已添加" "已经添加"
+        "已修改" "已经修改" "已移除" "已经移除" "已删除" "已经删除"
+        "已确认" "已经确认" "已保存" "已经保存" "已更新" "已经更新"] {
+        if visible.search(claim) >= 0 {
+            return agent_proposal_title(proposal) + "；请核对，最终确认前不会修改业务数据。"
+        }
+    }
+    visible
+}
+fn agent_authority_marker(){
+    let stage_id = 0
+    let stage_revision = ""
+    let stage = current_stage()
+    if stage != nil && !program_expired() {
+        stage_id = stage.id
+        stage_revision = stage.to_json()
+    }
+    let menu = agent_today_menu()
+    let menu_revision = ""
+    for p in state.plans {
+        if p.id == menu.menu_id && p.day == health_day() && p.accepted {
+            menu_revision = p.to_json()
+        }
+    }
+    {stage_id: stage_id stage_revision: stage_revision menu_id: menu.menu_id
+        menu_status: menu.status menu_revision: menu_revision menu_locked: menu.locked}
+}
+fn agent_snapshot(current_id, text){
+    {day: today_day() profile_revision: state.profile_revision inventory_revision: state.revision
+        authority: agent_authority_marker() business_state: state.to_json()
+        message_id: current_id message_text: text
+        next_message_id: agent_session.next_message_id entry: agent_entry_context(tab)}
+}
+fn agent_snapshot_matches(snapshot){
+    if snapshot == nil || snapshot.day != today_day() || agent_session == nil ||
+        agent_session.day != snapshot.day || state.profile_revision != snapshot.profile_revision ||
+        state.revision != snapshot.inventory_revision ||
+        agent_authority_marker().to_json() != snapshot.authority.to_json() ||
+        state.to_json() != snapshot.business_state ||
+        agent_session.next_message_id != snapshot.next_message_id || agent_input != snapshot.message_text ||
+        pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || removal != nil ||
+        reset_pending || market != nil || receipt != nil || recognition_phase != "" || ai_busy || voice_phase != 0 ||
+        storage_blocked || !use_ai { return false }
+    for item in agent_session.messages {
+        if item.id == snapshot.message_id && item.kind == "user" && item.text == snapshot.message_text { return true }
+    }
+    false
+}
+fn agent_fail(reason){
+    agent_sequence = agent_sequence + 1
+    agent_phase = "idle" agent_deadline = 0 agent_call_snapshot = nil agent_batch = nil agent_answer_input = nil
+    agent_error = reason
+    redraw()
+}
+fn agent_provider_error(reply){
+    try {
+        if reply.error.is_string() {
+            let error = reply.error
+            if error.search("no_provider:") == 0 { return "宿主没有可用的 AI 提供方，请在 AI 提供方设置中核对后重试。" }
+            if error.search("provider:") == 0 { return "AI 提供方未能完成请求，请检查连接或额度后重试。" }
+            if error.search("invalid_output:") == 0 || error.search("too_large:") == 0 {
+                return "模型回复未通过格式检查，请重试。"
+            }
+            if error.search("rate:") == 0 || error.search("budget:") == 0 {
+                return "宿主已达到模型调用限额，请稍后重试。"
+            }
+            if error.search("bad_request:") == 0 { return "本轮请求未通过宿主校验，请缩短问题后重试。" }
+            if error.search("capability:") == 0 { return "宿主暂未允许本应用调用模型，请检查应用安装。" }
+        }
+    } catch { }
+    "本轮请求失败，请检查宿主 AI 配置或稍后重试。"
+}
+fn agent_advance_turn(){
+    if !agent_snapshot_matches(agent_call_snapshot) {
+        agent_fail("本地状态或输入已变化，请核对文字后重试。") return
+    }
+    let projection = agent_projection_base(agent_call_snapshot.entry)
+    let next = agent_context_plan(projection, agent_session,
+        agent_call_snapshot.message_id, agent_call_snapshot.message_text)
+    if next.status == "too_large" {
+        agent_fail("本轮上下文超过安全长度，请缩短输入或整理库存后重试。") return
+    }
+    let token = agent_sequence
+    agent_deadline = time_now() + 95
+    if next.status == "compact" {
+        agent_phase = "compacting" agent_batch = next.batch
+        try {
+            host.request("model.complete", {task: agent_compaction_task()
+                input: {summary: agent_batch.summary messages: agent_batch.messages}
+                schema: agent_compaction_schema() class: "fast"},
+                |r| { agent_reply = {token: token mode: "compacting" reply: r} })
+        } catch { agent_fail("整理上下文失败，请重试。") }
+    } else {
+        agent_phase = "answering" agent_batch = nil
+        agent_answer_input = next.input
+        try {
+            host.request("model.complete", {task: agent_task() input: next.input
+                schema: agent_schema() class: "strong"},
+                |r| { agent_reply = {token: token mode: "answering" reply: r} })
+        } catch { agent_fail("暂时无法连接模型，请重试。") }
+    }
+    redraw()
+}
+fn agent_send(){
+    if !agent_open || !agent_entry_allowed() || agent_phase != "idle" || agent_proposal != nil ||
+        ai_busy || recognition_phase != "" || voice_phase != 0 || storage_blocked || !use_ai {
+        agent_error = "请先结束当前操作并启用在线 AI，再发送。" redraw() return
+    }
+    agent_ensure_today()
+    let text = agent_input
+    if text.trim() == "" || text.to_chars().len() > 1500 {
+        agent_error = "请输入 1 到 1500 字。" redraw() return
+    }
+    let reuse = false
+    if agent_current_id > 0 {
+        for item in agent_session.messages {
+            if item.id == agent_current_id && item.kind == "user" && item.text == text { reuse = true }
+        }
+    }
+    if !reuse {
+        agent_current_id = agent_append("user", text)
+        if agent_current_id == 0 { agent_error = "保存消息失败，请重试。" redraw() return }
+    }
+    agent_input = text
+    agent_clear_pending = false
+    agent_history_end = 0
+    agent_error = ""
+    agent_correction = 0
+    agent_sequence = agent_sequence + 1
+    agent_call_snapshot = agent_snapshot(agent_current_id, text)
+    agent_advance_turn()
+}
+fn agent_received(envelope){
+    if envelope == nil || envelope.token != agent_sequence || agent_call_snapshot == nil ||
+        envelope.mode != agent_phase || (agent_phase != "compacting" && agent_phase != "answering") { return }
+    if time_now() >= agent_deadline || !agent_snapshot_matches(agent_call_snapshot) {
+        agent_fail("等待期间状态已变化或请求已超时，请核对文字后重试。") return
+    }
+    let output = nil
+    try { if envelope.reply.is_ok { output = envelope.reply.data.output } } catch { }
+    if output == nil {
+        agent_fail(agent_provider_error(envelope.reply)) return
+    }
+    if agent_phase == "compacting" {
+        let next = agent_apply_summary(agent_session, output, agent_batch.through_id)
+        if next == nil || !agent_store_session(next) {
+            agent_fail("整理上下文失败，请重试。") return
+        }
+        agent_advance_turn()
+        return
+    }
+    if !agent_valid_envelope(output) {
+        agent_fail("回复格式无效，请重试；本轮没有修改数据。") return
+    }
+    let proposal = nil
+    if output.tool_name != "none" {
+        ai_validation_error = ""
+        try { proposal = agent_proposal_from(output, agent_call_snapshot) } catch { proposal = nil }
+        if proposal == nil {
+            if (output.tool_name == "propose_menu_generate" || output.tool_name == "propose_menu_adjust") &&
+                ai_validation_error != "" && agent_correction == 0 {
+                agent_correction = 1
+                agent_sequence = agent_sequence + 1
+                let token = agent_sequence
+                agent_deadline = time_now() + 95
+                try {
+                    host.request("model.complete", {task: agent_task() + " 上次菜单未通过本地校验：" + ai_validation_error + "。请只纠正一次并返回完整信封。"
+                        input: agent_answer_input schema: agent_schema() class: "strong"},
+                        |r| { agent_reply = {token: token mode: "answering" reply: r} })
+                } catch { agent_fail("菜单纠正请求失败；本轮没有修改数据。") }
+                redraw() return
+            }
+            if ai_validation_error != "" {
+                agent_fail("建议未通过本地校验：" + ai_validation_error + "；本轮没有修改数据。") return
+            }
+            agent_fail("建议参数未通过本地校验，请核对需求后重试；本轮没有修改数据。") return
+        }
+    }
+    let visible_reply = agent_safe_proposal_reply(output.reply, proposal)
+    if visible_reply == "" || agent_append("assistant", visible_reply) == 0 {
+        agent_fail("保存回复失败，请重试。") return
+    }
+    agent_proposal = proposal
+    agent_sequence = agent_sequence + 1
+    agent_phase = "idle" agent_deadline = 0 agent_call_snapshot = nil agent_batch = nil agent_answer_input = nil
+    agent_current_id = 0 agent_input = "" agent_error = ""
+    ui.agent_input_field.set_text("")
+    redraw()
+}
+fn agent_proposal_title(proposal){
+    if proposal.tool_name == "propose_inventory_add" { return "建议添加 " + proposal.rows.len() + " 批食材" }
+    if proposal.tool_name == "propose_inventory_edit" { return "建议修改「" + proposal.food.name + "」批次" }
+    if proposal.tool_name == "propose_inventory_remove" { return "建议移除「" + proposal.food.name + "」" }
+    if proposal.tool_name == "propose_menu_generate" { return "建议生成今日三餐" }
+    if proposal.tool_name == "propose_menu_adjust" { return "建议调整今日三餐" }
+    "建议记录实际食用"
+}
+fn agent_proposal_detail(proposal){
+    if proposal.tool_name == "propose_inventory_add" { return "请逐项核对名称、数量、单位、保质期和营养参考。" }
+    if proposal.tool_name == "propose_inventory_edit" { return "具体批次：" + proposal.food.name + " · " + proposal.food.quantity + proposal.food.unit }
+    if proposal.tool_name == "propose_inventory_remove" { return "请核对具体批次和移除原因。" }
+    if proposal.tool_name == "propose_menu_generate" || proposal.tool_name == "propose_menu_adjust" {
+        return "菜单要求：" + agent_public_reply(proposal.intent) + "。点击后核对要求，再交给菜单模块生成。"
+    }
+    "你的描述：" + agent_public_reply(proposal.user_text) + " 点击后核对实际食用。"
+}
+fn agent_menu_review_active(){
+    agent_review != nil && (agent_review.tool_name == "propose_menu_generate" ||
+        agent_review.tool_name == "propose_menu_adjust")
+}
+fn agent_finish_review(result){
+    let origin = -1
+    if agent_review != nil { origin = agent_review.origin }
+    agent_review = nil agent_proposal = nil
+    if origin >= 0 { tab = origin }
+    if result != "" && agent_append("local", result) == 0 {
+        agent_error = "状态消息未保存，请核对当前页面。"
+    }
+    redraw()
+}
+fn agent_cancel_proposal(){
+    if agent_proposal == nil { return }
+    agent_proposal = nil
+    agent_append("local", "已取消建议；业务数据没有变化。")
+    redraw()
+}
+fn agent_open_review(){
+    if agent_proposal == nil { return }
+    if !agent_marker_matches(agent_proposal.marker) {
+        agent_cancel_proposal() agent_error = "状态已变化，请重新提问。" redraw() return
+    }
+    agent_review = agent_proposal
+    agent_review.origin = tab
+    agent_proposal = nil agent_open = false
+    let name = agent_review.tool_name
+    if name == "propose_inventory_add" || name == "propose_inventory_edit" {
+        editing_id = 0
+        if name == "propose_inventory_edit" { editing_id = agent_review.food.id }
+        intake_draft = {draft_id: "agent-" + time_now() mode: "manual" image_path: ""
+            rows: agent_review.rows.to_json().parse_json() busy: false error: ""}
+        tab = 2
+        message = "请在库存草稿页逐项核对；最终确认前不会写入。"
+    }
+    if name == "propose_inventory_remove" {
+        tab = 2
+        request_remove(agent_review.food.id)
+        message = "请核对具体批次，再确认移除。"
+    }
+    if name == "propose_menu_generate" || name == "propose_menu_adjust" {
+        tab = 3
+        goal = agent_review.intent
+        message = "请核对或修改菜单要求；确认后由菜单模块生成候选，接受前不会扣库存。"
+    }
+    if name == "handoff_consumption" {
+        tab = 3
+        let found = false
+        for i in state.plans.len() {
+            if state.plans[i].id == state.active && state.plans[i].accepted &&
+                state.plans[i].day == health_day() && !state.plans[i].consumed {
+                selected = i found = true
+            }
+        }
+        if found {
+            let p = choose_plan()
+            let matched = -1
+            let match_count = 0
+            for slot in 3 {
+                if agent_review.args.text.search(meal_label(slot)) >= 0 &&
+                    !menu_slot_recorded(p.id, slot) { matched = slot match_count = match_count + 1 }
+            }
+            if match_count > 1 { matched = -1 }
+            if match_count == 0 {
+            for slot in 3 {
+                if !menu_slot_recorded(p.id, slot) {
+                    let slot_matched = false
+                    for item in p.meals[slot].uses {
+                        let mentioned = agent_review.args.text.search(item.name) >= 0
+                        for hint in agent_review.args.food_hints { if hint == item.name { mentioned = true } }
+                        if mentioned { slot_matched = true }
+                    }
+                    if slot_matched { matched = slot match_count = match_count + 1 }
+                }
+            }
+            }
+            if match_count == 1 { prepare_consume_slot(matched) }
+            else { message = "请在今日菜单中选择实际食用的餐次，再核对食物和用量。" }
+        } else { agent_finish_review("今日没有可核对的已接受菜单；请先接受菜单，再记录实际摄入。") return }
+    }
+    redraw()
+}
+fn agent_confirm_menu_review(){
+    if agent_review == nil || (agent_review.tool_name != "propose_menu_generate" &&
+        agent_review.tool_name != "propose_menu_adjust") { return }
+    if !agent_marker_matches(agent_review.marker) || agent_today_menu().locked {
+        agent_finish_review("状态已变化，菜单建议失效；正式菜单未修改。") return
+    }
+    if goal.trim() == "" || goal.to_chars().len() > 500 {
+        message = "菜单要求不能为空且不得超过 500 字。" redraw() return
+    }
+    if state.paused || pending || plan_removal != nil || storage_blocked {
+        message = "请先恢复管家并完成当前核对，再生成菜单。" redraw() return
+    }
+    if !online_ready() { redraw() return }
+    let confirmed = goal.trim()
+    agent_menu_intent_memory = {goal: confirmed day: today_day()
+        profile_revision: state.profile_revision inventory_revision: state.revision
+        candidate: agent_review.memory_candidate user_text: agent_review.user_text}
+    agent_finish_review("已确认菜单要求；请在菜单页核对生成结果，接受前不会扣库存。")
+    tab = 3 goal = confirmed
+    online_plan_ready("用户请求")
+    if !ai_busy { agent_menu_intent_memory = nil }
+    redraw()
+}
+fn agent_watchdog(){
+    if agent_reply != nil {
+        let received = agent_reply agent_reply = nil
+        agent_received(received)
+    }
+    if agent_phase != "idle" && agent_deadline > 0 && time_now() >= agent_deadline {
+        agent_fail("等待超时，请重试；本轮没有修改数据。")
+    }
+    if agent_open && agent_session != nil && agent_session.day != today_day() {
+        agent_fail("已进入新的一天，请重新发送。")
+        agent_ensure_today() agent_current_id = 0 agent_input = ""
+        redraw()
+    }
+    if agent_proposal != nil && !agent_marker_matches(agent_proposal.marker) {
+        agent_proposal = nil
+        agent_append("local", "状态已变化，待核对建议已失效。")
+        redraw()
+    }
+    if agent_review != nil && !agent_marker_matches(agent_review.marker) {
+        intake_draft = nil editing_id = 0 removal = nil
+        if pending { pending = false consumption = [] }
+        agent_finish_review("状态已变化，本次核对已失效；请重新提问。")
+    }
+}
 fn canonical_unit(unit){
     if unit == "g" || unit == "kg" { return "g" }
     if unit == "ml" || unit == "L" { return "ml" }
@@ -1934,8 +2943,9 @@ fn render_dashboard(){
         if ai_error != "" && ai_phase == 1 { status = "在线 AI · 需要重试" }
     }
     if ai_busy { status = "在线 AI · 正在规划" }
-    if voice_phase == 1 { status = "语音输入 · 正在打开麦克风" }
+    if voice_phase == 1 || voice_phase == 4 { status = "语音输入 · 正在打开麦克风" }
     if voice_phase == 2 { status = "语音输入 · 正在聆听" }
+    if voice_phase == 5 { status = "语音输入 · 正在保存" }
     if voice_phase == 3 { status = "语音输入 · 正在识别" }
     if state.paused { status = "管家已暂停" }
     if state.auto_generate { status = status + " · 自动生成" }
@@ -1949,9 +2959,14 @@ fn redraw(){
     if onboarding_step == 4 && recognition_phase == "" { start_timeout(0.01, || render_dashboard()) }
 }
 fn navigate(index){
+    if agent_review != nil {
+        intake_draft = nil editing_id = 0 removal = nil pending = false consumption = []
+        agent_finish_review("已离开核对页；建议取消，业务数据没有变化。") return
+    }
     if pending { message = "请先确认或取消本次扣减。" redraw() return }
     if plan_removal != nil { message = "请先确认或取消删除菜单。" redraw() return }
-    if voice_phase != 0 { message = "请先结束本次语音输入。" redraw() return }
+    if voice_phase != 0 { voice_cancel() }
+    agent_open = false
     tab = index
     details = false
     reset_pending = false
@@ -1979,6 +2994,8 @@ fn load(){
         if !restored { storage_blocked = true message = "库存文件无法读取，已停止写入并保留原文件。请先备份修复。" }
     }
     ensure_extended_state()
+    agent_load_session()
+    agent_load_memory()
     if state.plans.len() > 0 { selected = state.plans.len() - 1 }
     use_ai = state.model_enabled == true
     booted = true
@@ -1986,6 +3003,7 @@ fn load(){
     redraw()
     read_ai_config()
     probe_vision()
+    probe_voice()
 }
 fn batch_grams(food){
     if food.canonical_unit == "g" { return food.canonical_quantity }
@@ -2068,7 +3086,7 @@ fn plan_use_by_id(food_id, desired_grams){
 // nutrition at once; a menu that now breaks 忌口、营养参考 or 额度 is refused with
 // the reason and the edit is rolled back.
 fn revise_meal(index, text){
-    if pending || plan_removal != nil { return }
+    if pending || plan_removal != nil || agent_today_menu().locked { return }
     let p = choose_plan()
     if p == nil || index < 0 || index >= p.meals.len() { return }
     let target = text.trim().to_f64()
@@ -2093,7 +3111,7 @@ fn revise_meal(index, text){
     redraw()
 }
 fn swap_meal_food(index, use_index){
-    if pending || plan_removal != nil { return }
+    if pending || plan_removal != nil || agent_today_menu().locked { return }
     let p = choose_plan()
     if p == nil || index < 0 || index >= p.meals.len() { return }
     if use_index < 0 || use_index >= p.meals[index].uses.len() { return }
@@ -2127,7 +3145,7 @@ fn swap_meal_food(index, use_index){
 // Issue #24: the number typed on the 缺菜清单 is how much to top up, so the day
 // menu's usage becomes 库存可用 + that number. Nothing about the list is stored.
 fn revise_shortfall(name, text){
-    if pending || plan_removal != nil { return }
+    if pending || plan_removal != nil || agent_today_menu().locked { return }
     let p = choose_plan()
     if p == nil { return }
     let typed = text.trim()
@@ -2154,7 +3172,7 @@ fn revise_shortfall(name, text){
 // "不需要" is the same write with the target set to what is already available,
 // so the row's gap becomes zero without the list keeping a number of its own.
 fn drop_shortfall(name){
-    if pending || plan_removal != nil { return }
+    if pending || plan_removal != nil || agent_today_menu().locked { return }
     let p = choose_plan()
     if p == nil { return }
     let before = state.to_json()
@@ -2424,7 +3442,7 @@ fn toggle_group(name){
     else { expanded_name = name }
     redraw()
 }
-fn draft_batch(row){
+fn draft_batch(row, mode, image_path, edit_id){
     let days_text = row.remaining_days_text.trim()
     let date_text = row.printed_expires_on.trim()
     if days_text != "" && date_text != "" { return nil }
@@ -2432,7 +3450,7 @@ fn draft_batch(row){
     let precision = "unknown"
     if days_text != "" {
         let days = days_text.to_f64()
-        if (!(days >= 0) && editing_id == 0) || days < -365 || days > 365 || days != floor(days) { return nil }
+        if (!(days >= 0) && edit_id == 0) || days < -365 || days > 365 || days != floor(days) { return nil }
         expiry = today_day() + days
         precision = "estimated"
     }
@@ -2446,7 +3464,7 @@ fn draft_batch(row){
     let average = 0
     if row.average_item_grams_text.trim() != "" { average = row.average_item_grams_text.trim().to_f64() }
     let quantity = row.quantity_text.trim().to_f64()
-    if (row.unit == "个" || (package_unit(row.unit) && editing_id == 0)) && quantity != floor(quantity) { return nil }
+    if (row.unit == "个" || (package_unit(row.unit) && edit_id == 0)) && quantity != floor(quantity) { return nil }
     if row.package_size_text.trim() != "" && !(size > 0) { return nil }
     if row.average_item_grams_text.trim() != "" && !(average > 0) { return nil }
     let size_unit = row.package_size_unit
@@ -2454,8 +3472,8 @@ fn draft_batch(row){
     if package_unit(row.unit) && size == 0 && size_unit != "" { return nil }
     if row.unit != "个" && !(package_unit(row.unit) && size_unit == "piece") { average = 0 }
     let source = "manual"
-    if intake_draft.mode == "receipt_image" { source = "receipt_image" }
-    if intake_draft.mode == "food_image" { source = "food_image" }
+    if mode == "receipt_image" { source = "receipt_image" }
+    if mode == "food_image" { source = "food_image" }
     let batch = {name: row.name.trim() quantity: quantity unit: row.unit
         package_size: size package_size_unit: size_unit
         average_item_grams: average expires_on_day: expiry expiry_precision: precision source: source}
@@ -2467,7 +3485,7 @@ fn draft_batch(row){
         batch.nutrition = {kcal: row.kcal_text.trim().to_f64() protein: row.protein_text.trim().to_f64()
             fiber: row.fiber_text.trim().to_f64() vitamin_c: row.vitamin_c_text.trim().to_f64()}
     }
-    if intake_draft.image_path != "" { batch.source_image_path = intake_draft.image_path }
+    if image_path != "" { batch.source_image_path = image_path }
     if normalize_batch(batch, 1) == nil { return nil }
     batch
 }
@@ -2480,7 +3498,11 @@ fn preview_food(){
     message = "请核对草稿；只有最终确认才会写入库存。"
     redraw()
 }
-fn cancel_preview(){ intake_draft = nil message = "已取消草稿，库存没有变化。" redraw() }
+fn cancel_preview(){
+    intake_draft = nil message = "已取消草稿，库存没有变化。"
+    if agent_review != nil { editing_id = 0 agent_finish_review("已取消库存建议；库存没有变化。") }
+    else { redraw() }
+}
 fn probe_vision(){
     vision_sequence = vision_sequence + 1
     let token = vision_sequence
@@ -2489,6 +3511,8 @@ fn probe_vision(){
     catch { vision_phase = 2 }
 }
 fn begin_recognition(mode){
+    if agent_phase != "idle" { message = "请先等待 Agent 回复或整理完成。" redraw() return }
+    if voice_phase != 0 { message = "请先结束语音输入。" redraw() return }
     if !online_ready() { redraw() return }
     if vision_phase != 1 {
         message = "当前宿主暂不支持图片识别，请使用手动录入"
@@ -2674,12 +3698,16 @@ fn draft_rejected(reason){
 }
 fn confirm_intake(){
     if intake_draft == nil || intake_draft.busy { return }
+    if agent_review != nil && !agent_marker_matches(agent_review.marker) {
+        intake_draft = nil editing_id = 0
+        agent_finish_review("库存或阶段已变化，建议失效；未写入库存。") return
+    }
     intake_draft.error = ""
     ui.draft_error.set_text("")
     let batches = []
     for row in intake_draft.rows {
         if row.selected {
-            let batch = draft_batch(row)
+            let batch = draft_batch(row, intake_draft.mode, intake_draft.image_path, editing_id)
             if batch == nil {
                 draft_rejected("第 " + row.row_id + " 行（" + row.name + "）：" + draft_issue(row))
                 return
@@ -2692,10 +3720,14 @@ fn confirm_intake(){
     let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "add" batches: batches}
     if editing_id > 0 { operation.type = "edit" operation.batch_id = editing_id operation.batch = batches[0] }
     if !apply_inventory_operation(operation, nil) { draft_rejected(message) return }
+    let from_agent = agent_review != nil
     intake_draft = nil editing_id = 0 reset_manual_form()
+    if from_agent { agent_finish_review("已确认库存建议；库存已按核对结果更新。") }
     message = "已确认入库。已有菜单会重新校验；需要新菜单时，请回首页点击生成今日菜单。"
-    if !state.paused && ai_phase == 1 && nutrition_items(false).len() > 0 { estimate_nutrition(nutrition_items(false), "stock", "库存营养估算") }
-    else { if state.auto_generate && !state.paused && state.profile.done { plan("库存变化") } }
+    if !from_agent {
+        if !state.paused && ai_phase == 1 && nutrition_items(false).len() > 0 { estimate_nutrition(nutrition_items(false), "stock", "库存营养估算") }
+        else { if state.auto_generate && !state.paused && state.profile.done { plan("库存变化") } }
+    }
     redraw()
 }
 fn edit_food(id){
@@ -2719,18 +3751,27 @@ fn edit_food(id){
     }
     redraw()
 }
-fn cancel_edit(){ editing_id = 0 intake_draft = nil removal = nil reset_manual_form() message = "已取消修改。" redraw() }
+fn cancel_edit(){
+    editing_id = 0 intake_draft = nil removal = nil reset_manual_form() message = "已取消修改。"
+    if agent_review != nil { agent_finish_review("已取消库存建议；库存没有变化。") }
+    else { redraw() }
+}
 fn request_remove(id){
     for f in state.foods { if f.id == id { removal = f } }
     intake_draft = nil message = "请确认移除这批食材。此操作不会计入已食用进度。" redraw()
 }
 fn confirm_remove(){
     if removal == nil { return }
+    if agent_review != nil && !agent_marker_matches(agent_review.marker) {
+        removal = nil agent_finish_review("库存或阶段已变化，移除建议失效。") return
+    }
     let operation = {operation_id: "pantry-local-" + state.next_operation_id type: "discard" batch_id: removal.id}
     if !apply_inventory_operation(operation, nil) { redraw() return }
+    let from_agent = agent_review != nil
     removal = nil editing_id = 0 reset_manual_form()
+    if from_agent { agent_finish_review("已确认移除指定批次；不计入实际摄入。") }
     message = "已移除，旧菜单会重新校验。"
-    if state.auto_generate && !state.paused { plan("库存移除") }
+    if !from_agent && state.auto_generate && !state.paused { plan("库存移除") }
     redraw()
 }
 fn choose_plan(){
@@ -2939,6 +3980,8 @@ fn save_day_menu(meals, reason, source, numeric){
     prune_menus()
     record(reason + " → " + source + " → 生成日菜单 #" + p.id)
     if !commit(before) { return nil }
+    agent_ensure_today()
+    agent_memory_pending = nil
     selected = state.plans.len() - 1
     p
 }
@@ -3080,10 +4123,6 @@ fn ai_watchdog(){
     if recognition_phase == "model" && recognition_deadline > 0 && time_now() >= recognition_deadline {
         recognition_failed("图片识别超时")
     }
-    if voice_reply != nil {
-        let received = voice_reply voice_reply = nil
-        apply_voice_reply(received)
-    }
     if ai_phase == 0 && config_deadline > 0 && time_now() >= config_deadline {
         probe_sequence = probe_sequence + 1 ai_phase = 3
         ai_error = "读取 AI 配置超时，请在设置里重新读取。"
@@ -3093,54 +4132,218 @@ fn ai_watchdog(){
         stop_ai()
         if has_field(ai_snapshot, "nutrition_flow") { apply_nutrition_reply({is_ok: false error: "营养估算超时"}) } else { ai_failure("AI 生成超时，已停止等待。迟到的结果不会写入，可稍后重试。") }
     }
-    if voice_phase == 1 && time_now() >= voice_deadline {
-        voice_sequence = voice_sequence + 1 voice_phase = 0 voice_deadline = 0
-        message = "打开麦克风超时，请检查宿主与系统权限。" redraw()
-    }
-    if voice_phase == 2 && time_now() >= voice_deadline { stop_voice() }
-    if voice_phase == 3 && time_now() >= voice_deadline {
-        voice_sequence = voice_sequence + 1 voice_phase = 0 voice_deadline = 0
-        message = "语音识别超时，迟到的结果不会填入。请检查网络后重试。" redraw()
-    }
+    voice_watchdog()
+    agent_watchdog()
     // The Overview reads the current stage from today's date. When the civil day
     // turns over while the app stays open, re-render so the new stage and its
     // targets appear without a click or restart.
     let today = health_day()
     if booted && today != shown_day { shown_day = today redraw() }
 }
-fn voice_received(token, action, r){ voice_reply = {token: token action: action reply: r} }
-fn apply_voice_reply(envelope){
-    if envelope.token != voice_sequence { return }
-    let r = envelope.reply
-    if envelope.action == "start" {
-        if !r.is_ok {
-            voice_phase = 0 message = "语音输入启动失败：" + r.error
-        } else {
-            voice_phase = 2 voice_deadline = time_now() + 18
-            message = "正在听，请说出这一餐想吃什么；说完后再点一次麦克风。"
+fn probe_voice(){
+    voice_capability = "checking"
+    voice_probe_deadline = time_now() + 12
+    voice_probe_next = 0
+    voice_probe_attempts = 0
+    request_voice_probe()
+}
+fn request_voice_probe(){
+    voice_probe_sequence = voice_probe_sequence + 1
+    voice_probe_attempts = voice_probe_attempts + 1
+    let token = voice_probe_sequence
+    try { host.request("model.transcribe_capability", {}, |r| {
+        if token == voice_probe_sequence { voice_probe_reply = {token: token reply: r} }
+    }) }
+    catch { voice_capability = "unsupported" voice_probe_deadline = 0 }
+}
+fn voice_request(action, method, args){
+    voice_action = action
+    let token = voice_sequence
+    try { host.request(method, args, |r| { voice_received(token, action, r) }) }
+    catch { voice_fail("语音操作失败，请检查宿主后重试。") }
+}
+fn voice_received(token, action, r){
+    if token != voice_sequence {
+        // A cancelled start can still create a host session; discard it there.
+        if action == "start" && r.is_ok && r.data != nil && r.data.session.is_string() {
+            try { host.request("microphone.record_cancel", {session: r.data.session}, nil) } catch { }
         }
+        return
+    }
+    if action != voice_action { return }
+    voice_reply = {token: token action: action reply: r}
+}
+fn voice_cancel(){
+    let session = voice_session
+    voice_sequence = voice_sequence + 1
+    voice_phase = 0 voice_deadline = 0 voice_next_poll = 0
+    voice_action = "" voice_reply = nil voice_session = ""
+    if session != "" {
+        try { host.request("microphone.record_cancel", {session: session}, nil) } catch { }
+    }
+}
+fn voice_fail(reason){
+    voice_cancel()
+    agent_error = reason
+    redraw()
+}
+fn voice_permission_ok(data){
+    data != nil && data.is_object() && data.supported == true &&
+        data.app_policy_granted == true && data.app_consent == true && data.os_permission == "granted"
+}
+fn voice_start(){
+    try {
+        if fs.exists(voice_path) { fs.remove(voice_path) }
+    } catch { voice_fail("无法删除上次临时录音，请检查应用存储后重试。") return }
+    voice_phase = 4 voice_deadline = time_now() + 25
+    voice_request("start", "microphone.record_start", {path: voice_path max_duration_ms: 30000})
+    redraw()
+}
+fn voice_stop(){
+    if voice_phase != 2 || voice_session == "" { return }
+    voice_phase = 5 voice_deadline = time_now() + 25
+    voice_request("stop", "microphone.record_stop", {session: voice_session})
+    redraw()
+}
+fn voice_status(){
+    if voice_session == "" || voice_action != "" { return }
+    voice_request("status", "microphone.record_status", {session: voice_session})
+}
+fn voice_transcribe(){
+    voice_phase = 3 voice_deadline = time_now() + 60
+    agent_error = "正在识别语音…"
+    voice_request("transcribe", "model.transcribe", {audio: {app_path: voice_path}})
+    redraw()
+}
+fn voice_apply_status(data){
+    if data == nil || !data.is_object() || data.session != voice_session {
+        voice_fail("录音状态无效，请重新录音。") return
+    }
+    if data.status == "saved" {
+        if data.path != voice_path { voice_fail("录音文件路径无效，请重新录音。") return }
+        voice_transcribe() return
+    }
+    if data.status == "failed" || data.status == "cancelled" {
+        if data.error.is_string() && data.error.search("foreground") >= 0 {
+            voice_fail("录音因切换窗口而取消；请保持冰箱管家窗口在前台，录完后再返回聊天。") return
+        }
+        if data.error.is_string() && data.error.search("device_unavailable:") == 0 {
+            voice_fail("麦克风没有提供音频，请检查 Windows 的麦克风设备和隐私设置。") return
+        }
+        voice_fail("录音失败或已取消，请检查麦克风后重试。") return
+    }
+    if data.status != "recording" && data.status != "starting" && data.status != "waiting_device" &&
+        data.status != "checking_permission" && data.status != "preparing" && data.status != "stopping" {
+        voice_fail("录音状态无效，请重新录音。") return
+    }
+    voice_next_poll = time_now() + 0.5
+}
+fn apply_voice_reply(envelope){
+    if envelope.token != voice_sequence || envelope.action != voice_action || voice_phase == 0 { return }
+    voice_action = ""
+    let r = envelope.reply
+    if !r.is_ok {
+        if envelope.action == "transcribe" { voice_fail("语音识别失败，请检查 MiniMax 配置或网络后重试。") }
+        else if r.error.is_string() && r.error.search("foreground_required:") == 0 {
+            voice_fail("请保持冰箱管家窗口在前台，再点击麦克风。")
+        } else if r.error.is_string() && r.error.search("device_unavailable:") == 0 {
+            voice_fail("麦克风没有提供音频，请检查 Windows 的麦克风设备和隐私设置。")
+        } else { voice_fail("麦克风操作失败或权限未授予，请检查宿主与系统设置后重试。") }
+        return
+    }
+    if envelope.action == "permission_status" || envelope.action == "permission_request" {
+        if voice_permission_ok(r.data) { voice_start() return }
+        if envelope.action == "permission_status" && r.data != nil && r.data.is_object() &&
+            r.data.supported == true && r.data.app_policy_granted == true &&
+            (r.data.os_permission == "not_determined" || r.data.os_permission == "denied" ||
+             (r.data.os_permission == "granted" && r.data.app_consent != true)) {
+            voice_request("permission_request", "microphone.permission.request", {}) return
+        }
+        voice_fail("麦克风权限未授予，请在宿主或系统设置中允许后重试。") return
+    }
+    if envelope.action == "start" {
+        if r.data == nil || !r.data.is_object() || !r.data.session.is_string() {
+            voice_fail("录音启动结果无效，请重试。") return
+        }
+        voice_session = r.data.session
+        voice_phase = 2 voice_deadline = time_now() + 45
+        voice_next_poll = time_now() + 0.5
+        agent_error = "正在聆听；说完后再点一次麦克风。"
         redraw() return
     }
-    voice_phase = 0 voice_deadline = 0
-    if !r.is_ok {
-        message = "语音识别失败：" + r.error
-    } else {
-        goal = ("" + r.data.text).trim()
-        if goal == "" { message = "没有识别到清晰内容，请重新录音。" }
-        if goal != "" { message = "语音已填入，请确认文字后再生成菜单。" }
+    if envelope.action == "stop" || envelope.action == "status" { voice_apply_status(r.data) return }
+    if envelope.action == "transcribe" {
+        if r.data == nil || !r.data.is_object() || !r.data.text.is_string() {
+            voice_fail("语音识别结果无效，请重试。") return
+        }
+        let transcript = r.data.text.trim()
+        if transcript == "" { voice_fail("没有识别到清晰内容，请重新录音或直接输入。") return }
+        let next = transcript
+        if agent_input.trim() != "" { next = agent_input + "\n" + transcript }
+        if next.to_chars().len() > 1500 { voice_fail("识别文字超过输入上限，请缩短录音后重试。") return }
+        voice_session = ""
+        voice_cancel()
+        agent_input = next
+        agent_error = "语音已填入，请核对文字后再发送。"
+        redraw()
+        ui.agent_input_field.set_text(next)
+        ui.agent_input_field.take_key_focus()
     }
-    redraw()
+}
+fn voice_watchdog(){
+    if voice_probe_reply != nil {
+        let received = voice_probe_reply voice_probe_reply = nil
+        if received.token == voice_probe_sequence {
+            voice_capability = "unsupported"
+            if !received.reply.is_ok && received.reply.error.search("rate:") == 0 &&
+                voice_probe_attempts < 5 && time_now() + 0.6 < voice_probe_deadline {
+                voice_capability = "checking"
+                voice_probe_next = time_now() + 0.6
+            } else {
+                voice_probe_deadline = 0
+                try {
+                    if received.reply.is_ok && received.reply.data.schema == 1 && received.reply.data.supported == true {
+                        if received.reply.data.configured == true { voice_capability = "ready" }
+                        else { voice_capability = "unconfigured" }
+                    }
+                } catch { }
+            }
+            redraw()
+        }
+    }
+    if voice_capability == "checking" && voice_probe_deadline > 0 && time_now() >= voice_probe_deadline {
+        voice_probe_sequence = voice_probe_sequence + 1
+        voice_capability = "unsupported" voice_probe_deadline = 0 voice_probe_next = 0
+        redraw()
+    }
+    if voice_capability == "checking" && voice_probe_next > 0 && time_now() >= voice_probe_next {
+        voice_probe_next = 0
+        request_voice_probe()
+    }
+    if voice_reply != nil {
+        let received = voice_reply voice_reply = nil
+        apply_voice_reply(received)
+    }
+    if voice_phase == 0 { return }
+    if !agent_open || !agent_entry_allowed() || agent_phase != "idle" || agent_proposal != nil ||
+        ai_busy || recognition_phase != "" || storage_blocked || !use_ai {
+        voice_cancel() redraw() return
+    }
+    if voice_deadline > 0 && time_now() >= voice_deadline {
+        voice_fail("语音操作超时，请检查麦克风或网络后重试。") return
+    }
+    if (voice_phase == 2 || voice_phase == 5) && voice_action == "" && time_now() >= voice_next_poll {
+        voice_status()
+    }
 }
 fn toggle_voice(){
-    message = "官方宿主尚未提供本应用所需的语音识别服务，请直接输入文字。"
-    redraw()
-}
-fn stop_voice(){
-    voice_phase = 0 voice_deadline = 0
+    if !agent_open { agent_open_panel() }
+    agent_microphone()
 }
 fn stop_ai(){
     ai_sequence = ai_sequence + 1
     ai_busy = false
+    agent_menu_intent_memory = nil
 }
 fn cancel_ai(){ stop_ai() message = "已停止等待，库存未变化。后台请求可能仍会计费，请稍候再生成。" redraw() }
 fn automatic_reason(reason){
@@ -3177,6 +4380,7 @@ fn toggle_model(){
 }
 fn ai_failure(text){
     ai_busy = false ai_error = text message = text
+    agent_menu_intent_memory = nil
     if text.search("no_provider") >= 0 {
         ai_phase = 2
         message = "宿主未配置可用模型，请到 OctoSense 的 AI 提供方设置配置后重新生成。"
@@ -3191,28 +4395,26 @@ fn ai_failure(text){
     redraw()
 }
 fn recipe_display_text(text){
-    text.replace(regex("库存全部\\s*nutrition_known\\s*=\\s*false", "gi"), "库存食材都缺少营养参考")
+    agent_public_reply(text.replace("menu_candidates", "当前可用食材")
+        .replace("inventory_batches", "库存批次")
+        .replace(regex("库存全部\\s*nutrition_known\\s*=\\s*false", "gi"), "库存食材都缺少营养参考")
         .replace(regex("nutrition_known\\s*=\\s*false", "gi"), "营养参考不完整")
         .replace(regex("nutrition_known\\s*=\\s*true", "gi"), "有营养参考")
         .replace(regex("[ \\t]*food_id[ \\t]*[:=]?[ \\t]*\\d+[ \\t]*", "gi"), "相应批次")
         .replace(regex("[ \\t]*(unknown expiry|expiry_unknown)[ \\t]*", "gi"), "保质期未知")
-        .replace(regex("[ \\t]*profile[ \\t]*", "gi"), "饮食档案")
+        .replace(regex("[ \\t]*profile[ \\t]*", "gi"), "饮食档案"))
 }
-fn save_ai_result(output, reason, requested_goal){
+fn build_ai_menu(output, requested_goal, recipe_only){
     ai_validation_error = ""
     try {
-        if output.reason.len() == 0 || output.reason.len() > 1200 {
+        if !agent_exact_keys(output, ["feasible" "reason" "meals"]) || output.feasible != true ||
+            !output.reason.is_string() || output.reason.len() == 0 || output.reason.len() > 1200 {
             ai_validation_error = "reason 缺失或超过 1200 字。"
-            return false
+            return nil
         }
-        if output.feasible != true {
-            ai_error = "这次要求无法满足：" + recipe_display_text(output.reason)
-            message = ai_error
-            return true
-        }
-        if output.meals.len() != 3 {
+        if !output.meals.is_array() || output.meals.len() != 3 {
             ai_validation_error = "必须恰好返回早、中、晚三条 meals。"
-            return false
+            return nil
         }
         let meals = []
         let uses = []
@@ -3220,27 +4422,27 @@ fn save_ai_result(output, reason, requested_goal){
             let raw = output.meals[slot]
             if raw.title.len() == 0 || raw.title.len() > 240 {
                 ai_validation_error = "第 " + (slot + 1) + " 餐的 title 不符合要求。"
-                return false
+                return nil
             }
             if !(raw.minutes >= 1) || raw.minutes > 120 || raw.minutes != floor(raw.minutes) {
                 ai_validation_error = "第 " + (slot + 1) + " 餐的 minutes 必须是 1–120 的整数。"
-                return false
+                return nil
             }
             if raw.steps.len() < 2 || raw.steps.len() > 8 {
                 ai_validation_error = "第 " + (slot + 1) + " 餐的步骤需要 2–8 项。"
-                return false
+                return nil
             }
             if raw.uses.len() == 0 || raw.uses.len() > 4 {
                 ai_validation_error = "第 " + (slot + 1) + " 餐的 uses 需要 1–4 项。"
-                return false
+                return nil
             }
             let meal_uses = []
             for u in raw.uses {
                 let planned = nil
-                if ai_snapshot.recipe_only {
+                if recipe_only {
                     if !(u.quantity > 0) || u.quantity != floor(u.quantity) {
                         ai_validation_error = "第 " + (slot + 1) + " 餐的食材数量必须是正整数。"
-                        return false
+                        return nil
                     }
                     for f in state.foods {
                         if f.id == u.food_id && u.quantity <= f.canonical_quantity { planned = recipe_use(f, u.quantity) }
@@ -3248,7 +4450,7 @@ fn save_ai_result(output, reason, requested_goal){
                 } else {
                     if !(u.grams > 0) || u.grams != floor(u.grams) {
                         ai_validation_error = "第 " + (slot + 1) + " 餐的 grams 必须是正整数。"
-                        return false
+                        return nil
                     }
                     for f in state.foods {
                         if f.id == u.food_id && u.grams <= batch_grams(f) { planned = plan_use(f, u.grams) }
@@ -3256,7 +4458,7 @@ fn save_ai_result(output, reason, requested_goal){
                 }
                 if planned == nil {
                     ai_validation_error = "第 " + (slot + 1) + " 餐的食材不在本次候选内，或用量超出该批次可用量。"
-                    return false
+                    return nil
                 }
                 meal_uses.push(planned)
                 uses.push(planned)
@@ -3264,7 +4466,7 @@ fn save_ai_result(output, reason, requested_goal){
             let recipe = parse_recipe(raw, meal_uses)
             if recipe == nil {
                 ai_validation_error = "第 " + (slot + 1) + " 餐的做法结构不符合 schema。"
-                return false
+                return nil
             }
             meals.push({slot: meal_label(slot) title: recipe.title minutes: raw.minutes uses: meal_uses steps: recipe.steps})
         }
@@ -3274,18 +4476,50 @@ fn save_ai_result(output, reason, requested_goal){
         let p = {id: state.next_id recipe_version: 2 day: health_day() title: "今日三餐" meals: meals uses: uses accepted: false consumed: false
             stage_id: stage_id_now revision: state.revision profile_revision: state.profile_revision created: time_now() reason: recipe_display_text(output.reason) goal: requested_goal
             source: "在线 AI" previous: "" minutes: 45 steps: ""}
-        if ai_snapshot.recipe_only { p.numeric = false p.source = "在线 AI · 营养未核算" }
+        if recipe_only { p.numeric = false p.source = "在线 AI · 营养未核算" }
         let previous = active_plan()
         if previous != nil { p.previous = menu_title(previous) }
         if !validate(p) {
             ai_validation_error = "整份菜单未通过库存用量校验。"
-            return false
+            return nil
         }
+        return p
+    } catch {
+        ai_validation_error = "输出结构无法解析。"
+        nil
+    }
+}
+fn save_ai_result(output, reason, requested_goal){
+    if output.feasible != true {
+        agent_menu_intent_memory = nil
+        ai_error = "这次要求无法满足：" + recipe_display_text(output.reason)
+        message = ai_error
+        return true
+    }
+    let p = build_ai_menu(output, requested_goal, ai_snapshot.recipe_only)
+    if p == nil { return false }
+    try {
         let before = state.to_json()
         state.plans.push(p) state.next_id = state.next_id + 1
         prune_menus()
         record(reason + " → 在线 AI → JSON 与库存用量校验 → 生成日菜单 #" + p.id)
-        if !commit(before) { return true }
+        if !commit(before) { agent_menu_intent_memory = nil return true }
+        agent_ensure_today()
+        let handoff = agent_menu_intent_memory
+        agent_menu_intent_memory = nil
+        let from_agent = handoff != nil && handoff.goal == requested_goal && handoff.day == today_day() &&
+            handoff.profile_revision == state.profile_revision &&
+            handoff.inventory_revision == state.revision
+        agent_memory_pending = nil
+        if from_agent {
+            if handoff.candidate != "" && requested_goal.search(handoff.candidate) >= 0 &&
+                agent_allowed_preference(handoff.candidate, handoff.user_text) {
+                agent_memory_pending = {menu_id: p.id day: today_day() menu_meals: p.meals.to_json()
+                    user_text: handoff.user_text candidate: handoff.candidate}
+            }
+        } else {
+            agent_stage_menu_memory(p, requested_goal, reason)
+        }
         selected = state.plans.len() - 1
         ai_error = ""
         message = "AI 已生成今日早、中、晚三餐菜单。"
@@ -3317,6 +4551,7 @@ fn apply_model_reply(envelope){
         ai_busy = false ai_sequence = ai_sequence + 1
         let current = current_stage()
         if (!state.auto_generate && automatic_reason(ai_snapshot.reason)) || plan_removal != nil || current == nil || current.id != ai_snapshot.program_id || current.consumed_kcal != ai_snapshot.consumed_kcal || state.profile_revision != ai_snapshot.profile_revision || state.revision != ai_snapshot.revision || state.offset != ai_snapshot.offset || goal != ai_snapshot.goal || state.paused || !use_ai || pending {
+            agent_menu_intent_memory = nil
             ai_error = "等待期间库存、目标或运行状态变化，已丢弃旧结果。请重新生成。"
             message = ai_error redraw() return
         }
@@ -3341,6 +4576,8 @@ fn apply_model_reply(envelope){
         redraw()
 }
 fn plan(reason){
+    if agent_phase != "idle" { message = "请先等待 Agent 回复或整理完成。" return }
+    if agent_today_menu().locked { message = "今日已有实际摄入记录，菜单已锁定；明天可重新生成。" return }
     ai_correction = 0 ai_validation_error = ""
     if !state.auto_generate && automatic_reason(reason) { return }
     if storage_blocked { message = "库存文件异常，已停止生成和写入。请先备份修复。" return }
@@ -3355,11 +4592,13 @@ fn retry_ai(){ if pending { estimate_actual() return } plan("用户请求重试"
 fn generate(){
     if ai_busy { message = "菜单正在生成，请稍候或停止等待。" redraw() return }
     if voice_phase != 0 { message = "请先结束语音输入并确认识别文字。" redraw() return }
+    agent_memory_pending = nil
     goal = ui.request.text().trim()
     if goal == "" { goal = "优先吃掉快过期的食材" }
     plan("用户请求") tab = 3 details = false redraw()
 }
 fn accept(){
+    if agent_today_menu().locked { message = "今日已有实际摄入记录，不能更改已接受菜单。" redraw() return }
     let p = choose_plan()
     let issue = menu_issue(p)
     if issue != "" { message = "这份菜单不能接受：" + issue redraw() return }
@@ -3367,11 +4606,15 @@ fn accept(){
     p.accepted = true
     state.active = p.id
     record("接受日菜单 #" + p.id + "：" + menu_title(p))
-    if commit(before) { message = "已接受今日菜单。库存不足的食材补上后会自动变为可执行。" }
+    if commit(before) {
+        agent_confirm_menu_memory(p)
+        message = "已接受今日菜单。库存不足的食材补上后会自动变为可执行。"
+    }
     redraw()
 }
 fn begin_consume(){
     let p = choose_plan()
+    if agent_today_menu().locked { message = "今日已有逐餐摄入记录，请按剩余餐次分别核对。" redraw() return }
     if p == nil || !p.accepted || p.id != state.active || !validate(p) { message = "只能扣减当前已接受且有效的菜单。" redraw() return }
     pending = true message = "请核对实际食用数量。最后一次确认后才会扣减。" redraw()
 }
@@ -3422,17 +4665,50 @@ fn prepare_consume(){
     actual_estimate_attempted = false
     begin_consume() estimate_actual()
 }
+fn menu_slot_recorded(menu_id, slot){
+    for entry in state.execution_records {
+        if has_field(entry, "menu_id") && entry.menu_id == menu_id &&
+            entry.day == health_day() && entry.slot == slot { return true }
+    }
+    false
+}
+fn prepare_consume_slot(slot){
+    if pending || ai_busy || slot < 0 || slot > 2 { return }
+    let p = choose_plan()
+    if p == nil || p.meals.len() != 3 || !p.accepted || p.id != state.active || p.consumed ||
+        p.day != health_day() || menu_slot_recorded(p.id, slot) { return }
+    let meal = p.meals[slot]
+    let candidate = p.to_json().parse_json()
+    candidate.uses = meal.uses
+    if !validate(candidate) { message = "本餐食材或库存已变化，请核对后重试。" redraw() return }
+    consumption = meal.uses.to_json().parse_json() init_actual_labels()
+    trial_slot = slot consumption_program = current_stage().id actual_title = meal.title extra_kcal_text = "0"
+    pending = true actual_estimate_attempted = false
+    message = "请核对本餐实际食物和用量；最终确认前不会扣库存。"
+    estimate_actual() redraw()
+}
 fn confirm_consume(){
     if !pending || ai_busy { return }
+    if agent_review != nil && !agent_marker_matches(agent_review.marker) {
+        pending = false consumption = []
+        agent_finish_review("菜单或库存已变化，实际摄入核对失效。") return
+    }
     if !actual_estimate_attempted && nutrition_items(true).len() > 0 { estimate_actual() return }
     let program = current_stage()
     if program == nil || program.id != consumption_program { actual_error("周期已变化，请取消并重新确认。") return }
-    if trial_slot >= 0 { confirm_trial_actual() return }
+    if trial_slot >= 0 && is_experience() { confirm_trial_actual() return }
     let p = choose_plan()
     if p == nil || p.consumed || !p.accepted || p.id != state.active { actual_error("当前菜单已变化，请重新核对。") return }
-    finalize_actual(p, p.id)
+    if trial_slot >= 0 {
+        if menu_slot_recorded(p.id, trial_slot) { actual_error("本餐已经记录，请勿重复扣减。") return }
+        finalize_actual(p.meals[trial_slot], p.id)
+    } else { finalize_actual(p, p.id) }
 }
-fn cancel_consume(){ pending = false trial_slot = -1 consumption = [] message = "已取消，库存没有变化。" redraw() }
+fn cancel_consume(){
+    pending = false trial_slot = -1 consumption = [] message = "已取消，库存没有变化。"
+    if agent_review != nil { agent_finish_review("已取消实际摄入核对；库存没有变化。") }
+    else { redraw() }
+}
 fn step_history(delta){
     if pending || plan_removal != nil { return }
     selected = clamp(selected + delta, 0, state.plans.len() - 1)
@@ -3467,6 +4743,9 @@ fn confirm_delete_plan(){
     if was_active { state.active = 0 }
     record("删除日菜单 #" + plan_removal.id + "：" + plan_removal.title + "（不改变库存或用餐记录）")
     if !commit(before) { redraw() return }
+    if agent_memory_pending != nil && agent_memory_pending.menu_id == plan_removal.id {
+        agent_memory_pending = nil
+    }
     selected = min(selected, state.plans.len() - 1)
     plan_removal = nil details = false
     message = "菜单已删除，库存和用餐记录保持不变。"
@@ -3475,7 +4754,7 @@ fn confirm_delete_plan(){
 }
 fn check_risk(){
     if onboarding_step != 4 { return }
-    if !booted || storage_blocked || pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || ai_busy || voice_phase != 0 || (use_ai && (ai_phase == 0 || ai_phase == 3)) { return }
+    if !booted || storage_blocked || pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || ai_busy || agent_phase != "idle" || voice_phase != 0 || (use_ai && (ai_phase == 0 || ai_phase == 3)) { return }
     if now() - state.cycle_start >= 604800 {
         let before = state.to_json()
         state.cycle_start = now() state.handled = 0 state.baseline = risk_count()
@@ -3541,6 +4820,7 @@ fn request_demo(){ reset_pending = true message = "演示会替换这个脚本�
 fn cancel_demo(){ reset_pending = false message = "已取消替换。" redraw() }
 fn install_demo(){
     stop_ai()
+    agent_memory_pending = nil
     let before = state.to_json()
     if !state.demo {
         let result = fs.write("before-demo.json", before)
@@ -3589,6 +4869,7 @@ fn restore_before_demo(){
     if previous == nil { message = "备份无法读取，未替换当前库存。" redraw() return }
     let before = state.to_json()
     stop_ai()
+    agent_memory_pending = nil
     let records = state.execution_records.to_json().parse_json()
     let next = state.execution_next let stage_next = state.stage_next
     state = previous
@@ -3884,7 +5165,7 @@ fn finalize_actual(recommendation, plan_id){
     }
     let before = state.to_json()
     let calories = estimate.kcal + extra
-    let entry = {id: state.execution_next program_id: program.id slot: trial_slot
+    let entry = {id: state.execution_next program_id: program.id menu_id: plan_id slot: trial_slot
         program: {name: program.name days: program.days kind: program.kind started: program.started
             kcal_goal: program.kcal_goal protein_goal: program.protein_goal fiber_goal: program.fiber_goal vitamin_c_goal: program.vitamin_c_goal}
         at: now() day: health_day() title: actual_title.trim()
@@ -3899,8 +5180,28 @@ fn finalize_actual(recommendation, plan_id){
     program.consumed_fiber = program.consumed_fiber + estimate.fiber
     program.consumed_vitamin_c = program.consumed_vitamin_c + estimate.vitamin_c
     if plan_id > 0 {
-        for saved_plan in state.plans { if saved_plan.id == plan_id { saved_plan.consumed = true saved_plan.recorded_kcal = calories } }
-        state.active = 0
+        let complete = trial_slot < 0
+        if !complete {
+            complete = true
+            for slot in 3 { if !menu_slot_recorded(plan_id, slot) { complete = false } }
+        }
+        let recorded_total = 0
+        if complete {
+            for item in state.execution_records {
+                if has_field(item, "menu_id") && item.menu_id == plan_id && item.day == health_day() {
+                    recorded_total = recorded_total + item.kcal
+                }
+            }
+        }
+        for saved_plan in state.plans {
+            if saved_plan.id == plan_id {
+                if complete {
+                    saved_plan.recorded_kcal = recorded_total
+                    saved_plan.consumed = true
+                }
+            }
+        }
+        if complete { state.active = 0 }
     }
     state.consumed_kcal = program_today_kcal(program) state.meal_count = state.meal_count + 1
     state.last_meal = entry.title state.last_goal = goal
@@ -3913,6 +5214,7 @@ fn finalize_actual(recommendation, plan_id){
     else { state.revision = state.revision + 1 saved = commit(before) }
     if !saved { redraw() return }
     pending = false details = false extra_kcal_text = "0" consumption = []
+    if agent_review != nil { agent_finish_review("已确认实际摄入；库存和营养由用餐确认流程更新。") }
     message = "已按实际内容记录摄入与库存。"
     if !estimate.complete { message = "已按实际克数记录并扣库存；部分食物营养未知，不冒充完整摄入或达标。" }
     if calories > program.daily_kcal || program_today_kcal(program) > program.daily_kcal { message = message + "今日超过参考目标，已如实记录。" }
@@ -4268,7 +5570,7 @@ View{width: Fill height: Fill flow: Overlay
     SolidView{width: Fill height: Fill draw_bg.color: #xffffff18}
     View{width: Fill height: Fill padding: 0
         GlassCard{
-            app_body := View{width: Fill height: Fill on_render: || {
+            app_body := View{width: Fill height: Fill flow: Overlay on_render: || {
                 if recognition_phase != "" {
                     View{width: Fill height: Fill flow: Down align: Align{x: .5 y: .5} padding: 24
                         Frost{width: 720 height: Fit padding: 24 spacing: 14 new_batch: true
@@ -4995,6 +6297,7 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                 }
                                 Quiet{text: "+  更新冰箱" on_click: || navigate(2)}
+                                if agent_entry_allowed() { Quiet{text: "问管家" on_click: || agent_open_panel()} }
                             }
                             content := View{width: Fill height: Fill on_render: || { ScrollYView{width: Fill height: Fill flow: Down spacing: 16 padding: Inset{right: 5}
                                 if ai_busy {
@@ -5366,6 +6669,9 @@ View{width: Fill height: Fill flow: Overlay
                                 if tab == 3 && pending {
                                     Frost{
                                         Heading{text: "确认实际食用"}
+                                        if agent_review != nil && agent_review.tool_name == "handoff_consumption" {
+                                            Hint{text: "你的描述：" + agent_public_reply(agent_review.user_text) + " 请按实际情况修改，建议不会自动扣库存。"}
+                                        }
                                         Hint{text: "推荐菜单保留不变。库存外食物只计摄入；库存内按本次确认数量扣减。营养由 AI 自动估算，可用包装标签校正。"}
                                         actual_title_input := Field{text: actual_title empty_text: "实际餐食名称" on_change: |text| { actual_title = text }}
                                         Hint{text: "额外用油、饮料热量：没有可留空或填0。"}
@@ -5393,7 +6699,11 @@ View{width: Fill height: Fill flow: Overlay
                                             }
                                         }
                                         Copy{text: "从库存补充 / 替换（先移除原项）"}
-                                        for f in state.foods { if recipe_eligible(f) { Quiet{text: "添加 " + f.name + " · 库存 " + f.canonical_quantity + f.canonical_unit on_click: || add_actual_stock(f.id)} } }
+                                        for f in state.foods {
+                                            if recipe_eligible(f) {
+                                                Quiet{text: "添加 " + f.name + " · 库存 " + f.canonical_quantity + agent_unit_label(f.canonical_unit) on_click: || add_actual_stock(f.id)}
+                                            }
+                                        }
                                         Copy{text: "补记库存外食物（不扣冰箱库存）"}
                                         external_name := Field{text: actual_name empty_text: "实际食物名称" on_change: |text| { actual_name = text }}
                                         external_grams := Field{text: actual_grams empty_text: "实际克数" on_change: |text| { actual_grams = text }}
@@ -5412,15 +6722,25 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                 }
                                 if tab == 3 && !is_experience() && !pending {
+                                    if agent_menu_review_active() {
+                                        Frost{padding: 22 spacing: 12
+                                            Heading{text: "核对菜单要求"}
+                                            Hint{text: "确认后才交给菜单模块重新生成候选；生成结果仍需在此页核对并接受。"}
+                                            agent_menu_goal := Field{text: goal empty_text: "请写出本次菜单要求" on_change: |text| { goal = text }}
+                                            Action{text: "确认要求并生成候选" enabled: !ai_busy on_click: || agent_confirm_menu_review()}
+                                            Soft{text: "取消建议" on_click: || agent_finish_review("已取消菜单建议；正式菜单和库存没有变化。")}
+                                        }
+                                    }
                                     View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: .5}
                                         View{width: Fill height: Fit flow: Down spacing: 4
                                             Heading{text: "今日菜单 · 早 / 中 / 晚" draw_text.text_style.font_size: 30}
                                             if state.auto_generate { Hint{text: "自动生成已开启：库存、临期或用餐变化可生成新菜单，仍需你确认接受。"} }
                                             else { Hint{text: "手动生成：库存变化和临期只更新或提醒，点击生成才创建新菜单。"} }
                                         }
-                                        Quiet{text: "+ 再给我一个备选" enabled: !ai_busy && plan_removal == nil on_click: || generate_alternative()}
+                                        Quiet{text: "+ 再给我一个备选" enabled: !ai_busy && plan_removal == nil && !agent_menu_review_active() on_click: || generate_alternative()}
                                     }
                                     let p = choose_plan()
+                                    if agent_menu_review_active() { p = nil }
                                     if plan_removal != nil {
                                         Frost{padding: 20 spacing: 12
                                             Copy{text: "确认删除这份菜单？" draw_text.text_style: theme.font_bold{font_size: 20}}
@@ -5433,7 +6753,7 @@ View{width: Fill height: Fill flow: Overlay
                                             }
                                         }
                                     }
-                                    if p == nil {
+                                    if p == nil && !agent_menu_review_active() {
                                         Frost{padding: 26
                                             Copy{text: "还没有日菜单" draw_text.text_style: theme.font_bold{font_size: 20}}
                                             Hint{text: message}
@@ -5483,6 +6803,10 @@ View{width: Fill height: Fill flow: Overlay
                                                             for j in meal.uses.len() { Quiet{text: "换掉 " + meal.uses[j].name on_click: || swap_meal_food(i, j)} }
                                                         }
                                                         if details { Copy{text: recipe_display_text(meal.steps)} }
+                                                        if p.accepted && p.id == state.active && !p.consumed &&
+                                                            !menu_slot_recorded(p.id, i) {
+                                                            Soft{text: "记录这餐的实际食用" on_click: || prepare_consume_slot(i)}
+                                                        }
                                                     }
                                                 }
                                                 if p.previous != "" {
@@ -5769,7 +7093,7 @@ View{width: Fill height: Fill flow: Overlay
                                         }
                                         Hint{text: model_status}
                                         Hint{text: "启用在线 AI 后，相关食材、菜单所需档案或所选图片会发送给宿主配置的模型提供方。"}
-                                        Hint{text: "模型密钥只在 OctoSense 的 AI 提供方设置中填写。本版本不读取 ai.env；语音识别暂不可用。"}
+                                        Hint{text: "模型密钥只在 OctoSense 的 AI 提供方设置中填写。本版本不读取 ai.env；本地宿主支持主动录音转写，官方宿主保留文字输入。"}
                                         View{width: Fill height: Fit flow: Right spacing: 8
                                             let model_button = "关闭在线 AI"
                                             if !use_ai { model_button = "启用在线 AI" }
@@ -5795,10 +7119,88 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     if !pending && plan_removal == nil && !p.consumed && menu_ready(p) {
                                         if !p.accepted { Action{text: "接受今日菜单  →" enabled: !ai_busy on_click: || accept()} }
-                                        if p.accepted && p.id == state.active && validate(p) { Action{text: "我吃完了 · 核对实际用量" enabled: !ai_busy on_click: || prepare_consume()} }
+                                        if p.accepted && p.id == state.active && validate(p) && !agent_today_menu().locked {
+                                            Action{text: "我吃完了 · 核对实际用量" enabled: !ai_busy on_click: || prepare_consume()}
+                                        }
                                     }
                                 }
                             }}
+                        }
+                    }
+                    if agent_open && agent_entry_allowed() {
+                        SolidView{width: Fill height: Fill draw_bg.color: #x23211f66}
+                        View{width: Fill height: Fill flow: Right
+                            View{width: Fill height: Fill}
+                            Frost{width: 440 height: Fill padding: 20 spacing: 12 draw_bg.color: #xf8f5f0fa
+                                View{width: Fill height: Fit flow: Right align: Align{y: .5}
+                                    View{width: Fill height: Fit flow: Down spacing: 3
+                                        Heading{text: "问管家" draw_text.text_style.font_size: 25}
+                                        Hint{text: "今天的对话会在本机保存"}
+                                    }
+                                    Quiet{text: "清空" enabled: agent_phase == "idle" && voice_phase == 0 && agent_proposal == nil && agent_review == nil
+                                        on_click: || { agent_clear_pending = true redraw() }}
+                                    Quiet{text: "关闭" on_click: || agent_close_panel()}
+                                }
+                                Divider{}
+                                if agent_clear_pending {
+                                    Tint{width: Fill padding: 12 spacing: 8 draw_bg.color: #f4ede4
+                                        Copy{text: "清空今天的聊天和摘要？库存、菜单和已确认偏好会保留。"}
+                                        View{width: Fill height: Fit flow: Right spacing: 8
+                                            Soft{text: "取消" on_click: || { agent_clear_pending = false redraw() }}
+                                            Action{text: "确认清空" on_click: || agent_clear_today()}
+                                        }
+                                    }
+                                }
+                                let history_page = agent_history_window()
+                                View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                    Soft{text: "更早" enabled: history_page.start > 0 on_click: || agent_history_older()}
+                                    Hint{text: "" + (if history_page.count == 0 { 0 } else { history_page.start + 1 }) + "–" + history_page.end + " / " + history_page.count}
+                                    Soft{text: "较新" enabled: history_page.end < history_page.count on_click: || agent_history_newer()}
+                                }
+                                agent_history := ScrollYView{width: Fill height: Fill flow: Down spacing: 10
+                                    padding: Inset{left: 10 right: 14 top: 8 bottom: 20}
+                                    if history_page.count == 0 { Hint{text: "今天还没有对话。"} }
+                                    for i in agent_session.messages.len() {
+                                        if i >= history_page.start && i < history_page.end {
+                                            let item = agent_session.messages[i]
+                                            let sender = "我"
+                                            if item.kind == "assistant" { sender = "管家" }
+                                            if item.kind == "local" { sender = "状态" }
+                                            Tint{width: Fill padding: 12 spacing: 5 draw_bg.color: #xffffffd9
+                                                Hint{text: sender}
+                                                Copy{text: (if item.kind == "assistant" { agent_public_reply(item.text) } else { item.text }) width: Fill}
+                                            }
+                                        }
+                                    }
+                                }
+                                if agent_phase == "compacting" {
+                                    Hint{text: "Agent 正在整理本次对话…页面中的聊天记录不会被删除"}
+                                }
+                                if agent_phase == "answering" { Hint{text: "管家正在回复…"} }
+                                if voice_phase == 1 || voice_phase == 4 { Hint{text: "正在打开麦克风…"} }
+                                if voice_phase == 2 { Hint{text: "正在录音，再次点击麦克风结束"} }
+                                if voice_phase == 5 { Hint{text: "正在保存录音…"} }
+                                if voice_phase == 3 { Hint{text: "正在转写…"} }
+                                if agent_error != "" { Hint{text: agent_error} }
+                                if agent_proposal != nil {
+                                    Tint{draw_bg.color: #f4ede4
+                                        Copy{text: agent_proposal_title(agent_proposal)}
+                                        Hint{text: agent_proposal_detail(agent_proposal)}
+                                        View{width: Fill height: Fit flow: Right spacing: 8
+                                            Action{text: "去核对 / 去记录" on_click: || agent_open_review()}
+                                            Soft{text: "取消建议" on_click: || agent_cancel_proposal()}
+                                        }
+                                    }
+                                } else {
+                                    agent_input_field := Field{height: 110 is_multiline: true text: agent_input
+                                        empty_text: "输入问题或说出今天的需求（最多 1500 字）"
+                                        on_change: |text| { agent_input = text }}
+                                    View{width: Fill height: Fit flow: Right spacing: 8
+                                        Soft{text: "麦克风" enabled: agent_phase == "idle" && (voice_phase == 0 || voice_phase == 2) on_click: || agent_microphone()}
+                                        Action{text: "发送" enabled: agent_phase == "idle" && voice_phase == 0 on_click: || agent_send()}
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -14,9 +14,13 @@ class ReleaseMetadataTests(unittest.TestCase):
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["id"], "pantry-steward")
         self.assertEqual(manifest["version"], "0.8.0")
-        self.assertEqual(set(manifest["capabilities"]), {"storage", "model", "camera", "files"})
+        self.assertEqual(set(manifest["capabilities"]), {"storage", "model", "camera", "files", "microphone"})
         self.assertEqual(manifest["requires"], ["host-api-v1"])
-        self.assertEqual(manifest["host_api"]["optional"], {"camera.permission.request": 1, "model.complete": 2})
+        self.assertEqual(manifest["host_api"]["optional"], {name: 1 for name in (
+            "camera.permission.request", "microphone.permission.status", "microphone.permission.request",
+            "microphone.record_start", "microphone.record_stop", "microphone.record_status",
+            "microphone.record_cancel", "model.transcribe_capability", "model.transcribe")}
+            | {"model.complete": 2})
         self.assertRegex(manifest["integrity"]["bundle_blake3"], r"^[0-9a-f]{64}$")
 
     def test_listing_links_assets_and_platform(self):
@@ -142,7 +146,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("接受这份菜单后即可一键补齐", script)
         self.assertIn("请先接受这份菜单，再一键补齐", script)
         manifest = json.loads((BUNDLE / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["capabilities"], ["storage", "model", "camera", "files"])
+        self.assertEqual(manifest["capabilities"], ["storage", "model", "camera", "files", "microphone"])
 
     def test_design_decision_a4_estimates_write_back_with_provenance(self):
         # Issue #41 settled the D5-015 conflict in favour of PR #21: an AI

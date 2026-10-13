@@ -1,5 +1,261 @@
 # Migration validation
 
+## Issue #3 PR review repair — 2026-10-13
+
+The Agent menu tools now return a bounded, editable `goal` intent. After the
+person confirms it, the existing Issue #5 `online_plan_ready()` path generates
+the full three-meal candidate from the current profile, stage and inventory.
+The Menu page still requires a separate `accept()`; confirming the Agent
+intent writes no menu or stock. A durable preference candidate is carried
+only to that final acceptance. The production Script VM covers this sequence,
+including zero business writes at intent confirmation and no stock deduction
+at menu acceptance.
+
+The restamped 0.8.0 bundle digest is
+`c9b53e985367ece6f37f6e2cd66331bbb9e7142b0ee570e14624fc03b5099c0a`.
+The pinned Hub `stamp` and `check --allow-unsigned` passed. The full Python
+suite passed 36/36; its Agent VM test ran all 38 production-function cases
+without a skip. On the exact digest, the full modified Windows desktop host
+verified local signatures, digest and admission, then the isolated native
+`--m6-offline` smoke passed 19 checks. The installed app opened the Agent
+panel and showed editable input, microphone and Send. After host quit and
+relaunch, the native restart smoke passed 2 checks. This is full-host
+admission and offline UI evidence, with task-owned synthetic data.
+
+A live provider/menu-intent replay, a microphone replay, and an unmodified
+official-host install were **not run on this digest**. Earlier provider and
+device evidence below belongs to earlier digests. The code-side text fallback
+remains available when speech methods or the provider are unavailable.
+
+## Issue #3 PR baseline sync — 2026-10-13
+
+The Issue #3 branch merged `origin/main` at `900c0c3`, retaining the current
+`model.complete@2` image discovery/import contract and the optional local-host
+microphone/transcription contract in the same bundle. The restamped 0.8.0
+bundle digest is `9cce08f308fdfbe9d3f124c36ac93fb54e8dd4ad53be752b68c57c59b6edac5e`.
+The pinned Hub's offline bundle gate passed with only the expected unsigned
+warning; the launcher check passed; all 36 Python tests passed. A synthetic
+Agent-panel screenshot from the pre-sync candidate is in
+`docs/qa/issue-3-agent-panel.png`; the panel code had no text merge conflict.
+Real model, camera and microphone calls have not been replayed on the merged
+digest. Earlier foreground evidence remains tied to its recorded digest.
+The standalone `card-host` rejected this digest at admission because it does
+not implement `app_policy.device_consent@1`; its offline smoke did not reach
+the app. That path requires the full desktop host, so it is not counted as a
+passed native regression for this digest.
+
+## Issue #3 chat follow-up — 2026-10-13
+
+The bundle digest before the PR baseline sync was `e223fff9ac368106af591be2346df5e4289a20750bc6136883fd92579d24a308`.
+The chat panel now keeps the latest message visible and offers older/newer pages;
+opening it again keeps the selected history page. Message bubbles have horizontal
+and bottom insets. A two-step `清空` action deletes only today's visible messages
+and context summary; inventory, menu and confirmed soft preferences remain.
+Successful Agent replies also clear the native text field, while a failed model
+call retains the draft for retry.
+
+The screenshot's `18262` is an internal day count for 2020-01-01. Both isolated
+test profiles had a synthetic egg batch with that expired date. Agent input now
+uses a calendar date and expiry status; the app does not silently edit stored
+inventory. The model receives the formatted date, expiry status and quantity
+label, while previous assistant messages and the summary are sanitized before
+normal replies and context compaction. The model task now explicitly requires readable dates,
+units and nutrition explanations. User-facing replies and old assistant bubbles
+also filter repeated internal field names, numeric IDs and `piece`;
+actual-consumption review text and the stock picker use the same readable terms.
+
+- Production Script VM cases passed, including session clearing without business
+  writes, history paging after an incoming message, repeated internal-field
+  filtering in model context, expiry display and clearing the native text field
+  on success.
+  Full Python suite passed 36/36 in a task-owned Windows temporary directory.
+- Pinned Hub stamp/check and `tools/launch.py --check --offline` passed with the
+  expected unsigned warning. Isolated official native offline smoke passed 19
+  checks; quit/relaunch restart checks passed 2.
+- In an isolated official native profile with synthetic chat history, the panel
+  opened on the latest item, older/newer navigation returned to it, and `清空`
+  showed a separate confirmation. After confirmation, messages and summary were
+  empty and the business-state file SHA-256 was unchanged. A persisted old
+  assistant reply containing repeated `18262`, `piece`, `menu_candidates`,
+  `nutrition_kcal`, `uses` and `food_id` rendered without those raw tokens.
+  The native bubble inset and scrollbar were inspected from a real screenshot.
+- This follow-up did not call a real model or microphone. The successful-send
+  input clear was verified in the production Script VM; a real-provider repeat
+  remains unverified because the configured host reached its model budget.
+
+## Issue #3 M6 end-to-end checkpoint — 2026-10-13
+
+The Issue #3 candidate uses one Pantry bundle in two isolated Windows host
+profiles. Final source digest: `ee11ba0571780a3351473261c5e0a590f2cc6f74d18441d529d88c878737cb81`.
+The pinned Hub stamp/check passed with the expected unsigned warning. The
+production Agent still uses the host model service and the existing inventory,
+three-meal menu and intake confirmation paths. M6 tightened durable preference
+filtering, current-state precedence in compressed conversations, user-readable
+proposal cards and reply text, and a deterministic fallback when a model
+incorrectly describes an unconfirmed proposal as already recorded. Settings
+now describe the local voice capability and official text fallback accurately.
+
+- **Unit/fixture:** `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`
+  passed 36/36 with a task-owned Windows temporary directory. The production
+  Script VM cases include durable preference versus a one-off meal request and
+  a false `已记录` model reply while an intake proposal remains unconfirmed.
+  `python -X utf8 tools/launch.py --host-workspace ..\OctoSense --check --offline`
+  passed. The final bundle version remains 0.8.0.
+- **Official native, isolated, AI disabled:** `tools/smoke.py --m6-offline`
+  passed 19 checks on a fresh profile: six-cycle onboarding, camera/import
+  fallback, manual stock entry, separate batches, edit/remove, settings and
+  no fabricated menu when online AI is disabled. After host quit/relaunch,
+  `--restart` passed 2 exact-state and home checks. The historical
+  `--legacy-flow` path still assumes a removed local-rule menu switch and was not used
+  as evidence for menu or intake; those paths were exercised separately.
+- **Menu shortage and simulated market, isolated fixture:** a copy of the
+  accepted synthetic three-meal state had spinach reduced to 100 g in a
+  task-owned profile. The Menu page derived `还差 100 克` from 200 g planned
+  use, with no intake record or stock deduction. `一键补齐` carried that gap
+  into one spinach cart line and one pack; submitting a confirmed simulated
+  order left stock revision 10, spinach 100 g and execution count zero.
+  Restart kept an identical `pantry.json` SHA-256. Confirmed receipt then
+  created a separate 300 g spinach batch, set the order to `已收货`, and left
+  execution count zero. The Menu page re-derived `库存够，不用买`; a second
+  restart again preserved the exact state. The order/receipt check used a
+  synthetic stock mutation, not a real purchase or a model response.
+- **Official native, real provider:** on the prior M6 build, the same-day Agent
+  continued across Home, Inventory and Menu; 11 messages survived an official
+  host restart with the same session digest. The unsupported microphone path
+  showed the exact text fallback and created no WAV. A two-egg proposal wrote
+  nothing before review and one inventory event after final confirmation; an
+  ambiguous egg-batch edit asked which batch without a proposal. At 17
+  messages, context compaction advanced its summary cursor while the visible
+  conversation remained. A complete three-meal proposal wrote no stock before
+  confirmation; acceptance saved the menu without deducting inventory. A
+  separately requested `偏好清淡` was saved as soft memory only after accepting
+  its menu, and the next real answer saw it. Task-owned synthetic spinach,
+  mushrooms and tofu were seeded only inside that isolated app-data to make a
+  three-meal menu feasible. The final-digest official text probe received the
+  host `rate`/budget error, retained the unsent draft and made no business
+  write; a final-digest real-provider reply is therefore unverified.
+- **Local native, real provider and device:** an earlier M6 build used a real
+  Windows microphone and configured MiniMax ASR. The person edited its mixed
+  Chinese/English transcript before pressing Send. The resulting real Agent
+  reply said today's menu was locked and suggested tomorrow; inventory
+  revision 11 and one confirmed execution record remained unchanged. A real
+  intake handoff opened the existing review; after removing an unwanted
+  prefilled food and confirming breakfast tofu, stock changed once and the
+  three-meal plan remained locked. A later lunch handoff was cancelled and
+  appended a local result without a business write. The final-digest local
+  host repeated the real microphone test: ASR filled a mixed Chinese/English
+  request about Greek yogurt and tomatoes, the person added `只给建议` and
+  pressed Send. The persisted user message included that edit; the real Agent
+  replied with tomorrow-only advice while explaining that today's menu was
+  locked. Inventory revision remained 11 with one confirmed execution record.
+- **OctoSense:** `cargo test --locked --offline -p octosense-llm-service
+  --test media --quiet` passed 28 cases; `cargo test --locked --offline
+  -p octosense-shell --features app-hub --lib audio_service --quiet` passed 8;
+  `cargo check --locked --offline -p octosense` and
+  `python tools/setup.py --check --cargo` passed. The shell test without
+  `app-hub` selected zero cases and is not counted. Windows speaker playback,
+  hosted CI and sealed Store publication were not tested.
+
+
+## Issue #3 M3 本地提案与业务确认集成 — 2026-10-13
+
+在 `feat/issue-3-global-agent-voice` 上接入七个文字 Agent 工具值：`none`、库存
+add/edit/remove、完整三餐 generate/adjust 和实际摄入 handoff。模型只返回一份提案；
+本地逐字段校验并显示固定卡片。点击卡片进入现有核对页，取消或状态快照变化时
+丢弃内存提案。库存仅在最终确认时走 `apply_inventory_operation()`；菜单复用
+`build_ai_menu()`、`save_day_menu()` 和 `accept()`；实际摄入仍由用户核对后走
+`confirm_consume()`/`finalize_actual()`。普通偏好只在接受同一份有效菜单后写入
+M1 软记忆。内部 `food_id` 等编号从用户可见回复中剔除。
+
+已合入的业务契约使用 `state.plans[]` 三餐，而非设计稿中的独立 `daily_menu`。
+本次补齐常规日菜单逐餐确认：第一餐记录 slot/menu_id 并扣对应实际库存，
+保留三餐菜单；任意一餐确认后锁定当日菜单，三餐确认完才结束 active 菜单。
+
+- 从生产 `bundle/main.splash` 提取的函数 VM：**30 个场景通过**，覆盖七种工具值、
+  批次歧义、非法参数与旧快照、核对/取消、菜单一次纠正、完整三餐接受和记忆。
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`：正常本机权限下
+  **36/36 passed**。默认沙箱的 Windows 临时目录 ACL 会使其中 6 项文件测试出现
+  `PermissionError`；正常权限复跑全部通过。
+- 固定 App Hub `hub stamp bundle` digest
+  `4bd53dd902385ec7b76fbbd2b22e53109d621eac0af39fbb7a93e867241cad2c`；
+  `python -X utf8 tools/launch.py --hub ..\OctoSense\target\release\hub.exe --check`：
+  **PASSED**，仅有 unsigned editable bundle 提示，版本仍为 0.8.0。
+- 任务专用官方 OctoSense 宿主与真实已配置提供方：新增鸡蛋 2 个在核对前零写入，
+  最终确认只产生一次 `add`；新增菠菜 200 g 后取消，`pantry.json` 字节不变。
+  生成与调整完整三餐在核对前零写入，接受后仅菜单变化，库存未提前扣减。
+  豆腐 250→230 g 编辑及菠菜移除各在核对前零写入，确认后分别只产生一次
+  `edit`/`discard`；移除不计实际摄入。
+- 真实模型的“我吃了早餐的豆腐”进入摄入核对；用户取消建议的菠菜后确认豆腐
+  80 g，豆腐库存 250→170 g，执行记录带 slot 0/menu_id，完整三餐菜单仍在，
+  随后备选菜单被本地锁定。最终代码还在官方宿主再次调用真实模型：模型回复
+  “内部 food_id 为 1” 时，保存的 assistant 消息只含公开的“豆腐 230 克”，
+  业务 revision 仍为 5。部分摄入 `recorded_kcal` 的最后展示修补通过代码检查、
+  全量测试与 App Hub gate，最终版的原生逐餐回放 **not run**。M4 麦克风/ASR
+  亦 **not run**。测试结束后已恢复任务专用 profile 的原始业务及会话文件。
+
+## Issue #3 M2 阶段与菜单回调快照补齐 — 2026-10-13
+
+在已有 M2 纯文字 Agent 主流程上，发送前显式记录当前确认阶段 ID/完整阶段快照、
+今日已接受菜单 ID/状态/完整菜单快照和实际摄入锁定标志，同时保留日期、档案/库存版本、
+消息 ID、输入原文和整份业务状态快照。回调先检查 token、阶段与快照，再验证模型信封；
+阶段或菜单变更后旧回复只显示重试提示，不追加 assistant 消息。
+
+- 生产 Splash 函数 VM：**25/25** 场景通过，新增阶段/菜单标识与内容、菜单锁定、
+  旧 token 在新请求期间迟到以及状态变化后的重试覆盖。
+- `python -X utf8 -m unittest discover -s tools -p test_*.py`：正常本机权限下
+  **36/36 passed**。默认沙箱和仓库内临时目录均触发 Windows tempfile ACL 的 6 项
+  PermissionError；正常本机权限复跑成功。
+- 固定 App Hub `hub stamp bundle`：digest
+  `18761744c455a504d105607b9e3ee323316468d3994e49141790a49f6a8e6ff2`；
+  `tools/launch.py --hub ... --check`：**PASSED**（仅 unsigned editable bundle 提示）。
+- 使用既有本地测试密钥在独立 `target/m2-completion-profile` 签名、发布、安装成功，
+  官方桌面窗口已在用户交互桌面启动。合成豆腐库存建档后，第一次真实文字请求
+  保存了 user 消息并收到宿主 `no_provider`；检查时任务专用宿主的已保存模型 profile
+  尚不存在。用户随后在 AI providers 完成模型列表保存；同一任务专用配置复跑通过。
+- 宿主返回已知错误码时 Agent 现在显示具体可重试提示；未知错误仍使用通用提示，
+  不向应用界面暴露提供方、密钥或原始响应。
+- 官方宿主原生 UI + 真实提供方：主页、库存页、菜单页共用当天对话，7 条真实
+  assistant 回复均落入本地 `agent-session.json`；模型正确读取合成库存 1 批豆腐
+  250 克、今日无已接受菜单和当前阶段。达到第 15 条消息时 UI 实际显示压缩提示，
+  摘要游标从 0 推进到 6，再返回本轮回复；16 条 UI 消息原文均保留，滚动可看
+  首条与最新回复。截图：`target/m2-completion-profile/m2-live-latest.png`。
+- 同日关闭并重启官方宿主后，session 文件 SHA-256 均为
+  `12A329319B7E43B6B2A3D2CBCC6126D197A32D2E8630FCC27588EC6C6D80F26C`；
+  16 条消息、7 条 assistant 回复和摘要游标 6 恢复，抽屉首尾消息均可见。
+  Agent 对话后业务数据仍为 1 批豆腐 250 克、0 份菜单、1 条原始入库事件。
+  原生测试仅在 Windows 任务专用配置执行；没有把 VM 回调算作真实提供方证据。
+
+## Issue #3 M1 当日会话、权威上下文与软记忆 — 2026-10-13
+
+在 Pantry `origin/main` `c6f4d80` 上补齐 M1：每轮 Agent 输入从已确认档案、`current_stage()`、
+库存批次、今日已接受 `state.plans` 菜单和本地软记忆重建。菜单未接受时不进入投影；
+今天已有实际摄入记录时投影标为锁定。投影不带购物车、订单、原始执行记录、
+图片／音频路径或模型配置。
+
+- 压缩前与每次压缩后均按完整 `input.to_json()` 的 UTF-8 字节数检查 24 KiB。
+  超量且无法继续压缩时保留当前消息与 UI 历史，提示用户缩短输入。
+- 用户在现有在线日菜单入口明确输入普通偏好、生成菜单通过 Issue #5 校验后，
+  候选只暂存在内存。用户接受同一份、未改动的菜单后写入独立
+  `agent-memory.json`；删除、修改或跨日菜单不会写入。记忆写入失败不回滚菜单。
+- 生产 Splash 函数 VM 覆盖 24 个场景，包括跨日生成、真实 `accept()`、失败写入、
+  最终输入预算、多批压缩和 UI 消息保留。`python -X utf8 -m unittest discover -s tools
+  -p 'test_*.py'` 在正常本机权限下 **36 passed**；固定 App Hub 盖章与
+  `hub check bundle --allow-unsigned` **PASSED**（digest
+  `342f1bf84930d684ddc1e906ed932042b76fb062fc5b62a6dda51e4cefdbeb42`，仅 unsigned 提示）。
+- 本次没有运行真实模型生成／压缩输出和原生 UI。Agent 可执行菜单提案属于 M3，
+  本次记忆确认验证使用现有日菜单生成与接受路径。
+
+## Issue #3 分支同步 Issue #5 主线 — 2026-10-13
+
+`feat/issue-3-global-agent-voice` 合入 `origin/main` 的 #40、#42、#44。`plan()` 同时保留
+Agent 在线操作排它检查与菜单自动纠正状态初始化；按宿主固定 App Hub
+`8347a489141c0e24cab564883db7c4592935a8b2` 重新盖章，manifest 版本保持 0.8.0。
+
+- `hub stamp bundle` 后 `hub check bundle --allow-unsigned`：PASSED（仅 editable bundle unsigned 提示）。
+- `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`：36 passed。本机沙箱内的
+  Windows 临时目录 ACL 使 6 个测试无法创建临时文件；在正常本机权限下重跑通过。
+- 未运行本次同步后的原生 UI、真实 provider 与麦克风测试；这些结果不能由离线测试替代。
+
 
 ## 0.8.0 bundle 合并丢失定义与官方 rc.6 实测 — 2026-10-13
 
@@ -1868,6 +2124,50 @@ hidden test windows were closed through their own remote endpoint.
 Publisher identity and privacy text remain unapproved; the existing listing
 keeps the author's pending identity. Local test-key creation was explicitly
 approved by the user. Production signing and submission were not authorized.
+
+## Issue #3 M2 local validation, 2026-10-12
+
+- The global text panel and Agent request path live in `bundle/main.splash`.
+  The panel is limited to home, inventory, and menu. M2 permits only a
+  `none + {}` reply; proposal tools have no executable card or business write.
+- The production Script VM harness passed 18 cases covering shared day session,
+  one strong request, optional fast compaction, retry after provider failure,
+  timeout, invalid output, stale reply, and local snapshot changes.
+- `python -X utf8 -m unittest discover -s tools -p "test_*.py"`: 20 passed.
+  The full suite needed local Windows temporary-directory access; the default
+  sandbox's temporary-directory ACL does not permit those tests.
+- `python -X utf8 tools/launch.py --host-workspace
+  D:/projects/GOSIMAPP/OctoSense --check --offline`: PASSED. The editable source
+  bundle has the expected unsigned warning.
+- The bundle was restamped to digest
+  `906f9ce1c5f4cae7731c3ef5f5c8519a0c83dd73ad94e13135dc2d2b3f0f22f6`.
+  Using pre-existing local test keys, the source snapshot was signed, published,
+  and installed through the official App Hub into the task-owned
+  `target/m2-official-profile`; no new keys were generated.
+- The unmodified official OctoSense desktop built with `cargo build --release
+  --locked -p octosense --offline` and opened the installed Pantry Card. The
+  local legacy App Hub mirror needs `OCTOSENSE_HUB_CATALOG=legacy`; the Pantry
+  launcher now sets it for this task-owned mirror.
+- Native UI with a synthetic four-batch profile: home, inventory, and menu
+  each exposed `问管家`; all three reused one day session. The profile page and
+  inventory intake draft hid the entry. Canceling that draft restored the
+  entry without changing inventory. The panel rendered multiline input,
+  microphone, send, close, and the saved message. The microphone reported
+  recognition unavailable. A no-provider send stored one user message,
+  retained the input, showed a retryable error, and did not append an assistant
+  reply. After closing and reopening the desktop, the same-day user message
+  appeared again. Host logs contained no `[E]`, callback, or render errors.
+- A fresh isolated official-host profile passed 27 native UI/data checks in
+  `tools/smoke.py`, covering onboarding, both available image entry choices
+  and their review gate, manual inventory, menu acceptance, consumption,
+  deletion, profile editing, and navigation. The old smoke assertion assumed
+  image capability was unavailable; it now checks the actual available or
+  unavailable path. A subsequent desktop restart passed both persistence
+  checks for profile, inventory, menu, history, IDs, and home navigation.
+- Real provider multi-turn/compaction calls were not run. The separate Issue
+  #4 stage and Issue #5 final menu revisions/lock contract are absent from
+  this checkout, so their snapshot fields and the final M2 exit remain open.
+
 # PR #21 schema compatibility and main integration — 2026-10-12
 
 Merged the stage/candidate split, native inventory units, image-entry drafts,
@@ -1988,3 +2288,76 @@ Reproduction: `tools/qa_request_control.py --profile <fresh .local-state/qa-*>
 --hub <official hub> --card-host <official card-host>`; the driver starts and
 closes its own hidden hosts. Bundle digest:
 `234e13907694e1efabca02da29b9e275557fd6115a4f8eeea95eaf57734c62ed`.
+
+## Issue #3 branch sync with remote main, 2026-10-12
+
+- Fetched `origin/main` at `358d61c` and merged its stage, three-meal,
+  shopping, and actual-intake work into the Issue #3 branch. The merge kept the
+  Agent busy gate on image recognition and added the new online-ready gate.
+  It also remapped the Agent entry to the new Home/Inventory/Menu tabs (0/2/3)
+  and leaves the Overview tab (1) without an Agent entry.
+- `python -X utf8 -m unittest discover -s tools -p "test_*.py"`: 33/33 passed
+  with normal local filesystem permissions. The restricted execution sandbox
+  denied Python temporary-directory access; those ACL errors were not product
+  failures. The production Script VM Agent harness passed 18 cases, including
+  the updated tab mapping.
+- The pinned local `hub.exe stamp bundle` produced digest
+  `b80a513b0f3289f3a90806eb2501ece4beb62ddba41788339fb96c81482a37ac`;
+  `tools/launch.py --hub <pinned hub> --check` passed with the expected unsigned
+  editable-bundle warning.
+- In a task-owned hidden `card-host` profile, the synthetic `qa_merge.py`
+  scenario passed 24/24 native checks for stage, ordinary three-meal menu,
+  one-day experience, actual consumption, and inventory writes. A separate
+  native UI probe found the Agent panel on Home, Inventory, and Menu and absent
+  from Overview. This fixture did not call a real provider.
+- The remote main contains `current_stage()` and a three-meal `state.plans`
+  path, but it does not implement Issue #5's final `state.daily_menu` draft,
+  status, allocation revision, or whole-day lock after one meal. The Issue #3
+  Agent still accepts only `none + {}`; proposals, full stage/menu projection,
+  memory writes after confirmed menus, and ASR remain unverified or unbuilt.
+
+## Issue #3 M5 voice integration — 2026-10-13
+
+The Agent microphone now probes the optional host speech capability, checks
+microphone consent, records one app-local WAV for at most 30 seconds, and puts
+the transcript into the editable Agent input. It never sends the transcript or
+writes inventory, menu, or intake state on its own. A transient host `rate`
+response during startup capability probing is retried within a 12-second
+budget; the initial local-host run reproduced that response before the fix.
+The host-managed permission sheet uses the same device-consent route as the
+Issue #2 camera flow. Waiting for a person's consent now has a 180-second
+application deadline instead of 30 seconds.
+
+- Final bundle digest: `e400d0b8f899b78e4638d7093953f693c30fa191c554b47a4b9b57d6c93c0e9e`.
+  The pinned Hub stamp/check and `tools/launch.py --check --offline` passed.
+  Existing local test keys signed task-owned isolated profiles; no new key or
+  production signature was generated.
+- Offline Pantry suite: 36/36 passed with a task-owned temporary directory.
+  The production Script VM cases cover unsupported/no MiniMax, consent and
+  refusal, manual and automatic stop, cancellation, stale callbacks, empty
+  transcription, editable draft versus send, transient startup `rate`, and a
+  late recording-status reply arriving after Stop.
+- The unmodified official desktop installed this same bundle in an isolated
+  profile. Its microphone showed the exact unsupported message without an app
+  WAV. An earlier real provider reply remained readable after restart, and a
+  fresh text request returned a real Agent reply on the final bundle.
+- The rebuilt local desktop opened the host's microphone consent sheet. After
+  consent, a person recorded and manually stopped a mixed Chinese/English food
+  request. The app-local 16 kHz mono WAV contained 4.38 seconds of audio; the
+  actual MiniMax transcription appeared in the editable Agent input. The
+  person did not press Send and the inventory revision did not change.
+- In a separate run on the final bundle, the person clicked the microphone
+  only once. The host automatically stopped at 30 seconds; the 16 kHz mono WAV
+  contained exactly 30.0 seconds of audio, and a mixed Chinese/English
+  transcript appeared in the editable input without a Send action.
+- During a later live recording, closing the Agent panel removed the temporary
+  WAV. A further recording was started with the task-owned window in the
+  foreground, then the host was quit normally while recording. Its process
+  exited and no temporary WAV remained. Across these unsent voice runs, no
+  Agent session file was created and the inventory revision stayed at 8.
+- Windows mouse activation initially made the pinned Makepad runtime report a
+  focus loss. The OctoSense patch now treats `WA_CLICKACTIVE` as focus gain;
+  its regression test and release build passed. Earlier `device_unavailable:
+  No audio frames arrived` results came from a restricted test-host process
+  without microphone-device access. The task-owned host launched on the
+  interactive desktop with normal device access produced both live recordings.
