@@ -1,5 +1,6 @@
 # Migration validation
 
+
 ## 0.8.0 bundle 合并丢失定义与官方 rc.6 实测 — 2026-10-13
 
 在未改动宿主的前提下，用官方预编译 rc.6（`%LOCALAPPDATA%\OctoSense\octosense.exe`；
@@ -33,9 +34,29 @@
   上限的关系需要产品决定；`tools/qa_actual_feedback.py`、`tools/qa_online.py`、
   `tools/qa_review_feedback.py` 仍在用旧控件名（`food_name`/`food_grams`/`food_days`），
   `qa_ai_nutrition.py` 只做了标签/字段对齐、尚未重跑。
-- Bundle digest: `f26f33139ee34cf9fdc9cb3d50493bf6ce94901dbb3228aa0df0c1fe12e2a0d7`（版本保持 0.8.0；`hub stamp bundle` + `hub check bundle
+- Bundle digest（合并 main 之前的工作区修复版）: `f26f33139ee34cf9fdc9cb3d50493bf6ce94901dbb3228aa0df0c1fe12e2a0d7`（版本保持 0.8.0；`hub stamp bundle` + `hub check bundle
   --allow-unsigned` 在 rc.6 固定的 App Hub `386359153ed6377b5f047bd9ed2767a6a2ac2bc7`
   上 PASSED，只有预期的未签名警告）。
+- 合并 `origin/main` 后：主线上本来就带着这些定义（`cycle_days`/`profile_ready`/`base_daily_kcal`、
+  `stages.len() > 0` 完成态判据、`>20` 候选上限），并已含 PR #45 的图片接口改造，所以合并时
+  `bundle/` 取主线版本；本节记录的工作区症状只存在于工作区回退版里。
+
+## Image contract review, 2026-10-13 — source and package checks
+
+The app now discovers the host's `model.complete@2` image input through
+`runtime.describe` instead of calling an app-specific probe. It declares
+version 2 as optional, so hosts without it retain manual entry. Existing-image
+selection uses `files.import`; the callback checks the returned byte count and
+removes an imported file above 10 MiB before any model call. A provider may
+still reject image input after host discovery.
+
+The pinned App Hub stamped digest
+`69a1df657406ecf8b69d4d76946f5b5a2c1c540a902cbf47694fea5646acb1f4`
+and checked the unsigned editable bundle; 35 launcher/release Python tests
+and the launcher check passed in an isolated test run. This changed
+contract has not yet been replayed in a foreground window with a real
+provider or camera. The earlier user-reported foreground checks below apply
+to a preceding digest only.
 
 ## Issue #43 裁决：菜单只在生成时使用库存（承认现状）— 2026-10-12
 

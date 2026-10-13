@@ -83,15 +83,15 @@ let profile_preferences = ""
 let profile_special = ""
 let profile_activity = "轻活动"
 let program_selected = 0
-// The cycles a candidate batch is built for: one seed per entry in
-// state.cycle_seed, in the same order the cycle views list them.
-let cycle_days = [1 3 7 15 21 30]
-let cycle_view = 7
-// A composed plan is the ordered candidate ids stacked before confirmation; the two
-// index variables are UI-only (an in-flight swap, the stage being edited).
+// Pre-confirmation composition lives in memory only; confirmation snapshots it
+// into state.stages.
 let plan_draft = []
 let draft_swap = -1
+// Index of the confirmed future stage whose goal is being re-picked in tab 3.
 let stage_edit = -1
+let stage_swap_cycle = 7
+let cycle_view = 7
+let cycle_days = [1 3 7 15 21 30]
 let extra_kcal_text = "0"
 // Issue #25: the 模拟买菜 region replaces the butler dashboard in the same
 // window while it is open; nil means the dashboard. The 购物车 itself lives in
@@ -260,9 +260,7 @@ fn program_option(days, key, name, plan_goal, trait, difference, kcal_day, prote
     let p = {id: state.program_next name: name days: days variant: key
         goal: plan_goal trait: trait difference: difference daily_kcal: kcal_day
         kcal_goal: kcal_day * days protein_goal: protein_day * days
-        fiber_goal: fiber_day * days vitamin_c_goal: vitamin_day * days
-        consumed_kcal: 0 consumed_protein: 0 consumed_fiber: 0 consumed_vitamin_c: 0
-        started: 0 intake: []}
+        fiber_goal: fiber_day * days vitamin_c_goal: vitamin_day * days}
     state.program_next = state.program_next + 1
     p
 }
@@ -672,17 +670,18 @@ fn plan_stage_index(stage){
     1
 }
 fn confirm_health_plan(){
-    let chosen = program_by_id(program_selected)
-    if chosen == nil { message = "请先选择一份周期方案。" redraw() return }
-    if chosen.kcal_goal <= 0 {
-        message = "当前档案不能自动推算安全的数值目标，请由专业人员确认后再使用数值追踪。"
-        redraw() return
-    }
     let entries = []
-    if plan_draft.len() > 0 {
-        for id in plan_draft { let c = program_by_id(id) if c != nil { entries.push(c) } }
-    } else {
+    for id in plan_draft { let c = program_by_id(id) if c != nil { entries.push(c) } }
+    if entries.len() == 0 {
+        let chosen = program_by_id(program_selected)
+        if chosen == nil { message = "请先选择或组合一份周期方案。" redraw() return }
         entries.push(chosen)
+    }
+    for c in entries {
+        if c.kcal_goal <= 0 {
+            message = "当前档案不能自动推算安全的数值目标，请由专业人员确认后再使用数值追踪。"
+            redraw() return
+        }
     }
     let before = state.to_json()
     let saved_draft = plan_draft
@@ -705,11 +704,15 @@ fn confirm_health_plan(){
     state.health.meals_week = 0 state.health.meals_today = 0
     state.health.protein_week = 0 state.health.fiber_week = 0
     onboarding_step = 3
-    state.daily_target = chosen.daily_kcal
+    let first = current_stage()
+    if first != nil {
+        state.daily_target = first.daily_kcal
+        state.health.protein_goal = floor(first.protein_goal * 7 / first.days)
+        state.health.fiber_goal = floor(first.fiber_goal * 7 / first.days)
+    }
     state.consumed_kcal = 0
-    state.health.protein_goal = floor(chosen.protein_goal * 7 / chosen.days)
-    state.health.fiber_goal = floor(chosen.fiber_goal * 7 / chosen.days)
-    record("确认周期方案：" + chosen.name + " · " + chosen.days + " 天 · " + chosen.kcal_goal + " kcal")
+    plan_draft = [] draft_swap = -1 stage_edit = -1
+    record("确认计划：" + entries.len() + " 个阶段 · " + names)
     if profile_edit_backup != nil {
         let original = profile_edit_backup
         state.profile.done = true
@@ -718,27 +721,31 @@ fn confirm_health_plan(){
         profile_edit_backup = nil
         redraw() return
     }
-    if commit(before) { message = "已启用「" + chosen.name + "」。现在请录入冰箱里的真实食材。" }
+    if commit(before) {
+        message = "已启用 " + entries.len() + " 个阶段的计划。现在请录入冰箱里的真实食材。"
+    } else {
+        // Keep the composed plan when the write failed instead of dropping it.
+        plan_draft = saved_draft
+        onboarding_step = saved_step
+    }
     redraw()
 }
-fn choose_meals_per_day(value){
-    if value < 1 || value > 4 { return }
-    state.health.meals_per_day = value
-    message = "每日执行餐数已选择 " + value + " 餐；确认方案后生效。"
-    redraw()
+// Archive the current plan into bounded history and clear the live stages.
+fn archive_plan(){
+    if state.stages.len() > 0 {
+        if state.plan_history.len() >= 12 { state.plan_history.remove(0) }
+        state.plan_history.push(state.stages.to_json().parse_json())
+    }
+    state.stages = []
 }
 fn renew_programs(){
     experience_selected = false
     if pending || ai_busy || plan_removal != nil { message = "请先结束当前确认或方案生成。" redraw() return }
     let before = state.to_json()
-    let old = current_stage()
-    if old != nil {
-        if state.program_history.len() >= 12 { state.program_history.remove(0) }
-        state.program_history.push(old.to_json().parse_json())
-    }
-    state.program_active = 0 state.profile.plan_approved = false
-    state.profile.done = false state.active = 0 state.profile_revision = state.profile_revision + 1
-    make_programs() onboarding_step = 2 tab = 0
+    archive_plan() state.profile.plan_approved = false
+    state.profile.done = false state.active = 0 state.revision = state.revision + 1
+    plan_draft = [] draft_swap = -1 stage_edit = -1
+    make_programs() onboarding_step = 2 cycle_view = 7 tab = 0
     record("开始选择下一周期；旧周期已存档，库存保持不变")
     if commit(before) { message = "新周期候选已生成。请选定后继续；旧库存未删除。" }
     redraw()
@@ -766,12 +773,10 @@ fn health_week_meals(){ if state.health.start <= 0 || now() - state.health.start
 fn health_week_protein(){ if health_week_meals() == 0 { return 0 } state.health.protein_week }
 fn health_week_fiber(){ if health_week_meals() == 0 { return 0 } state.health.fiber_week }
 fn health_daily_percent(){
-    if state.health.meals_per_day <= 0 { return 0 }
-    min(100, floor(health_today_meals() * 100 / state.health.meals_per_day))
+    min(100, floor(health_today_meals() * 100 / meals_per_day()))
 }
 fn health_week_percent(){
-    if state.health.meals_per_day <= 0 { return 0 }
-    min(100, floor(health_week_meals() * 100 / (state.health.meals_per_day * 7)))
+    min(100, floor(health_week_meals() * 100 / (meals_per_day() * 7)))
 }
 fn nutrient_reference(name, food_id){
     for f in state.foods {
@@ -1382,7 +1387,6 @@ fn set_menu_ingredient(p, name, target){
     refresh_menu_uses(p)
     true
 }
-fn plan_ready(p){ menu_issue(p) == "" }
 fn now(){ time_now() + state.offset }
 fn available(){
     state.foods.len()
@@ -1409,15 +1413,21 @@ fn valid_legacy_state(value){
         if value.health.meals_per_day < 1 || value.health.meals_per_day > 4 || value.health.meals_week < 0 || value.health.meals_today < 0 { return false }
         if value.health.protein_goal < 0 || value.health.fiber_goal < 0 || value.health.calcium_goal < 0 || value.health.iron_goal < 0 { return false }
         if value.health.protein_week < 0 || value.health.fiber_week < 0 { return false }
-        if value.programs.len() > 20 || value.program_history.len() > 12 || value.program_next < 1 { return false }
+        if value.programs.len() > 20 || value.plan_history.len() > 12 || value.program_next < 1 || value.stage_next < 1 { return false }
+        if value.stages.len() > 12 { return false }
+        if value.cycle_seed.len() != 6 { return false }
+        for seed in value.cycle_seed { if !(seed >= 0) || seed > 1000 { return false } }
         for program in value.programs {
-            if program.days < 7 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 || program.consumed_kcal < 0 || program.intake.len() > 150 { return false }
+            if program.days < 1 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 { return false }
             if program.protein_goal < 0 || program.fiber_goal < 0 || program.vitamin_c_goal < 0 { return false }
         }
-        if value.program_active > 0 {
-            let found_program = false
-            for program in value.programs { if program.id == value.program_active && program.started > 0 { found_program = true } }
-            if !found_program { return false }
+        for stage in value.stages {
+            if stage.days < 1 || stage.days > 30 || !(stage.started > 0) || stage.kcal_goal < 0 || stage.daily_kcal < 0 || stage.consumed_kcal < 0 || stage.intake.len() > 150 { return false }
+            if stage.protein_goal < 0 || stage.fiber_goal < 0 || stage.vitamin_c_goal < 0 || stage.consumed_protein < 0 || stage.consumed_fiber < 0 || stage.consumed_vitamin_c < 0 { return false }
+        }
+        for old in value.plan_history {
+            if old.len() > 12 { return false }
+            for stage in old { if stage.days < 1 || stage.days > 30 || stage.kcal_goal < 0 || stage.consumed_kcal < 0 { return false } }
         }
         for f in value.foods {
             if f.name.len() == 0 || f.name.len() > 40 || !(f.id > 0) || !(f.grams >= 0) || f.grams > 100000 || !(f.expires > 0) { return false }
@@ -1515,6 +1525,8 @@ fn valid_state(value){
         if value.health.protein_goal < 0 || value.health.fiber_goal < 0 || value.health.calcium_goal < 0 || value.health.iron_goal < 0 { return false }
         if value.health.protein_week < 0 || value.health.fiber_week < 0 { return false }
         if value.programs.len() > 20 || value.program_history.len() > 12 || value.program_next < 1 { return false }
+        if value.cycle_seed.len() != 6 { return false }
+        for seed in value.cycle_seed { if !(seed >= 0) || seed > 1000 { return false } }
         for program in value.programs {
             if program.days < 1 || program.days > 30 || program.kcal_goal < 0 || program.daily_kcal < 0 { return false }
             if program.protein_goal < 0 || program.fiber_goal < 0 || program.vitamin_c_goal < 0 { return false }
@@ -1759,7 +1771,11 @@ fn ensure_extended_state(){
     profile_preferences = state.profile.preferences
     profile_special = state.profile.special
     profile_activity = state.profile.activity
-    if program_selected == 0 && state.programs.len() > 0 { program_selected = state.programs[0].id }
+    if program_selected == 0 { program_selected = default_program_id() }
+    // The displayed daily target follows the stage whose dates cover today, so a
+    // calendar-driven stage switch shows the new stage's target.
+    let live_stage = current_stage()
+    if live_stage != nil { state.daily_target = live_stage.daily_kcal }
 }
 fn choose_scene(name){
     ensure_extended_state()
@@ -1792,8 +1808,9 @@ fn save_profile(){
     state.profile.activity = profile_activity
     state.profile.basics_done = true
     state.profile.plan_approved = false
-    state.program_active = 0
-    state.active = 0 state.profile_revision = state.profile_revision + 1
+    archive_plan()
+    state.active = 0 state.revision = state.revision + 1 state.profile_revision = state.profile_revision + 1
+    plan_draft = [] draft_swap = -1
     make_programs()
     // An explicit reference plan is created before the first inventory entry.
     // These are demo estimates for healthy adults, not an assessment of disease.
@@ -1830,12 +1847,8 @@ fn restart_profile(){
         message = "请先结束当前操作，再修改用户画像。" redraw() return
     }
     profile_edit_backup = state.to_json()
-    let old = current_stage()
-    if old != nil {
-        if state.program_history.len() >= 12 { state.program_history.remove(0) }
-        state.program_history.push(old.to_json().parse_json())
-    }
-    state.program_active = 0 state.programs = [] program_selected = 0
+    archive_plan() state.programs = [] program_selected = 0
+    plan_draft = [] draft_swap = -1
     state.profile.done = false
     state.profile.basics_done = false
     state.profile.plan_approved = false
@@ -1848,7 +1861,7 @@ fn cancel_profile_edit(){
     if profile_edit_backup == nil { return }
     state = profile_edit_backup.parse_json()
     profile_edit_backup = nil
-    program_selected = state.program_active
+    program_selected = 0
     ensure_extended_state()
     onboarding_step = 4 tab = 4
     message = "已取消画像修改，原有档案和库存保持不变。"
@@ -1858,7 +1871,7 @@ fn set_goal(text){ goal = text message = "已切换本餐偏好：" + text redra
 fn generate_alternative(){
     if ai_busy { message = "当前菜单还在生成，请稍候。" redraw() return }
     plan("用户请求备选")
-    tab = 2
+    tab = 3
     redraw()
 }
 fn coming_soon(){ message = "第三方买菜平台的一键下单入口已预留，本次比赛版不执行外部购买。" redraw() }
@@ -1871,6 +1884,13 @@ fn meal_kcal(p){
 }
 fn remaining_budget(){
     program_remaining_daily(current_stage())
+}
+// The archive/budget figures follow the stage whose dates cover today, not the
+// stage that was current when the plan was confirmed.
+fn live_daily_target(){
+    let s = current_stage()
+    if s == nil { return state.daily_target }
+    s.daily_kcal
 }
 fn nutrition_percent(){
     if is_experience() { return trial_progress() }
@@ -2465,7 +2485,7 @@ fn probe_vision(){
     vision_sequence = vision_sequence + 1
     let token = vision_sequence
     vision_phase = 0
-    try { host.request("model.vision_capability", {}, |r| { vision_reply = {token: token reply: r} }) }
+    try { host.request("runtime.describe", {method: "model.complete"}, |r| { vision_reply = {token: token reply: r} }) }
     catch { vision_phase = 2 }
 }
 fn begin_recognition(mode){
@@ -2579,6 +2599,10 @@ fn apply_recognition_reply(envelope){
             recognition_failed("图片导入失败：" + r.error) return
         }
         if r.data.cancelled == true { cancel_recognition() return }
+        if r.data.bytes != nil && r.data.bytes > 10 * 1024 * 1024 {
+            try { fs.remove(r.data.path) } catch {}
+            recognition_failed("图片超过 10 MiB，请选择较小的照片") return
+        }
         recognize_image(r.data.path) return
     }
     if envelope.action != "model" || recognition_phase != "model" { return }
@@ -3045,7 +3069,8 @@ fn ai_watchdog(){
         let received = vision_reply vision_reply = nil
         if received.token == vision_sequence {
             vision_phase = 2
-            if received.reply.is_ok && received.reply.data.schema == 1 && received.reply.data.supported == true { vision_phase = 1 }
+            if received.reply.is_ok && received.reply.data != nil && received.reply.data.supported == true &&
+                received.reply.data.descriptor != nil && received.reply.data.descriptor.version == 2 { vision_phase = 1 }
         }
     }
     if recognition_reply != nil {
@@ -3332,7 +3357,7 @@ fn generate(){
     if voice_phase != 0 { message = "请先结束语音输入并确认识别文字。" redraw() return }
     goal = ui.request.text().trim()
     if goal == "" { goal = "优先吃掉快过期的食材" }
-    plan("用户请求") tab = 2 details = false redraw()
+    plan("用户请求") tab = 3 details = false redraw()
 }
 fn accept(){
     let p = choose_plan()
@@ -3487,7 +3512,7 @@ fn check_risk(){
     }
     let next_before = state.next_id
     plan("临期提醒：" + names)
-    if ai_busy { if tab != 1 { tab = 2 } redraw() return }
+    if ai_busy { if tab != 2 { tab = 3 } redraw() return }
     if state.next_id == next_before { redraw() return }
     if tab != 2 { tab = 3 }
     message = names + "快到期了，已准备新菜单；原菜单保留到你接受。"
@@ -3537,11 +3562,11 @@ fn install_demo(){
         active: 5 next_id: 6 revision: 1 offset: 0 demo: true paused: false reminders: true snooze: 0 risk_key: ""
         handled: 0 baseline: 3 cycle_start: today log: [] model_enabled: use_ai auto_generate: state.auto_generate
         profile: {done: true scene: "日常健康" sex: "女性" age: "28" height: "165" weight: "55" avoid: "" diet: "清淡家常" special: "" activity: "轻活动" basics_done: true plan_approved: true}
-        programs: [{id: 1 name: "7天均衡起步 · 演示" days: 7 daily_kcal: 2000 kcal_goal: 14000
-            protein_goal: 308 fiber_goal: 196 vitamin_c_goal: 525 started: today
+        programs: [] stages: [{id: 1 name: "7天均衡起步 · 演示" days: 7 daily_kcal: 2000 kcal_goal: 14000
+            goal: "演示计划" protein_goal: 308 fiber_goal: 196 vitamin_c_goal: 525 started: today
             consumed_kcal: 680 consumed_protein: 0 consumed_fiber: 0 consumed_vitamin_c: 0
             intake: [{at: today day: floor(today / 86400) title: "演示前一餐" kcal: 680 protein: 0 fiber: 0 vitamin_c: 0 extra_kcal: 0}]}]
-        program_active: 1 program_next: 2 program_history: []
+        stage_next: 2 plan_history: [] program_next: 1 cycle_seed: [0 0 0 0 0 0]
         health: {start: today day: floor(today / 86400) meals_per_day: 2 meals_week: 1 meals_today: 1
             protein_week: 0 fiber_week: 0 protein_goal: 308 fiber_goal: 175 calcium_goal: 7000 iron_goal: 126}
         daily_target: 2000 consumed_kcal: 680 meal_count: 1 last_meal: "番茄豆腐汤" last_goal: "清淡一点"}
@@ -4387,27 +4412,90 @@ View{width: Fill height: Fill flow: Overlay
                                 if experience_selected { Hint{text: "已选 1 天体验；确认后安排三餐，只有实际食用确认才扣库存。"} }
                                 Copy{text: "方向只是偏好。每个周期给出 3 份按档案推算的候选；可直接确认单选，也可按顺序组合成多阶段计划。" draw_text.color: muted}
                             }
-                            for p in state.programs {
-                                Frost{padding: 20 spacing: 12 draw_bg.color: #ffffffc2
+                            View{width: Fill height: Fit flow: Right spacing: 7
+                                for d in cycle_days {
+                                    let cycle_bg = #x00000000
+                                    let cycle_tc = muted
+                                    if cycle_view == d { cycle_bg = #xe9e3d8 cycle_tc = ink }
+                                    Pill{width: 88 height: 42 margin: 0 padding: 8 text: "" + d + " 天" on_click: || select_cycle(d)
+                                        draw_bg +: {color: cycle_bg color_hover: #eee9e2 color_down: #ddd6cb color_focus: cycle_bg border_radius: 14 border_size: 0}
+                                        draw_text +: {color: cycle_tc color_hover: ink color_down: ink color_focus: cycle_tc text_style.font_size: 13}}
+                                }
+                            }
+                            let draft_hint = "1 天周期供短周期体验；换周期只切换比较对象，确认前不会开始执行。"
+                            if plan_draft.len() > 0 { draft_hint = "计划草稿 " + plan_draft.len() + " / 12 阶段 · 总天数 " + draft_total_days() + " 天；可在下方调整顺序、替换或移除。" }
+                            if plan_draft.len() >= 12 { draft_hint = "计划草稿已达 12 阶段上限；请先移除或用其它阶段替换，无法再加入。" }
+                            Hint{text: draft_hint}
+                            let candidates = cycle_candidates(cycle_view)
+                            for p in candidates {
+                                Frost{padding: 20 spacing: 11 draw_bg.color: #ffffffc2
                                     let marker = "候选方案"
                                     if p.id == program_selected { marker = "✓ 当前选中" }
-                                    Hint{text: marker + " · " + state.profile.scene}
+                                    Hint{text: marker + " · " + p.days + " 天 · " + state.profile.scene}
                                     Copy{text: p.name draw_text.text_style: theme.font_bold{font_size: 22}}
+                                    Copy{text: p.goal}
+                                    Hint{text: "执行特点 · " + p.trait}
                                     if p.kcal_goal > 0 {
-                                        Copy{text: p.days + " 天 · 总 " + p.kcal_goal + " kcal · 每日参考 " + p.daily_kcal + " kcal"}
-                                        Hint{text: "蛋白质 " + p.protein_goal + " g · 膳食纤维 " + p.fiber_goal + " g · 维生素 C " + p.vitamin_c_goal + " mg / 周期"}
+                                        Hint{text: "每日 " + p.daily_kcal + " kcal · 蛋白质 " + floor(p.protein_goal / p.days) + " g · 纤维 " + floor(p.fiber_goal / p.days) + " g · 维生素 C " + floor(p.vitamin_c_goal / p.days) + " mg"}
+                                        Hint{text: "周期总量 " + p.kcal_goal + " kcal · 蛋白质 " + p.protein_goal + " g · 纤维 " + p.fiber_goal + " g · 维生素 C " + p.vitamin_c_goal + " mg"}
                                     }
                                     if p.kcal_goal == 0 { Hint{text: "该档案需要专业人员确认摄入目标，当前不自动填入数值。"} }
-                                    if p.id == program_selected { ChosenSoft{text: "当前已选中" on_click: || select_program(p.id)} }
-                                    else { Soft{text: "选择这份周期方案" on_click: || select_program(p.id)} }
+                                    Hint{text: "主要差异 · " + p.difference}
+                                    let candidate_id = p.id
+                                    if draft_swap >= 0 {
+                                        Soft{text: "用这份替换第 " + (draft_swap + 1) + " 阶段" on_click: || draft_replace(draft_swap, candidate_id)}
+                                    }
+                                    if draft_swap < 0 {
+                                        View{width: Fill height: Fit flow: Right spacing: 8
+                                            Soft{text: "选择这份周期方案" on_click: || select_program(candidate_id)}
+                                            let add_text = "＋ 加入计划"
+                                            if plan_draft.len() >= 12 { add_text = "已达 12 阶段上限" }
+                                            Soft{text: add_text enabled: plan_draft.len() < 12 on_click: || draft_add(candidate_id)}
+                                        }
+                                    }
+                                }
+                            }
+                            if plan_draft.len() > 0 {
+                                Frost{padding: 18 spacing: 10 draw_bg.color: #xeef3e8
+                                    View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: .5}
+                                        Copy{text: "计划草稿 · " + plan_draft.len() + " / 12 阶段" draw_text.text_style: theme.font_bold{font_size: 18}}
+                                        Hint{text: "总天数 " + draft_total_days() + " 天"}
+                                    }
+                                    Hint{text: "各阶段按日期衔接；确认前可上移、下移、移除，或用其它候选替换。"}
+                                    if draft_swap >= 0 { Copy{text: "正在替换第 " + (draft_swap + 1) + " 阶段：请在上方候选中点选。" draw_text.text_style: theme.font_bold{font_size: 15}} }
+                                    for i in plan_draft.len() {
+                                        let c = program_by_id(plan_draft[i])
+                                        if c != nil {
+                                            Tint{draw_bg.color: #xffffffb0
+                                                View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                    View{width: Fill height: Fit flow: Down spacing: 3
+                                                        Copy{text: "第 " + (i + 1) + " 阶段 · " + c.name draw_text.text_style: theme.font_bold{font_size: 16}}
+                                                        Hint{text: c.days + " 天 · " + stage_range(i, c.days) + " · " + c.daily_kcal + " kcal/天 · 蛋白质 " + floor(c.protein_goal / c.days) + " g/天"}
+                                                    }
+                                                    Quiet{text: "上移" enabled: i > 0 on_click: || draft_move(i, -1)}
+                                                    Quiet{text: "下移" enabled: i + 1 < plan_draft.len() on_click: || draft_move(i, 1)}
+                                                    Quiet{text: "替换" on_click: || { draft_swap = i message = "请在上方候选里点选要替换到第 " + (i + 1) + " 阶段的方案。" redraw() }}
+                                                    Quiet{text: "移除" on_click: || draft_remove(i)}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                        Hint{text: "总天数由各阶段周期相加得出，不单独设定。"}
+                                        Quiet{text: "清空草稿" on_click: || { plan_draft = [] draft_swap = -1 message = "已清空计划草稿。" redraw() }}
+                                    }
                                 }
                             }
                             Frost{padding: 18 spacing: 10 draw_bg.color: #eef3e8
                                 Copy{text: "执行与营养核算" draw_text.text_style: theme.font_bold{font_size: 17}}
                                 Hint{text: "确认实际吃完才扣库存和热量；本地只识别少数原料营养，未知食材不冒充严格达标。烹饪油等需另计。"}
                                 Hint{text: "这里只是原型参考估算，不是医疗处方；不自动给未成年人或有特殊情况的档案填写数值目标。"}
-                                Soft{text: "返回修改基础资料" on_click: || { onboarding_step = 1 redraw() }}
-                                if profile_edit_backup == nil { Action{text: "确认选中方案 · 去录冰箱  →" on_click: || confirm_health_plan()} }
+                                View{width: Fill height: Fit flow: Right spacing: 8
+                                    Soft{text: "重新生成本周期候选" on_click: || regenerate_cycle()}
+                                    Soft{text: "返回修改基础资料" on_click: || { onboarding_step = 1 redraw() }}
+                                }
+                                Hint{text: "未加入计划草稿时，确认后只用当前选中的那一份方案，得到单阶段计划。"}
+                                if profile_edit_backup == nil { Action{text: "确认计划 · 去录冰箱  →" on_click: || confirm_health_plan()} }
                                 if profile_edit_backup != nil { Action{text: "保存画像与周期方案  →" on_click: || confirm_health_plan()} }
                             }
                         }
@@ -4906,7 +4994,7 @@ View{width: Fill height: Fill flow: Overlay
                                         agent_status := Hint{text: "在线 AI · 正在启动"}
                                     }
                                 }
-                                Quiet{text: "+  更新冰箱" on_click: || navigate(1)}
+                                Quiet{text: "+  更新冰箱" on_click: || navigate(2)}
                             }
                             content := View{width: Fill height: Fill on_render: || { ScrollYView{width: Fill height: Fill flow: Down spacing: 16 padding: Inset{right: 5}
                                 if ai_busy {
@@ -4921,7 +5009,7 @@ View{width: Fill height: Fill flow: Overlay
                                         Copy{text: "这次还没生成新菜单" draw_text.text_style: theme.font_bold{font_size: 16}}
                                         Hint{text: ai_error}
                                         if ai_phase == 1 { Soft{text: "重新生成" on_click: || retry_ai()} }
-                                        if ai_phase == 3 || ai_phase == 4 { Soft{text: "查看 AI 设置" on_click: || navigate(4)} }
+                                        if ai_phase == 3 || ai_phase == 4 { Soft{text: "查看 AI 设置" on_click: || navigate(5)} }
                                     }
                                 }
                                 if tab == 0 {
@@ -5497,17 +5585,81 @@ View{width: Fill height: Fill flow: Overlay
                                         stage_remain = "选择下一份计划后重新开始累计。"
                                     }
                                     Frost{padding: 20 spacing: 10
-                                        let program = current_stage()
-                                        Heading{text: "当前周期方案"}
-                                        Copy{text: program.name + " · 第 " + program_day_index(program) + " / " + program.days + " 天"}
-                                        Hint{text: "周期已核算热量 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
-                                        Hint{text: "按已核算餐食计算的余额 " + program_remaining_total(program) + " kcal · 今日已核算 " + program_today_kcal(program) + " kcal"}
+                                        Heading{text: stage_header}
+                                        Copy{text: program.name + " · " + stage_days}
+                                        Hint{text: "计划共 " + state.stages.len() + " 个阶段 · 总天数 " + plan_total_days() + " 天 · " + stage_state}
+                                        Hint{text: "阶段热量已记录 " + program.consumed_kcal + " / " + program.kcal_goal + " kcal"}
+                                        Hint{text: stage_remain}
                                         if unquantified_meals() > 0 { Hint{text: "另有 " + unquantified_meals() + " 餐营养未核算；上述余额不代表实际剩余额度。"} }
                                         Hint{text: "蛋白质 " + program.consumed_protein + " / " + program.protein_goal + " g"}
                                         Hint{text: "膳食纤维 " + program.consumed_fiber + " / " + program.fiber_goal + " g"}
                                         Hint{text: "维生素 C " + program.consumed_vitamin_c + " / " + program.vitamin_c_goal + " mg"}
                                         Hint{text: "这里只累计你确认吃完的餐食，数值是示例估算，不等于全天真实摄入或医疗建议。"}
-                                        Soft{text: "选择下一周期方案…" on_click: || renew_programs()}
+                                        Soft{text: "选择下一份计划…" on_click: || renew_programs()}
+                                    }
+                                    if state.stages.len() > 0 {
+                                        Frost{padding: 18 spacing: 8
+                                            Copy{text: "计划阶段 · 未开始的阶段可调整" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                            Hint{text: "计划进度 " + plan_progress_percent() + "% · 已确认 " + plan_done_meals() + " / " + plan_planned_meals() + " 餐（总天数 " + plan_total_days() + " 天）"}
+                                            for i in state.stages.len() {
+                                                let s = state.stages[i]
+                                                let marker = "第 " + (i + 1) + " 阶段"
+                                                if s.id == current_stage().id && !expired { marker = marker + " · 当前" }
+                                                Tint{draw_bg.color: #xffffffb0
+                                                    View{width: Fill height: Fit flow: Down spacing: 3
+                                                        Copy{text: marker + " · " + s.name draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                        Hint{text: s.days + " 天 · " + stage_span(s) + " · " + s.daily_kcal + " kcal/天 · 蛋白质 " + floor(s.protein_goal / s.days) + " g/天 · " + s.consumed_kcal + " / " + s.kcal_goal + " kcal"}
+                                                        Hint{text: stage_lock_hint(s)}
+                                                        if !stage_locked(s) {
+                                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                Quiet{text: "上移" enabled: i > 0 && !stage_locked(state.stages[i - 1]) on_click: || stage_move(i, -1)}
+                                                                Quiet{text: "下移" enabled: i + 1 < state.stages.len() && !stage_locked(state.stages[i + 1]) on_click: || stage_move(i, 1)}
+                                                                Quiet{text: "改目标" on_click: || { stage_edit = i stage_swap_cycle = s.days message = "请选择要替换到第 " + (i + 1) + " 阶段的候选目标。" redraw() }}
+                                                                Quiet{text: "移除" on_click: || stage_remove(i)}
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if stage_edit >= 0 && stage_edit < state.stages.len() {
+                                                View{width: Fill height: Fit flow: Down spacing: 8
+                                                    Copy{text: "为第 " + (stage_edit + 1) + " 阶段改目标" draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                    View{width: Fill height: Fit flow: Right spacing: 7
+                                                        for d in cycle_days {
+                                                            let pick_bg = #x00000000
+                                                            let pick_tc = muted
+                                                            if stage_swap_cycle == d { pick_bg = #xe9e3d8 pick_tc = ink }
+                                                            Pill{width: 88 height: 42 margin: 0 padding: 8 text: "" + d + " 天" on_click: || { stage_swap_cycle = d redraw() }
+                                                                draw_bg +: {color: pick_bg color_hover: #eee9e2 color_down: #ddd6cb color_focus: pick_bg border_radius: 14 border_size: 0}
+                                                                draw_text +: {color: pick_tc color_hover: ink color_down: ink color_focus: pick_tc text_style.font_size: 13}}
+                                                        }
+                                                    }
+                                                    for c in cycle_candidates(stage_swap_cycle) {
+                                                        Tint{draw_bg.color: #xffffffb0
+                                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: .5}
+                                                                View{width: Fill height: Fit flow: Down spacing: 3
+                                                                    Copy{text: c.name draw_text.text_style: theme.font_bold{font_size: 15}}
+                                                                    Hint{text: c.days + " 天 · " + c.daily_kcal + " kcal/天 · 蛋白质 " + floor(c.protein_goal / c.days) + " g/天"}
+                                                                }
+                                                                Soft{text: "改为这份目标" on_click: || stage_replace(stage_edit, c.id)}
+                                                            }
+                                                        }
+                                                    }
+                                                    Quiet{text: "取消改目标" on_click: || { stage_edit = -1 message = "已取消修改目标。" redraw() }}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if state.plan_history.len() > 0 {
+                                        Frost{padding: 18 spacing: 8
+                                            Copy{text: "计划历史" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                            for old in state.plan_history {
+                                                let days = 0
+                                                let names = ""
+                                                for s in old { days = days + s.days if names != "" { names = names + " + " } names = names + s.name }
+                                                Hint{text: old.len() + " 个阶段 · " + days + " 天 · " + names}
+                                            }
+                                        }
                                     }
                                                                         View{width: Fill height: Fit flow: Down spacing: 4
                                         Heading{text: "长期饮食档案" draw_text.text_style.font_size: 30}
@@ -5522,7 +5674,7 @@ View{width: Fill height: Fill flow: Overlay
                                                     Label{text: "" + program_today_kcal(current_stage()) padding: 0 draw_text +: {color: ink text_style: theme.font_bold{font_size: 20}}}
                                                 }
                                                 View{width: Fill height: Fit flow: Down spacing: 5
-                                                    Copy{text: "/ " + state.daily_target + " kcal" draw_text.text_style: theme.font_bold{font_size: 17}}
+                                                    Copy{text: "/ " + live_daily_target() + " kcal" draw_text.text_style: theme.font_bold{font_size: 17}}
                                                     Hint{text: "按已核算餐食剩余约 " + remaining_budget() + " kcal"}
                                                     Hint{text: "已记录 " + state.meal_count + " 餐"}
                                                     if unquantified_meals() > 0 { Hint{text: "其中 " + unquantified_meals() + " 餐营养未核算"} }
@@ -5554,7 +5706,7 @@ View{width: Fill height: Fill flow: Overlay
                                     }
                                     Action{width: 260 text: "去安排下一餐  →" on_click: || navigate(0)}
                                 }
-                                if tab == 4 {
+                                if tab == 5 {
                                     View{width: Fill height: Fit flow: Down spacing: 4
                                         Heading{text: "管家设置" draw_text.text_style.font_size: 30}
                                         Hint{text: "管理用户画像、Agent 运行方式与比赛演示。"}
@@ -5566,7 +5718,7 @@ View{width: Fill height: Fill flow: Overlay
                                             if state.profile.allergies != "" { Hint{text: "过敏 · " + state.profile.allergies} }
                                             if state.profile.avoidances != "" { Hint{text: "忌口 · " + state.profile.avoidances} }
                                             Soft{text: "重新设置用户画像" on_click: || restart_profile()}
-                                            Soft{text: "选择下一周期方案…" on_click: || renew_programs()}
+                                            Soft{text: "选择下一份计划…" on_click: || renew_programs()}
                                             Divider{}
                                             Copy{text: "运行与提醒" draw_text.text_style: theme.font_bold{font_size: 18}}
                                             View{width: Fill height: Fit flow: Right spacing: 8
