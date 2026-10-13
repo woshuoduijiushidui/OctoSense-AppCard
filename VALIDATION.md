@@ -60,8 +60,11 @@ now describe the local voice capability and official text fallback accurately.
   prefilled food and confirming breakfast tofu, stock changed once and the
   three-meal plan remained locked. A later lunch handoff was cancelled and
   appended a local result without a business write. The final-digest local
-  host was installed, but the repeat live microphone Send has not yet received
-  a user result at this checkpoint. Its device/provider retest is unverified.
+  host repeated the real microphone test: ASR filled a mixed Chinese/English
+  request about Greek yogurt and tomatoes, the person added `只给建议` and
+  pressed Send. The persisted user message included that edit; the real Agent
+  replied with tomorrow-only advice while explaining that today's menu was
+  locked. Inventory revision remained 11 with one confirmed execution record.
 - **OctoSense:** `cargo test --locked --offline -p octosense-llm-service
   --test media --quiet` passed 28 cases; `cargo test --locked --offline
   -p octosense-shell --features app-hub --lib audio_service --quiet` passed 8;
