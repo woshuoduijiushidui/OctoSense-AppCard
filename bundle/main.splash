@@ -1812,6 +1812,9 @@ fn agent_valid_envelope(output){
             output.reply.to_chars().len() > 1200 || !output.tool_name.is_string() ||
             !output.tool_args.is_object() || !output.memory_candidate.is_string() ||
             output.memory_candidate.to_chars().len() > 120 { return false }
+        let field_count = 0
+        for key value in output { field_count = field_count + 1 }
+        if field_count != 4 { return false }
         let known = false
         for name in ["none" "propose_inventory_add" "propose_inventory_edit"
             "propose_inventory_remove" "propose_menu_generate" "propose_menu_adjust" "handoff_consumption"] {
@@ -1824,15 +1827,36 @@ fn agent_valid_envelope(output){
         true
     } catch { false }
 }
+fn agent_authority_marker(){
+    let stage_id = 0
+    let stage_revision = ""
+    let stage = current_stage()
+    if stage != nil && !program_expired() {
+        stage_id = stage.id
+        stage_revision = stage.to_json()
+    }
+    let menu = agent_today_menu()
+    let menu_revision = ""
+    for p in state.plans {
+        if p.id == menu.menu_id && p.day == health_day() && p.accepted {
+            menu_revision = p.to_json()
+        }
+    }
+    {stage_id: stage_id stage_revision: stage_revision menu_id: menu.menu_id
+        menu_status: menu.status menu_revision: menu_revision menu_locked: menu.locked}
+}
 fn agent_snapshot(current_id, text){
     {day: today_day() profile_revision: state.profile_revision inventory_revision: state.revision
-        business_state: state.to_json() message_id: current_id message_text: text
+        authority: agent_authority_marker() business_state: state.to_json()
+        message_id: current_id message_text: text
         next_message_id: agent_session.next_message_id entry: agent_entry_context(tab)}
 }
 fn agent_snapshot_matches(snapshot){
     if snapshot == nil || snapshot.day != today_day() || agent_session == nil ||
         agent_session.day != snapshot.day || state.profile_revision != snapshot.profile_revision ||
-        state.revision != snapshot.inventory_revision || state.to_json() != snapshot.business_state ||
+        state.revision != snapshot.inventory_revision ||
+        agent_authority_marker().to_json() != snapshot.authority.to_json() ||
+        state.to_json() != snapshot.business_state ||
         agent_session.next_message_id != snapshot.next_message_id || agent_input != snapshot.message_text ||
         pending || plan_removal != nil || intake_draft != nil || editing_id > 0 || removal != nil ||
         reset_pending || market != nil || receipt != nil || recognition_phase != "" || ai_busy || voice_phase != 0 ||
@@ -1847,6 +1871,24 @@ fn agent_fail(reason){
     agent_phase = "idle" agent_deadline = 0 agent_call_snapshot = nil agent_batch = nil
     agent_error = reason
     redraw()
+}
+fn agent_provider_error(reply){
+    try {
+        if reply.error.is_string() {
+            let error = reply.error
+            if error.search("no_provider:") == 0 { return "宿主没有可用的 AI 提供方，请在 AI 提供方设置中核对后重试。" }
+            if error.search("provider:") == 0 { return "AI 提供方未能完成请求，请检查连接或额度后重试。" }
+            if error.search("invalid_output:") == 0 || error.search("too_large:") == 0 {
+                return "模型回复未通过格式检查，请重试。"
+            }
+            if error.search("rate:") == 0 || error.search("budget:") == 0 {
+                return "宿主已达到模型调用限额，请稍后重试。"
+            }
+            if error.search("bad_request:") == 0 { return "本轮请求未通过宿主校验，请缩短问题后重试。" }
+            if error.search("capability:") == 0 { return "宿主暂未允许本应用调用模型，请检查应用安装。" }
+        }
+    } catch { }
+    "本轮请求失败，请检查宿主 AI 配置或稍后重试。"
 }
 fn agent_advance_turn(){
     if !agent_snapshot_matches(agent_call_snapshot) {
@@ -1913,7 +1955,7 @@ fn agent_received(envelope){
     let output = nil
     try { if envelope.reply.is_ok { output = envelope.reply.data.output } } catch { }
     if output == nil {
-        agent_fail("本轮请求失败，请检查宿主 AI 配置或稍后重试。") return
+        agent_fail(agent_provider_error(envelope.reply)) return
     }
     if agent_phase == "compacting" {
         let next = agent_apply_summary(agent_session, output, agent_batch.through_id)

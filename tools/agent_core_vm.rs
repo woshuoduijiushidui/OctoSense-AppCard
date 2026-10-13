@@ -440,6 +440,8 @@ fn main() {
             assert(!agent_valid_envelope({reply: "好的" tool_name: "unknown" tool_args: {} memory_candidate: ""}))
             assert(!agent_valid_envelope({reply: "好的" tool_name: "none" tool_args: {x: 1} memory_candidate: ""}))
             assert(!agent_valid_envelope({reply: "好的" tool_name: "none" tool_args: {} memory_candidate: "偏好"}))
+            assert(!agent_valid_envelope({reply: "好的" tool_name: "none" tool_args: {}
+                memory_candidate: "" extra: "untrusted"}))
             let long = ""
             for i in 1201 { long = long + "中" }
             assert(!agent_valid_envelope({reply: long tool_name: "none" tool_args: {} memory_candidate: ""}))
@@ -538,6 +540,10 @@ fn main() {
             callback({is_ok: false error: "no provider"})
             agent_watchdog()
             assert(agent_session.messages.len() == 1 && agent_input == "请回答")
+            assert(agent_provider_error({error: "no_provider: No AI provider is set up."}) ==
+                "宿主没有可用的 AI 提供方，请在 AI 提供方设置中核对后重试。")
+            assert(agent_provider_error({error: "bad_request: Invalid schema."}) ==
+                "本轮请求未通过宿主校验，请缩短问题后重试。")
             agent_send()
             let late = callback
             fake_time = fake_time + 96
@@ -546,6 +552,16 @@ fn main() {
             late({is_ok: true data: {output: {reply: "迟到" tool_name: "none" tool_args: {} memory_candidate: ""}}})
             agent_watchdog()
             assert(agent_session.messages.len() == 1)
+            agent_send()
+            assert(agent_phase == "answering")
+            late({is_ok: true data: {output: {reply: "上一轮迟到"
+                tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_phase == "answering" && agent_session.messages.len() == 1)
+            callback({is_ok: true data: {output: {reply: "新一轮回复"
+                tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_phase == "idle" && agent_session.messages[1].text == "新一轮回复")
             true
         "#),
         ("text_snapshot_changes", r#"
@@ -553,14 +569,38 @@ fn main() {
             agent_input = "当前消息"
             assert(agent_append("user", "当前消息") == 1)
             let snapshot = agent_snapshot(1, "当前消息")
+            assert(snapshot.authority.stage_id == 0 && snapshot.authority.stage_revision == "")
+            assert(snapshot.authority.menu_id == 0 && snapshot.authority.menu_status == "none"
+                && snapshot.authority.menu_revision == "")
+            assert(!snapshot.authority.menu_locked)
             assert(agent_snapshot_matches(snapshot))
             state.revision = 2
             assert(!agent_snapshot_matches(snapshot))
             state.revision = 1 state.profile_revision = 2
             assert(!agent_snapshot_matches(snapshot))
-            state.profile_revision = 1 state.plans.push({id: 1 title: "新方案"})
+            state.profile_revision = 1
+            state.stages.push({id: 4 daily_kcal: 1800})
             assert(!agent_snapshot_matches(snapshot))
-            state.plans = [] fake_day = 101
+            state.stages = []
+            state.plans.push({id: 1 day: 100 accepted: true consumed: false
+                title: "今日菜单" meals: []})
+            state.active = 1
+            assert(!agent_snapshot_matches(snapshot))
+            let menu_snapshot = agent_snapshot(1, "当前消息")
+            assert(menu_snapshot.authority.menu_id == 1 && menu_snapshot.authority.menu_status == "accepted"
+                && menu_snapshot.authority.menu_revision != "")
+            assert(!menu_snapshot.authority.menu_locked)
+            state.plans[0].title = "调整后的菜单"
+            assert(!agent_snapshot_matches(menu_snapshot))
+            state.plans[0].title = "今日菜单"
+            state.execution_records.push({day: 100})
+            assert(!agent_snapshot_matches(menu_snapshot))
+            assert(agent_authority_marker().menu_locked)
+            assert(agent_authority_marker().menu_status == "locked")
+            state.execution_records = []
+            state.plans[0].id = 2 state.active = 2
+            assert(!agent_snapshot_matches(menu_snapshot))
+            state.plans = [] state.active = 0 fake_day = 101
             assert(!agent_snapshot_matches(snapshot))
             fake_day = 100 agent_input = "修改了输入"
             assert(!agent_snapshot_matches(snapshot))
@@ -568,6 +608,46 @@ fn main() {
             assert(!agent_snapshot_matches(snapshot))
             agent_session.next_message_id = 2 pending = true
             assert(!agent_snapshot_matches(snapshot))
+            pending = false ai_busy = true
+            assert(!agent_snapshot_matches(snapshot))
+            ai_busy = false agent_session.messages[0].text = "被改写的消息"
+            assert(!agent_snapshot_matches(snapshot))
+            true
+        "#),
+        ("text_stage_and_callback_guard", r#"
+            agent_open_panel()
+            agent_input = "请看当前阶段"
+            assert(agent_append("user", "请看当前阶段") == 1)
+            agent_current_id = 1
+            state.stages.push({id: 4 daily_kcal: 1800})
+            let snapshot = agent_snapshot(1, "请看当前阶段")
+            assert(snapshot.authority.stage_id == 4 && snapshot.authority.stage_revision != "")
+            assert(agent_snapshot_matches(snapshot))
+            state.stages[0].daily_kcal = 1900
+            assert(!agent_snapshot_matches(snapshot))
+            state.stages[0].daily_kcal = 1800
+            state.stages[0].id = 5
+            assert(!agent_snapshot_matches(snapshot))
+            state.stages = []
+            let callback = nil
+            host = {request: |name, args, cb| { callback = cb 1 }}
+            agent_send()
+            assert(agent_phase == "answering")
+            state.execution_records.push({day: 100})
+            callback({is_ok: true data: {output: {reply: "旧状态的回复"
+                tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_phase == "idle" && agent_session.messages.len() == 1)
+            assert(agent_input == "请看当前阶段" && agent_current_id == 1)
+            assert(agent_error != "")
+            state.execution_records = []
+            agent_send()
+            assert(agent_phase == "answering" && agent_session.messages.len() == 1)
+            callback({is_ok: true data: {output: {reply: "当前状态的回复"
+                tool_name: "none" tool_args: {} memory_candidate: ""}}})
+            agent_watchdog()
+            assert(agent_phase == "idle" && agent_session.messages.len() == 2)
+            assert(agent_session.messages[1].text == "当前状态的回复")
             true
         "#),
         ("text_day_rollover", r#"

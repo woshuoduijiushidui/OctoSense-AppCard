@@ -34,6 +34,7 @@ CASES = (
     "text_compaction_failure_stops_answer",
     "text_invalid_provider_and_stale_reply",
     "text_snapshot_changes",
+    "text_stage_and_callback_guard",
     "text_day_rollover",
 )
 

@@ -1,5 +1,37 @@
 # Migration validation
 
+## Issue #3 M2 阶段与菜单回调快照补齐 — 2026-10-13
+
+在已有 M2 纯文字 Agent 主流程上，发送前显式记录当前确认阶段 ID/完整阶段快照、
+今日已接受菜单 ID/状态/完整菜单快照和实际摄入锁定标志，同时保留日期、档案/库存版本、
+消息 ID、输入原文和整份业务状态快照。回调先检查 token、阶段与快照，再验证模型信封；
+阶段或菜单变更后旧回复只显示重试提示，不追加 assistant 消息。
+
+- 生产 Splash 函数 VM：**25/25** 场景通过，新增阶段/菜单标识与内容、菜单锁定、
+  旧 token 在新请求期间迟到以及状态变化后的重试覆盖。
+- `python -X utf8 -m unittest discover -s tools -p test_*.py`：正常本机权限下
+  **36/36 passed**。默认沙箱和仓库内临时目录均触发 Windows tempfile ACL 的 6 项
+  PermissionError；正常本机权限复跑成功。
+- 固定 App Hub `hub stamp bundle`：digest
+  `18761744c455a504d105607b9e3ee323316468d3994e49141790a49f6a8e6ff2`；
+  `tools/launch.py --hub ... --check`：**PASSED**（仅 unsigned editable bundle 提示）。
+- 使用既有本地测试密钥在独立 `target/m2-completion-profile` 签名、发布、安装成功，
+  官方桌面窗口已在用户交互桌面启动。合成豆腐库存建档后，第一次真实文字请求
+  保存了 user 消息并收到宿主 `no_provider`；检查时任务专用宿主的已保存模型 profile
+  尚不存在。用户随后在 AI providers 完成模型列表保存；同一任务专用配置复跑通过。
+- 宿主返回已知错误码时 Agent 现在显示具体可重试提示；未知错误仍使用通用提示，
+  不向应用界面暴露提供方、密钥或原始响应。
+- 官方宿主原生 UI + 真实提供方：主页、库存页、菜单页共用当天对话，7 条真实
+  assistant 回复均落入本地 `agent-session.json`；模型正确读取合成库存 1 批豆腐
+  250 克、今日无已接受菜单和当前阶段。达到第 15 条消息时 UI 实际显示压缩提示，
+  摘要游标从 0 推进到 6，再返回本轮回复；16 条 UI 消息原文均保留，滚动可看
+  首条与最新回复。截图：`target/m2-completion-profile/m2-live-latest.png`。
+- 同日关闭并重启官方宿主后，session 文件 SHA-256 均为
+  `12A329319B7E43B6B2A3D2CBCC6126D197A32D2E8630FCC27588EC6C6D80F26C`；
+  16 条消息、7 条 assistant 回复和摘要游标 6 恢复，抽屉首尾消息均可见。
+  Agent 对话后业务数据仍为 1 批豆腐 250 克、0 份菜单、1 条原始入库事件。
+  原生测试仅在 Windows 任务专用配置执行；没有把 VM 回调算作真实提供方证据。
+
 ## Issue #3 M1 当日会话、权威上下文与软记忆 — 2026-10-13
 
 在 Pantry `origin/main` `c6f4d80` 上补齐 M1：每轮 Agent 输入从已确认档案、`current_stage()`、
