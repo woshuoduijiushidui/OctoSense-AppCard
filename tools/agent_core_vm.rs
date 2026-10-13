@@ -8,6 +8,9 @@ fn main() {
     let start = source.find("fn agent_empty_session(day)").unwrap();
     let end = source.find("fn canonical_unit(unit)").unwrap();
     let helpers = &source[start..end];
+    let voice_start = source.find("fn probe_voice(){").unwrap();
+    let voice_end = source.find("fn stop_ai(){").unwrap();
+    let voice_helpers = &source[voice_start..voice_end];
     let save_start = source.find("fn save_day_menu(meals, reason, source, numeric)").unwrap();
     let save_end = source.find("fn rule_plan(reason)").unwrap();
     let menu_save = &source[save_start..save_end];
@@ -49,6 +52,25 @@ fn main() {
         let agent_review = nil
         let agent_answer_input = nil
         let agent_correction = 0
+        let voice_phase = 0
+        let voice_sequence = 0
+        let voice_deadline = 0
+        let voice_reply = nil
+        let voice_capability = "checking"
+        let voice_probe_sequence = 0
+        let voice_probe_reply = nil
+        let voice_probe_deadline = 0
+        let voice_probe_next = 0
+        let voice_probe_attempts = 0
+        let voice_action = ""
+        let voice_session = ""
+        let voice_next_poll = 0
+        let voice_path = "/agent/voice-latest.wav"
+        let ui_state = {text: "" focused: false}
+        let ui = {agent_input_field: {
+            set_text: |text| { ui_state.text = text }
+            take_key_focus: || { ui_state.focused = true }
+        }}
         let ai_validation_error = ""
         let goal = ""
         let selected = 0
@@ -57,10 +79,13 @@ fn main() {
             weight: "60" activity: "轻活动" allergies: "" avoidances: "" preferences: "" special: ""}
             foods: [] plans: [] stages: [] execution_records: [] active: 0
             next_id: 1 revision: 1 profile_revision: 1}
-        let disk = {session: "" memory: "" fail: false}
+        let disk = {session: "" memory: "" voice: false fail: false}
         let fs = {
-            exists: |path| { if path == "agent-session.json" { disk.session != "" } else { disk.memory != "" } }
+            exists: |path| { if path == "agent-session.json" { disk.session != "" }
+                else if path == "/agent/voice-latest.wav" { disk.voice }
+                else { disk.memory != "" } }
             read: |path| { if path == "agent-session.json" { disk.session } else { disk.memory } }
+            remove: |path| { if path == "/agent/voice-latest.wav" { disk.voice = false } }
             write: |path, value| {
                 if disk.fail { return "failed" }
                 if path == "agent-session.json" { disk.session = value }
@@ -84,7 +109,6 @@ fn main() {
         let market = nil
         let receipt = nil
         let ai_busy = false
-        let voice_phase = 0
         let storage_blocked = false
         let use_ai = true
         fn today_day(){ fake_day }
@@ -867,12 +891,219 @@ fn main() {
             assert(tab == 2 && agent_review == nil)
             true
         "#),
+        ("voice_fallback_and_transcript_draft", r#"
+            agent_load_session()
+            agent_open_panel()
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(name) callback = cb }}
+            voice_capability = "unsupported"
+            agent_microphone()
+            assert(calls.len() == 0 && agent_error == "当前宿主暂不支持语音识别，请使用文字输入。")
+            voice_capability = "unconfigured"
+            agent_microphone()
+            assert(calls.len() == 0 && agent_error.search("MiniMax") >= 0)
+            voice_capability = "ready"
+            agent_input = "先前文字"
+            disk.voice = true
+            agent_microphone()
+            assert(calls.len() == 1 && calls[0] == "microphone.permission.status")
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: true os_permission: "granted"}})
+            voice_watchdog()
+            assert(!disk.voice && calls[1] == "microphone.record_start")
+            let session = "12345678-1234-1234-1234-123456789012"
+            callback({is_ok: true data: {session: session status: "starting"}})
+            voice_watchdog()
+            assert(voice_phase == 2 && voice_session == session)
+            voice_stop()
+            assert(calls[2] == "microphone.record_stop" && voice_phase == 5)
+            callback({is_ok: true data: {session: session status: "stopping"}})
+            voice_watchdog()
+            fake_time = fake_time + 1
+            voice_watchdog()
+            assert(calls[3] == "microphone.record_status")
+            callback({is_ok: true data: {session: session status: "saved" path: voice_path}})
+            voice_watchdog()
+            assert(calls[4] == "model.transcribe" && voice_phase == 3)
+            callback({is_ok: true data: {text: "请买 Greek yogurt"}})
+            voice_watchdog()
+            assert(voice_phase == 0 && agent_input == "先前文字\n请买 Greek yogurt")
+            assert(ui_state.text == agent_input && ui_state.focused)
+            assert(agent_session.messages.len() == 0 && state.foods.len() == 0)
+            agent_input = "请买无糖 Greek yogurt"
+            agent_send()
+            assert(agent_session.messages.len() == 1)
+            assert(agent_session.messages[0].text == "请买无糖 Greek yogurt")
+            assert(calls.len() == 6 && calls[5] == "model.complete")
+            true
+        "#),
+        ("voice_rate_retries_before_permission", r#"
+            agent_load_session()
+            agent_open_panel()
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(name) callback = cb }}
+            probe_voice()
+            assert(calls.len() == 1 && calls[0] == "model.transcribe_capability")
+            let old_probe = callback
+            callback({is_ok: false error: "rate: Model workers are busy; retry later."})
+            voice_watchdog()
+            assert(voice_capability == "checking" && calls.len() == 1)
+            agent_microphone()
+            assert(calls.len() == 1 && agent_error.search("正在检查") >= 0)
+            fake_time = fake_time + 1
+            voice_watchdog()
+            assert(calls.len() == 2 && calls[1] == "model.transcribe_capability")
+            callback({is_ok: true data: {schema: 1 supported: true configured: true}})
+            old_probe({is_ok: false error: "rate: late response"})
+            voice_watchdog()
+            assert(voice_capability == "ready")
+            agent_microphone()
+            assert(calls.len() == 3 && calls[2] == "microphone.permission.status")
+            true
+        "#),
+        ("voice_late_status_cannot_hide_stop", r#"
+            agent_load_session()
+            agent_open_panel()
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(name) callback = cb }}
+            voice_capability = "ready"
+            agent_microphone()
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: true os_permission: "granted"}})
+            voice_watchdog()
+            let session = "12345678-1234-1234-1234-123456789012"
+            callback({is_ok: true data: {session: session status: "starting"}})
+            voice_watchdog()
+            fake_time = fake_time + 1
+            voice_watchdog()
+            assert(calls[2] == "microphone.record_status")
+            let old_status = callback
+            voice_stop()
+            assert(calls[3] == "microphone.record_stop")
+            callback({is_ok: true data: {session: session status: "stopping"}})
+            old_status({is_ok: true data: {session: session status: "recording"}})
+            voice_watchdog()
+            assert(voice_action == "" && voice_phase == 5)
+            fake_time = fake_time + 1
+            voice_watchdog()
+            assert(calls[4] == "microphone.record_status")
+            true
+        "#),
+        ("voice_denied_empty_cancel_stale", r#"
+            agent_load_session()
+            agent_open_panel()
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(name) callback = cb }}
+            voice_capability = "ready"
+            agent_input = "保留我"
+            agent_microphone()
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: false os_permission: "settings_required"}})
+            voice_watchdog()
+            assert(voice_phase == 0 && agent_input == "保留我" && calls.len() == 1)
+            agent_microphone()
+            let old = callback
+            agent_close_panel()
+            old({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: true os_permission: "granted"}})
+            voice_watchdog()
+            assert(voice_phase == 0 && calls.len() == 2)
+            agent_open_panel()
+            agent_microphone()
+            fake_time = fake_time + 181
+            voice_watchdog()
+            assert(voice_phase == 0 && agent_input == "保留我")
+            true
+        "#),
+        ("voice_auto_stop_empty_and_busy", r#"
+            agent_load_session()
+            agent_open_panel()
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(name) callback = cb }}
+            probe_voice()
+            assert(calls[0] == "model.transcribe_capability")
+            callback({is_ok: true data: {schema: 1 supported: true configured: false}})
+            voice_watchdog()
+            assert(voice_capability == "unconfigured")
+            agent_microphone()
+            assert(calls.len() == 1)
+            voice_capability = "ready"
+            agent_input = "旧内容"
+            agent_microphone()
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: true os_permission: "granted"}})
+            voice_watchdog()
+            let session = "12345678-1234-1234-1234-123456789012"
+            callback({is_ok: true data: {session: session status: "starting"}})
+            voice_watchdog()
+            fake_time = fake_time + 31
+            voice_watchdog()
+            assert(calls[3] == "microphone.record_status")
+            callback({is_ok: true data: {session: session status: "saved" path: voice_path}})
+            voice_watchdog()
+            assert(calls[4] == "model.transcribe")
+            callback({is_ok: true data: {text: "  "}})
+            voice_watchdog()
+            assert(voice_phase == 0 && agent_input == "旧内容")
+            assert(agent_session.messages.len() == 0)
+            agent_proposal = {tool_name: "none"}
+            agent_microphone()
+            assert(voice_phase == 0 && calls.len() == 6)
+            agent_proposal = nil
+            agent_microphone()
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: true os_permission: "granted"}})
+            voice_watchdog()
+            callback({is_ok: true data: {session: session status: "starting"}})
+            voice_watchdog()
+            assert(voice_phase == 2)
+            agent_close_panel()
+            assert(voice_phase == 0 && calls[calls.len()-1] == "microphone.record_cancel")
+            true
+        "#),
+        ("voice_permission_request_and_late_start", r#"
+            agent_load_session()
+            agent_open_panel()
+            let calls = []
+            let callback = nil
+            host = {request: |name, args, cb| { calls.push(name) callback = cb }}
+            voice_capability = "ready"
+            agent_input = "已有草稿"
+            agent_microphone()
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: false os_permission: "not_determined"}})
+            voice_watchdog()
+            assert(calls[1] == "microphone.permission.request")
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: false os_permission: "denied"}})
+            voice_watchdog()
+            assert(voice_phase == 0 && agent_input == "已有草稿")
+            agent_microphone()
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: false os_permission: "not_determined"}})
+            voice_watchdog()
+            callback({is_ok: true data: {supported: true app_policy_granted: true
+                app_consent: true os_permission: "granted"}})
+            voice_watchdog()
+            assert(calls[calls.len()-1] == "microphone.record_start")
+            let late = callback
+            agent_close_panel()
+            late({is_ok: true data: {session: "12345678-1234-1234-1234-123456789012" status: "starting"}})
+            assert(calls[calls.len()-1] == "microphone.record_cancel")
+            assert(voice_phase == 0 && agent_input == "已有草稿")
+            true
+        "#),
     ];
     for (name, script) in cases {
         let mut host = ScriptVmHost::new((), ());
         let mut vm = ScriptVm { host: &mut host, bx: Box::new(ScriptVmBase::new()) };
         vm.bx.captured_errors = Some(Vec::new());
-        let code = format!("{prelude}\n{helpers}\n{menu_save}\n{menu_accept}\n{recipe_helpers}\n{menu_builder}\n{batch_helpers}\n{draft_helper}\n{script}\n;");
+        let code = format!("{prelude}\n{helpers}\n{voice_helpers}\n{menu_save}\n{menu_accept}\n{recipe_helpers}\n{menu_builder}\n{batch_helpers}\n{draft_helper}\n{script}\n;");
         let result = vm.with_instruction_limit(2_000_000, |vm| vm.eval(ScriptMod {
             file: format!("agent_core_{name}.splash"), code, ..Default::default()
         }));

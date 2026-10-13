@@ -41,6 +41,12 @@ CASES = (
     "proposal_menu_lock_and_revision",
     "proposal_menu_one_correction",
     "proposal_menu_confirm_memory",
+    "voice_fallback_and_transcript_draft",
+    "voice_rate_retries_before_permission",
+    "voice_late_status_cannot_hide_stop",
+    "voice_denied_empty_cancel_stale",
+    "voice_auto_stop_empty_and_busy",
+    "voice_permission_request_and_late_start",
 )
 
 

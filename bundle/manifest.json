@@ -3,7 +3,8 @@
     "storage",
     "model",
     "camera",
-    "files"
+    "files",
+    "microphone"
   ],
   "compute": {
     "instruction_budget": 20000000,
@@ -11,12 +12,20 @@
   },
   "host_api": {
     "optional": {
-      "camera.permission.request": 1
+      "camera.permission.request": 1,
+      "microphone.permission.request": 1,
+      "microphone.permission.status": 1,
+      "microphone.record_cancel": 1,
+      "microphone.record_start": 1,
+      "microphone.record_status": 1,
+      "microphone.record_stop": 1,
+      "model.transcribe": 1,
+      "model.transcribe_capability": 1
     }
   },
   "id": "pantry-steward",
   "integrity": {
-    "bundle_blake3": "4bd53dd902385ec7b76fbbd2b22e53109d621eac0af39fbb7a93e867241cad2c"
+    "bundle_blake3": "e400d0b8f899b78e4638d7093953f693c30fa191c554b47a4b9b57d6c93c0e9e"
   },
   "name": "冰箱管家",
   "requires": [

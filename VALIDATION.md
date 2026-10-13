@@ -2093,3 +2093,49 @@ closes its own hidden hosts. Bundle digest:
   status, allocation revision, or whole-day lock after one meal. The Issue #3
   Agent still accepts only `none + {}`; proposals, full stage/menu projection,
   memory writes after confirmed menus, and ASR remain unverified or unbuilt.
+
+## Issue #3 M5 voice integration — 2026-10-13
+
+The Agent microphone now probes the optional host speech capability, checks
+microphone consent, records one app-local WAV for at most 30 seconds, and puts
+the transcript into the editable Agent input. It never sends the transcript or
+writes inventory, menu, or intake state on its own. A transient host `rate`
+response during startup capability probing is retried within a 12-second
+budget; the initial local-host run reproduced that response before the fix.
+The host-managed permission sheet uses the same device-consent route as the
+Issue #2 camera flow. Waiting for a person's consent now has a 180-second
+application deadline instead of 30 seconds.
+
+- Final bundle digest: `e400d0b8f899b78e4638d7093953f693c30fa191c554b47a4b9b57d6c93c0e9e`.
+  The pinned Hub stamp/check and `tools/launch.py --check --offline` passed.
+  Existing local test keys signed task-owned isolated profiles; no new key or
+  production signature was generated.
+- Offline Pantry suite: 36/36 passed with a task-owned temporary directory.
+  The production Script VM cases cover unsupported/no MiniMax, consent and
+  refusal, manual and automatic stop, cancellation, stale callbacks, empty
+  transcription, editable draft versus send, transient startup `rate`, and a
+  late recording-status reply arriving after Stop.
+- The unmodified official desktop installed this same bundle in an isolated
+  profile. Its microphone showed the exact unsupported message without an app
+  WAV. An earlier real provider reply remained readable after restart, and a
+  fresh text request returned a real Agent reply on the final bundle.
+- The rebuilt local desktop opened the host's microphone consent sheet. After
+  consent, a person recorded and manually stopped a mixed Chinese/English food
+  request. The app-local 16 kHz mono WAV contained 4.38 seconds of audio; the
+  actual MiniMax transcription appeared in the editable Agent input. The
+  person did not press Send and the inventory revision did not change.
+- In a separate run on the final bundle, the person clicked the microphone
+  only once. The host automatically stopped at 30 seconds; the 16 kHz mono WAV
+  contained exactly 30.0 seconds of audio, and a mixed Chinese/English
+  transcript appeared in the editable input without a Send action.
+- During a later live recording, closing the Agent panel removed the temporary
+  WAV. A further recording was started with the task-owned window in the
+  foreground, then the host was quit normally while recording. Its process
+  exited and no temporary WAV remained. Across these unsent voice runs, no
+  Agent session file was created and the inventory revision stayed at 8.
+- Windows mouse activation initially made the pinned Makepad runtime report a
+  focus loss. The OctoSense patch now treats `WA_CLICKACTIVE` as focus gain;
+  its regression test and release build passed. Earlier `device_unavailable:
+  No audio frames arrived` results came from a restricted test-host process
+  without microphone-device access. The task-owned host launched on the
+  interactive desktop with normal device access produced both live recordings.

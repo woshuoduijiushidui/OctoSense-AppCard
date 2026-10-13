@@ -66,11 +66,21 @@ let host_request_id = 0
 let config_reply = nil
 let model_reply = nil
 let retry_reason = "用户请求"
-// Push-to-talk audio stays in the trusted host; the script only receives text.
-let voice_phase = 0 // 0 idle, 1 opening, 2 recording, 3 transcribing
+// Audio stays in the trusted host; only its transcription enters the editable draft.
+let voice_phase = 0 // 0 idle, 1 permission, 2 recording, 3 transcribing, 4 starting, 5 stopping
 let voice_sequence = 0
 let voice_deadline = 0
 let voice_reply = nil
+let voice_capability = "checking"
+let voice_probe_sequence = 0
+let voice_probe_reply = nil
+let voice_probe_deadline = 0
+let voice_probe_next = 0
+let voice_probe_attempts = 0
+let voice_action = ""
+let voice_session = ""
+let voice_next_poll = 0
+let voice_path = "/agent/voice-latest.wav"
 let agent_session = nil
 let agent_memory = nil
 let agent_open = false
@@ -1814,10 +1824,31 @@ fn agent_open_panel(){
     agent_open = true
     redraw()
 }
-fn agent_close_panel(){ agent_open = false redraw() }
+fn agent_close_panel(){
+    if voice_phase != 0 { voice_cancel() }
+    agent_open = false redraw()
+}
 fn agent_microphone(){
     if agent_proposal != nil { agent_error = "请先核对或取消当前建议。" redraw() return }
-    agent_error = "当前宿主尚未提供语音识别，请输入文字。"
+    if voice_phase == 2 { voice_stop() return }
+    if voice_phase != 0 { return }
+    if !agent_open || !agent_entry_allowed() || agent_phase != "idle" || ai_busy ||
+        recognition_phase != "" || storage_blocked || !use_ai {
+        agent_error = "请先结束当前操作并启用在线 AI，再使用语音。" redraw() return
+    }
+    if voice_capability == "unsupported" {
+        agent_error = "当前宿主暂不支持语音识别，请使用文字输入。" redraw() return
+    }
+    if voice_capability == "unconfigured" {
+        agent_error = "语音识别需要在宿主中配置 MiniMax；文字 Agent 仍可使用。" redraw() return
+    }
+    if voice_capability != "ready" {
+        agent_error = "正在检查语音能力，请稍后再试。" redraw() return
+    }
+    agent_error = ""
+    voice_phase = 1 voice_deadline = time_now() + 180
+    voice_sequence = voice_sequence + 1
+    voice_request("permission_status", "microphone.permission.status", {})
     redraw()
 }
 fn agent_exact_keys(value, fields){
@@ -2811,8 +2842,9 @@ fn render_dashboard(){
         if ai_error != "" && ai_phase == 1 { status = "在线 AI · 需要重试" }
     }
     if ai_busy { status = "在线 AI · 正在规划" }
-    if voice_phase == 1 { status = "语音输入 · 正在打开麦克风" }
+    if voice_phase == 1 || voice_phase == 4 { status = "语音输入 · 正在打开麦克风" }
     if voice_phase == 2 { status = "语音输入 · 正在聆听" }
+    if voice_phase == 5 { status = "语音输入 · 正在保存" }
     if voice_phase == 3 { status = "语音输入 · 正在识别" }
     if state.paused { status = "管家已暂停" }
     if state.auto_generate { status = status + " · 自动生成" }
@@ -2832,7 +2864,7 @@ fn navigate(index){
     }
     if pending { message = "请先确认或取消本次扣减。" redraw() return }
     if plan_removal != nil { message = "请先确认或取消删除菜单。" redraw() return }
-    if voice_phase != 0 { message = "请先结束本次语音输入。" redraw() return }
+    if voice_phase != 0 { voice_cancel() }
     agent_open = false
     tab = index
     details = false
@@ -2870,6 +2902,7 @@ fn load(){
     redraw()
     read_ai_config()
     probe_vision()
+    probe_voice()
 }
 fn batch_grams(food){
     if food.canonical_unit == "g" { return food.canonical_quantity }
@@ -3378,6 +3411,7 @@ fn probe_vision(){
 }
 fn begin_recognition(mode){
     if agent_phase != "idle" { message = "请先等待 Agent 回复或整理完成。" redraw() return }
+    if voice_phase != 0 { message = "请先结束语音输入。" redraw() return }
     if !online_ready() { redraw() return }
     if vision_phase != 1 {
         message = "当前宿主暂不支持图片识别，请使用手动录入"
@@ -3983,10 +4017,6 @@ fn ai_watchdog(){
     if recognition_phase == "model" && recognition_deadline > 0 && time_now() >= recognition_deadline {
         recognition_failed("图片识别超时")
     }
-    if voice_reply != nil {
-        let received = voice_reply voice_reply = nil
-        apply_voice_reply(received)
-    }
     if ai_phase == 0 && config_deadline > 0 && time_now() >= config_deadline {
         probe_sequence = probe_sequence + 1 ai_phase = 3
         ai_error = "读取 AI 配置超时，请在设置里重新读取。"
@@ -3996,15 +4026,7 @@ fn ai_watchdog(){
         stop_ai()
         if has_field(ai_snapshot, "nutrition_flow") { apply_nutrition_reply({is_ok: false error: "营养估算超时"}) } else { ai_failure("AI 生成超时，已停止等待。迟到的结果不会写入，可稍后重试。") }
     }
-    if voice_phase == 1 && time_now() >= voice_deadline {
-        voice_sequence = voice_sequence + 1 voice_phase = 0 voice_deadline = 0
-        message = "打开麦克风超时，请检查宿主与系统权限。" redraw()
-    }
-    if voice_phase == 2 && time_now() >= voice_deadline { stop_voice() }
-    if voice_phase == 3 && time_now() >= voice_deadline {
-        voice_sequence = voice_sequence + 1 voice_phase = 0 voice_deadline = 0
-        message = "语音识别超时，迟到的结果不会填入。请检查网络后重试。" redraw()
-    }
+    voice_watchdog()
     agent_watchdog()
     // The Overview reads the current stage from today's date. When the civil day
     // turns over while the app stays open, re-render so the new stage and its
@@ -4012,35 +4034,205 @@ fn ai_watchdog(){
     let today = health_day()
     if booted && today != shown_day { shown_day = today redraw() }
 }
-fn voice_received(token, action, r){ voice_reply = {token: token action: action reply: r} }
-fn apply_voice_reply(envelope){
-    if envelope.token != voice_sequence { return }
-    let r = envelope.reply
-    if envelope.action == "start" {
-        if !r.is_ok {
-            voice_phase = 0 message = "语音输入启动失败：" + r.error
-        } else {
-            voice_phase = 2 voice_deadline = time_now() + 18
-            message = "正在听，请说出这一餐想吃什么；说完后再点一次麦克风。"
+fn probe_voice(){
+    voice_capability = "checking"
+    voice_probe_deadline = time_now() + 12
+    voice_probe_next = 0
+    voice_probe_attempts = 0
+    request_voice_probe()
+}
+fn request_voice_probe(){
+    voice_probe_sequence = voice_probe_sequence + 1
+    voice_probe_attempts = voice_probe_attempts + 1
+    let token = voice_probe_sequence
+    try { host.request("model.transcribe_capability", {}, |r| {
+        if token == voice_probe_sequence { voice_probe_reply = {token: token reply: r} }
+    }) }
+    catch { voice_capability = "unsupported" voice_probe_deadline = 0 }
+}
+fn voice_request(action, method, args){
+    voice_action = action
+    let token = voice_sequence
+    try { host.request(method, args, |r| { voice_received(token, action, r) }) }
+    catch { voice_fail("语音操作失败，请检查宿主后重试。") }
+}
+fn voice_received(token, action, r){
+    if token != voice_sequence {
+        // A cancelled start can still create a host session; discard it there.
+        if action == "start" && r.is_ok && r.data != nil && r.data.session.is_string() {
+            try { host.request("microphone.record_cancel", {session: r.data.session}, nil) } catch { }
         }
+        return
+    }
+    if action != voice_action { return }
+    voice_reply = {token: token action: action reply: r}
+}
+fn voice_cancel(){
+    let session = voice_session
+    voice_sequence = voice_sequence + 1
+    voice_phase = 0 voice_deadline = 0 voice_next_poll = 0
+    voice_action = "" voice_reply = nil voice_session = ""
+    if session != "" {
+        try { host.request("microphone.record_cancel", {session: session}, nil) } catch { }
+    }
+}
+fn voice_fail(reason){
+    voice_cancel()
+    agent_error = reason
+    redraw()
+}
+fn voice_permission_ok(data){
+    data != nil && data.is_object() && data.supported == true &&
+        data.app_policy_granted == true && data.app_consent == true && data.os_permission == "granted"
+}
+fn voice_start(){
+    try {
+        if fs.exists(voice_path) { fs.remove(voice_path) }
+    } catch { voice_fail("无法删除上次临时录音，请检查应用存储后重试。") return }
+    voice_phase = 4 voice_deadline = time_now() + 25
+    voice_request("start", "microphone.record_start", {path: voice_path max_duration_ms: 30000})
+    redraw()
+}
+fn voice_stop(){
+    if voice_phase != 2 || voice_session == "" { return }
+    voice_phase = 5 voice_deadline = time_now() + 25
+    voice_request("stop", "microphone.record_stop", {session: voice_session})
+    redraw()
+}
+fn voice_status(){
+    if voice_session == "" || voice_action != "" { return }
+    voice_request("status", "microphone.record_status", {session: voice_session})
+}
+fn voice_transcribe(){
+    voice_phase = 3 voice_deadline = time_now() + 60
+    agent_error = "正在识别语音…"
+    voice_request("transcribe", "model.transcribe", {audio: {app_path: voice_path}})
+    redraw()
+}
+fn voice_apply_status(data){
+    if data == nil || !data.is_object() || data.session != voice_session {
+        voice_fail("录音状态无效，请重新录音。") return
+    }
+    if data.status == "saved" {
+        if data.path != voice_path { voice_fail("录音文件路径无效，请重新录音。") return }
+        voice_transcribe() return
+    }
+    if data.status == "failed" || data.status == "cancelled" {
+        if data.error.is_string() && data.error.search("foreground") >= 0 {
+            voice_fail("录音因切换窗口而取消；请保持冰箱管家窗口在前台，录完后再返回聊天。") return
+        }
+        if data.error.is_string() && data.error.search("device_unavailable:") == 0 {
+            voice_fail("麦克风没有提供音频，请检查 Windows 的麦克风设备和隐私设置。") return
+        }
+        voice_fail("录音失败或已取消，请检查麦克风后重试。") return
+    }
+    if data.status != "recording" && data.status != "starting" && data.status != "waiting_device" &&
+        data.status != "checking_permission" && data.status != "preparing" && data.status != "stopping" {
+        voice_fail("录音状态无效，请重新录音。") return
+    }
+    voice_next_poll = time_now() + 0.5
+}
+fn apply_voice_reply(envelope){
+    if envelope.token != voice_sequence || envelope.action != voice_action || voice_phase == 0 { return }
+    voice_action = ""
+    let r = envelope.reply
+    if !r.is_ok {
+        if envelope.action == "transcribe" { voice_fail("语音识别失败，请检查 MiniMax 配置或网络后重试。") }
+        else if r.error.is_string() && r.error.search("foreground_required:") == 0 {
+            voice_fail("请保持冰箱管家窗口在前台，再点击麦克风。")
+        } else if r.error.is_string() && r.error.search("device_unavailable:") == 0 {
+            voice_fail("麦克风没有提供音频，请检查 Windows 的麦克风设备和隐私设置。")
+        } else { voice_fail("麦克风操作失败或权限未授予，请检查宿主与系统设置后重试。") }
+        return
+    }
+    if envelope.action == "permission_status" || envelope.action == "permission_request" {
+        if voice_permission_ok(r.data) { voice_start() return }
+        if envelope.action == "permission_status" && r.data != nil && r.data.is_object() &&
+            r.data.supported == true && r.data.app_policy_granted == true &&
+            (r.data.os_permission == "not_determined" || r.data.os_permission == "denied" ||
+             (r.data.os_permission == "granted" && r.data.app_consent != true)) {
+            voice_request("permission_request", "microphone.permission.request", {}) return
+        }
+        voice_fail("麦克风权限未授予，请在宿主或系统设置中允许后重试。") return
+    }
+    if envelope.action == "start" {
+        if r.data == nil || !r.data.is_object() || !r.data.session.is_string() {
+            voice_fail("录音启动结果无效，请重试。") return
+        }
+        voice_session = r.data.session
+        voice_phase = 2 voice_deadline = time_now() + 45
+        voice_next_poll = time_now() + 0.5
+        agent_error = "正在聆听；说完后再点一次麦克风。"
         redraw() return
     }
-    voice_phase = 0 voice_deadline = 0
-    if !r.is_ok {
-        message = "语音识别失败：" + r.error
-    } else {
-        goal = ("" + r.data.text).trim()
-        if goal == "" { message = "没有识别到清晰内容，请重新录音。" }
-        if goal != "" { message = "语音已填入，请确认文字后再生成菜单。" }
+    if envelope.action == "stop" || envelope.action == "status" { voice_apply_status(r.data) return }
+    if envelope.action == "transcribe" {
+        if r.data == nil || !r.data.is_object() || !r.data.text.is_string() {
+            voice_fail("语音识别结果无效，请重试。") return
+        }
+        let transcript = r.data.text.trim()
+        if transcript == "" { voice_fail("没有识别到清晰内容，请重新录音或直接输入。") return }
+        let next = transcript
+        if agent_input.trim() != "" { next = agent_input + "\n" + transcript }
+        if next.to_chars().len() > 1500 { voice_fail("识别文字超过输入上限，请缩短录音后重试。") return }
+        voice_session = ""
+        voice_cancel()
+        agent_input = next
+        agent_error = "语音已填入，请核对文字后再发送。"
+        redraw()
+        ui.agent_input_field.set_text(next)
+        ui.agent_input_field.take_key_focus()
     }
-    redraw()
+}
+fn voice_watchdog(){
+    if voice_probe_reply != nil {
+        let received = voice_probe_reply voice_probe_reply = nil
+        if received.token == voice_probe_sequence {
+            voice_capability = "unsupported"
+            if !received.reply.is_ok && received.reply.error.search("rate:") == 0 &&
+                voice_probe_attempts < 5 && time_now() + 0.6 < voice_probe_deadline {
+                voice_capability = "checking"
+                voice_probe_next = time_now() + 0.6
+            } else {
+                voice_probe_deadline = 0
+                try {
+                    if received.reply.is_ok && received.reply.data.schema == 1 && received.reply.data.supported == true {
+                        if received.reply.data.configured == true { voice_capability = "ready" }
+                        else { voice_capability = "unconfigured" }
+                    }
+                } catch { }
+            }
+            redraw()
+        }
+    }
+    if voice_capability == "checking" && voice_probe_deadline > 0 && time_now() >= voice_probe_deadline {
+        voice_probe_sequence = voice_probe_sequence + 1
+        voice_capability = "unsupported" voice_probe_deadline = 0 voice_probe_next = 0
+        redraw()
+    }
+    if voice_capability == "checking" && voice_probe_next > 0 && time_now() >= voice_probe_next {
+        voice_probe_next = 0
+        request_voice_probe()
+    }
+    if voice_reply != nil {
+        let received = voice_reply voice_reply = nil
+        apply_voice_reply(received)
+    }
+    if voice_phase == 0 { return }
+    if !agent_open || !agent_entry_allowed() || agent_phase != "idle" || agent_proposal != nil ||
+        ai_busy || recognition_phase != "" || storage_blocked || !use_ai {
+        voice_cancel() redraw() return
+    }
+    if voice_deadline > 0 && time_now() >= voice_deadline {
+        voice_fail("语音操作超时，请检查麦克风或网络后重试。") return
+    }
+    if (voice_phase == 2 || voice_phase == 5) && voice_action == "" && time_now() >= voice_next_poll {
+        voice_status()
+    }
 }
 fn toggle_voice(){
-    message = "官方宿主尚未提供本应用所需的语音识别服务，请直接输入文字。"
-    redraw()
-}
-fn stop_voice(){
-    voice_phase = 0 voice_deadline = 0
+    if !agent_open { agent_open_panel() }
+    agent_microphone()
 }
 fn stop_ai(){
     ai_sequence = ai_sequence + 1
@@ -6849,7 +7041,9 @@ View{width: Fill height: Fill flow: Overlay
                                     Hint{text: "Agent 正在整理本次对话…页面中的聊天记录不会被删除"}
                                 }
                                 if agent_phase == "answering" { Hint{text: "管家正在回复…"} }
-                                if voice_phase == 1 || voice_phase == 2 { Hint{text: "正在录音…"} }
+                                if voice_phase == 1 || voice_phase == 4 { Hint{text: "正在打开麦克风…"} }
+                                if voice_phase == 2 { Hint{text: "正在录音，再次点击麦克风结束"} }
+                                if voice_phase == 5 { Hint{text: "正在保存录音…"} }
                                 if voice_phase == 3 { Hint{text: "正在转写…"} }
                                 if agent_error != "" { Hint{text: agent_error} }
                                 if agent_proposal != nil {
@@ -6862,12 +7056,12 @@ View{width: Fill height: Fill flow: Overlay
                                         }
                                     }
                                 } else {
-                                    Field{height: 110 is_multiline: true text: agent_input
+                                    agent_input_field := Field{height: 110 is_multiline: true text: agent_input
                                         empty_text: "输入问题或说出今天的需求（最多 1500 字）"
                                         on_change: |text| { agent_input = text }}
                                     View{width: Fill height: Fit flow: Right spacing: 8
-                                        Soft{text: "麦克风" enabled: agent_phase == "idle" on_click: || agent_microphone()}
-                                        Action{text: "发送" enabled: agent_phase == "idle" on_click: || agent_send()}
+                                        Soft{text: "麦克风" enabled: agent_phase == "idle" && (voice_phase == 0 || voice_phase == 2) on_click: || agent_microphone()}
+                                        Action{text: "发送" enabled: agent_phase == "idle" && voice_phase == 0 on_click: || agent_send()}
                                     }
                                 }
                             }
