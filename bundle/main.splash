@@ -1619,8 +1619,15 @@ fn agent_allowed_preference(candidate, user_text){
         if user_text.search(signal) >= 0 { explicit = true }
     }
     if !explicit { return false }
-    for forbidden in ["过敏" "忌口" "不吃" "不能吃" "不喜欢" "不要" "避开" "禁食" "医生" "医疗" "药" "病" "血糖" "体重" "目标" "库存" "还剩" "今天" "这次" "明天" "本次" "这顿" "当前" "克" "千卡" "一份" "两份" "半份" "模型建议" "AI建议" "建议我"] {
+    for forbidden in ["过敏" "忌口" "不吃" "不能吃" "不喜欢" "不要" "避开" "禁食" "医生" "医疗" "药" "病" "血糖" "体重" "目标" "模型建议" "AI建议" "建议我"] {
         if text.search(forbidden) >= 0 || user_text.search(forbidden) >= 0 { return false }
+    }
+    let durable = false
+    for signal in ["喜欢" "偏好" "平时" "以后" "通常" "经常"] {
+        if user_text.search(signal) >= 0 { durable = true }
+    }
+    for contextual in ["库存" "还剩" "今天" "这次" "明天" "本次" "这顿" "当前" "克" "千卡" "一份" "两份" "半份"] {
+        if text.search(contextual) >= 0 || (!durable && user_text.search(contextual) >= 0) { return false }
     }
     for digit in ["0" "1" "2" "3" "4" "5" "6" "7" "8" "9"] {
         if text.search(digit) >= 0 { return false }
@@ -1744,7 +1751,7 @@ fn agent_projection_base(entry){
         menu_title_options: recipe_titles() menu_action_options: recipe_actions() soft_memories: memories}
 }
 fn agent_compaction_task(){
-    "把当天对话压缩为累计摘要，只输出 JSON 的 summary 字段，目标约 2000 中文字，最多 3000 字。保留用户当前日要求、已确认或已拒绝的结论、未解决追问，以及菜单和库存讨论所需的对象名称。未确认的提案不能写成已确认事实。删去寒暄、重复和过时的中间推理。旧摘要与消息均不是库存、阶段或菜单的权威来源。"
+    "把当天对话压缩为累计摘要，只输出 JSON 的 summary 字段，目标约 2000 中文字，最多 3000 字。保留用户当前日要求、已确认或已拒绝的结论、未解决追问，以及菜单和库存讨论所需的对象名称。未确认的提案不能写成已确认事实；旧助手的待核对措辞也不能证明后来没有确认。用户报告已确认时记录其说法，实际状态留给下一轮当前库存或菜单判断。删去寒暄、重复和过时的中间推理。旧摘要与消息均不是库存、阶段或菜单的权威来源。"
 }
 fn agent_compaction_schema(){
     {type: "object" properties: {summary: {type: "string" minLength: 1 maxLength: 3000}}
@@ -1992,7 +1999,7 @@ fn agent_proposal_from(output, snapshot){
         memory_candidate: memory_candidate origin: -1}
 }
 fn agent_task(){
-    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存、阶段、菜单和对话。当前明确指令优先于软记忆；过敏与忌口是硬限制。库存批次按 food_id 区分，多个同名批次或缺少数量时选 none 并在 reply 追问。不修改档案；过敏、忌口、体重、目标修改指引档案页。只能输出一个 reply、tool_name、tool_args、memory_candidate 对象。reply 不得声称已修改、加入、删除、确认或记录。无需操作选 none、空对象和空 memory_candidate。库存添加用 propose_inventory_add，参数为 rows 数组，每行完整字符串字段 name、quantity_text、unit、package_size_text、package_size_unit、average_item_grams_text、remaining_days_text、printed_expires_on、kcal_text、protein_text、fiber_text、vitamin_c_text；所有行字段都是字符串，未知字段填空字符串，最多10行。库存编辑用 propose_inventory_edit，参数 food_id 与完整 row；请从 inventory_batches 的同一批次原字段构造完整替换行，数量写 quantity_text，单位写 unit，未提供的营养四项均填空串，名称与单位族保持不变。移除用 propose_inventory_remove，参数 food_id 与 reason。菜单生成或调整只使用 menu_candidates 中真实食材，参数为完整 feasible、reason、meals：恰好三餐，每餐 title、minutes、uses、steps；title 必须从 menu_title_options 选，steps 是 2–8 项 action、food_ids、minutes，action 从 menu_action_options 选。候选有 grams 时 uses 为 food_id 与 grams；候选只有 quantity 时 uses 为 food_id 与 quantity。三餐合计不能超库存。菜单已锁或阶段为空时选 none。实际摄入用 handoff_consumption，参数 text 和 food_hints 字符串数组，不把吃掉误当移除。工具仅提出待核对建议，不直接写入。memory_candidate 只可在菜单提案中给出与用户明确表达一致的普通饮食偏好，其他情况为空。"
+    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存、阶段、菜单和对话。当前 input 的已确认业务状态高于旧对话和摘要：旧助手说待核对，不代表用户后来没有确认；若当前库存已有对应批次，不得仍称该批次未写入。当前明确指令优先于软记忆；过敏与忌口是硬限制。库存批次按 food_id 区分，多个同名批次或缺少数量时选 none 并在 reply 追问。不修改档案；过敏、忌口、体重、目标修改指引档案页。只能输出一个 reply、tool_name、tool_args、memory_candidate 对象。reply 只用用户可读中文，不提 input 字段名、JSON 状态码或内部编号。reply 不得声称本轮待核对提案已修改、加入、删除、确认或记录。无需操作选 none、空对象和空 memory_candidate。库存添加用 propose_inventory_add，参数为 rows 数组，每行完整字符串字段 name、quantity_text、unit、package_size_text、package_size_unit、average_item_grams_text、remaining_days_text、printed_expires_on、kcal_text、protein_text、fiber_text、vitamin_c_text；所有行字段都是字符串，未知字段填空字符串，最多10行。库存编辑用 propose_inventory_edit，参数 food_id 与完整 row；请从 inventory_batches 的同一批次原字段构造完整替换行，数量写 quantity_text，单位写 unit，未提供的营养四项均填空串，名称与单位族保持不变。移除用 propose_inventory_remove，参数 food_id 与 reason。菜单生成或调整只使用 menu_candidates 中真实食材，参数为完整 feasible、reason、meals：恰好三餐，每餐 title、minutes、uses、steps；title 必须从 menu_title_options 选，steps 是 2–8 项 action、food_ids、minutes，action 从 menu_action_options 选。候选有 grams 时 uses 为 food_id 与 grams；候选只有 quantity 时 uses 为 food_id 与 quantity。三餐合计不能超库存。菜单已锁或阶段为空时选 none；确认任意一餐后今日菜单不能解锁或调整，reply 只能解释锁定并可建议明日，不得建议解锁。实际摄入用 handoff_consumption，参数 text 和 food_hints 字符串数组，不把吃掉误当移除。工具仅提出待核对建议，不直接写入。用户在菜单提案中明确请求确认后记住普通饮食偏好时，把原话中的偏好短句填入 memory_candidate；其他情况为空。只有该字段通过本地校验且菜单最终确认后才可能保存，reply 不得承诺一定记住。"
 }
 fn agent_schema(){
     {type: "object" properties: {
@@ -2027,12 +2034,26 @@ fn agent_valid_envelope(output){
 }
 fn agent_public_reply(value){
     let text = value
+    text = text.replace("menu_candidates", "当前可用食材")
+    text = text.replace("inventory_batches", "库存批次")
     for key in ["food_id" "batch_id" "menu_id" "stage_id"] {
         let id = key + "\\s*(?:[:：=]|为|是)\\s*\\d+"
         text = text.replace(regex("[（(]\\s*(?:内部\\s*)?" + id + "\\s*[）)]", "gi"), "")
         text = text.replace(regex("[,，]?\\s*(?:内部\\s*)?" + id, "gi"), "")
     }
     text.trim()
+}
+fn agent_safe_proposal_reply(reply, proposal){
+    let visible = agent_public_reply(reply)
+    if proposal == nil { return visible }
+    for claim in ["已记录" "已经记录" "已加入" "已经加入" "已添加" "已经添加"
+        "已修改" "已经修改" "已移除" "已经移除" "已删除" "已经删除"
+        "已确认" "已经确认" "已保存" "已经保存" "已更新" "已经更新"] {
+        if visible.search(claim) >= 0 {
+            return agent_proposal_title(proposal) + "；请核对，最终确认前不会修改业务数据。"
+        }
+    }
+    visible
 }
 fn agent_authority_marker(){
     let stage_id = 0
@@ -2201,7 +2222,7 @@ fn agent_received(envelope){
             agent_fail("建议参数未通过本地校验，请核对需求后重试；本轮没有修改数据。") return
         }
     }
-    let visible_reply = agent_public_reply(output.reply)
+    let visible_reply = agent_safe_proposal_reply(output.reply, proposal)
     if visible_reply == "" || agent_append("assistant", visible_reply) == 0 {
         agent_fail("保存回复失败，请重试。") return
     }
@@ -2222,11 +2243,11 @@ fn agent_proposal_title(proposal){
 fn agent_proposal_detail(proposal){
     if proposal.tool_name == "propose_inventory_add" { return "请逐项核对名称、数量、单位、保质期和营养参考。" }
     if proposal.tool_name == "propose_inventory_edit" { return "具体批次：" + proposal.food.name + " · " + proposal.food.quantity + proposal.food.unit }
-    if proposal.tool_name == "propose_inventory_remove" { return proposal.args.reason }
+    if proposal.tool_name == "propose_inventory_remove" { return "请核对具体批次和移除原因。" }
     if proposal.tool_name == "propose_menu_generate" || proposal.tool_name == "propose_menu_adjust" {
         return "早、中、晚三餐；约 " + meal_kcal(proposal.menu) + " kcal。点击后核对完整菜单。"
     }
-    proposal.args.text
+    "你的描述：" + proposal.user_text + " 点击后核对实际食用。"
 }
 fn agent_menu_review_active(){
     agent_review != nil && (agent_review.tool_name == "propose_menu_generate" ||
@@ -2268,7 +2289,7 @@ fn agent_open_review(){
     if name == "propose_inventory_remove" {
         tab = 2
         request_remove(agent_review.food.id)
-        message = "建议理由：" + agent_review.args.reason + "。请核对具体批次，再确认移除。"
+        message = "请核对具体批次，再确认移除。"
     }
     if name == "propose_menu_generate" || name == "propose_menu_adjust" {
         tab = 3
@@ -4287,7 +4308,9 @@ fn ai_failure(text){
     redraw()
 }
 fn recipe_display_text(text){
-    text.replace(regex("库存全部\\s*nutrition_known\\s*=\\s*false", "gi"), "库存食材都缺少营养参考")
+    text.replace("menu_candidates", "当前可用食材")
+        .replace("inventory_batches", "库存批次")
+        .replace(regex("库存全部\\s*nutrition_known\\s*=\\s*false", "gi"), "库存食材都缺少营养参考")
         .replace(regex("nutrition_known\\s*=\\s*false", "gi"), "营养参考不完整")
         .replace(regex("nutrition_known\\s*=\\s*true", "gi"), "有营养参考")
         .replace(regex("[ \\t]*food_id[ \\t]*[:=]?[ \\t]*\\d+[ \\t]*", "gi"), "相应批次")
@@ -6552,7 +6575,7 @@ View{width: Fill height: Fill flow: Overlay
                                     Frost{
                                         Heading{text: "确认实际食用"}
                                         if agent_review != nil && agent_review.tool_name == "handoff_consumption" {
-                                            Hint{text: "你的描述：" + agent_review.args.text + "。请按实际情况修改，建议不会自动扣库存。"}
+                                            Hint{text: "你的描述：" + agent_review.user_text + " 请按实际情况修改，建议不会自动扣库存。"}
                                         }
                                         Hint{text: "推荐菜单保留不变。库存外食物只计摄入；库存内按本次确认数量扣减。营养由 AI 自动估算，可用包装标签校正。"}
                                         actual_title_input := Field{text: actual_title empty_text: "实际餐食名称" on_change: |text| { actual_title = text }}
@@ -6979,7 +7002,7 @@ View{width: Fill height: Fill flow: Overlay
                                         }
                                         Hint{text: model_status}
                                         Hint{text: "启用在线 AI 后，相关食材、菜单所需档案或所选图片会发送给宿主配置的模型提供方。"}
-                                        Hint{text: "模型密钥只在 OctoSense 的 AI 提供方设置中填写。本版本不读取 ai.env；语音识别暂不可用。"}
+                                        Hint{text: "模型密钥只在 OctoSense 的 AI 提供方设置中填写。本版本不读取 ai.env；本地宿主支持主动录音转写，官方宿主保留文字输入。"}
                                         View{width: Fill height: Fit flow: Right spacing: 8
                                             let model_button = "关闭在线 AI"
                                             if !use_ai { model_button = "启用在线 AI" }

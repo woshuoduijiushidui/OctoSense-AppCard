@@ -378,6 +378,8 @@ fn main() {
             assert(agent_memory_after_confirm(m, "库存还有米", "库存还有米", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "今天少放辣", "今天少放辣", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "少放辣", "今天少放辣", true, true, 100) == nil)
+            assert(agent_memory_after_confirm(m, "偏好清淡", "我平时偏好清淡，请生成今天一份完整三餐", true, true, 100) != nil)
+            assert(agent_memory_after_confirm(m, "偏好清淡", "今天想吃清淡一点，请生成一份三餐", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "少放辣", "花生过敏，平时少放辣", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "米饭", "今晚想吃米饭", true, true, 100) == nil)
             assert(agent_memory_after_confirm(m, "少放辣", "模型建议少放辣", true, true, 100) == nil)
@@ -719,6 +721,11 @@ fn main() {
             assert(agent_task().len() < 4096)
             assert(agent_public_reply("豆腐（food_id: 7）请核对") == "豆腐请核对")
             assert(agent_public_reply("豆腐 230 克，内部 food_id 为 1。") == "豆腐 230 克。")
+            assert(agent_public_reply("menu_candidates 里的菠菜") == "当前可用食材 里的菠菜")
+            let handoff = {tool_name: "handoff_consumption"}
+            assert(agent_safe_proposal_reply("已记录午餐菠菜 80g", handoff) ==
+                "建议记录实际食用；请核对，最终确认前不会修改业务数据。")
+            assert(agent_safe_proposal_reply("请核对午餐菠菜", handoff) == "请核对午餐菠菜")
             agent_load_session()
             let row = {name: "鸡蛋" quantity_text: "2" unit: "个" package_size_text: ""
                 package_size_unit: "" average_item_grams_text: "" remaining_days_text: "2"

@@ -1,5 +1,76 @@
 # Migration validation
 
+## Issue #3 M6 end-to-end checkpoint — 2026-10-13
+
+The Issue #3 candidate uses one Pantry bundle in two isolated Windows host
+profiles. Final source digest: `ee11ba0571780a3351473261c5e0a590f2cc6f74d18441d529d88c878737cb81`.
+The pinned Hub stamp/check passed with the expected unsigned warning. The
+production Agent still uses the host model service and the existing inventory,
+three-meal menu and intake confirmation paths. M6 tightened durable preference
+filtering, current-state precedence in compressed conversations, user-readable
+proposal cards and reply text, and a deterministic fallback when a model
+incorrectly describes an unconfirmed proposal as already recorded. Settings
+now describe the local voice capability and official text fallback accurately.
+
+- **Unit/fixture:** `python -X utf8 -m unittest discover -s tools -p 'test_*.py'`
+  passed 36/36 with a task-owned Windows temporary directory. The production
+  Script VM cases include durable preference versus a one-off meal request and
+  a false `已记录` model reply while an intake proposal remains unconfirmed.
+  `python -X utf8 tools/launch.py --host-workspace ..\OctoSense --check --offline`
+  passed. The final bundle version remains 0.8.0.
+- **Official native, isolated, AI disabled:** `tools/smoke.py --m6-offline`
+  passed 19 checks on a fresh profile: six-cycle onboarding, camera/import
+  fallback, manual stock entry, separate batches, edit/remove, settings and
+  no fabricated menu when online AI is disabled. After host quit/relaunch,
+  `--restart` passed 2 exact-state and home checks. The historical
+  `--legacy-flow` path still assumes a removed local-rule menu switch and was not used
+  as evidence for menu or intake; those paths were exercised separately.
+- **Menu shortage and simulated market, isolated fixture:** a copy of the
+  accepted synthetic three-meal state had spinach reduced to 100 g in a
+  task-owned profile. The Menu page derived `还差 100 克` from 200 g planned
+  use, with no intake record or stock deduction. `一键补齐` carried that gap
+  into one spinach cart line and one pack; submitting a confirmed simulated
+  order left stock revision 10, spinach 100 g and execution count zero.
+  Restart kept an identical `pantry.json` SHA-256. Confirmed receipt then
+  created a separate 300 g spinach batch, set the order to `已收货`, and left
+  execution count zero. The Menu page re-derived `库存够，不用买`; a second
+  restart again preserved the exact state. The order/receipt check used a
+  synthetic stock mutation, not a real purchase or a model response.
+- **Official native, real provider:** on the prior M6 build, the same-day Agent
+  continued across Home, Inventory and Menu; 11 messages survived an official
+  host restart with the same session digest. The unsupported microphone path
+  showed the exact text fallback and created no WAV. A two-egg proposal wrote
+  nothing before review and one inventory event after final confirmation; an
+  ambiguous egg-batch edit asked which batch without a proposal. At 17
+  messages, context compaction advanced its summary cursor while the visible
+  conversation remained. A complete three-meal proposal wrote no stock before
+  confirmation; acceptance saved the menu without deducting inventory. A
+  separately requested `偏好清淡` was saved as soft memory only after accepting
+  its menu, and the next real answer saw it. Task-owned synthetic spinach,
+  mushrooms and tofu were seeded only inside that isolated app-data to make a
+  three-meal menu feasible. The final-digest official text probe received the
+  host `rate`/budget error, retained the unsent draft and made no business
+  write; a final-digest real-provider reply is therefore unverified.
+- **Local native, real provider and device:** an earlier M6 build used a real
+  Windows microphone and configured MiniMax ASR. The person edited its mixed
+  Chinese/English transcript before pressing Send. The resulting real Agent
+  reply said today's menu was locked and suggested tomorrow; inventory
+  revision 11 and one confirmed execution record remained unchanged. A real
+  intake handoff opened the existing review; after removing an unwanted
+  prefilled food and confirming breakfast tofu, stock changed once and the
+  three-meal plan remained locked. A later lunch handoff was cancelled and
+  appended a local result without a business write. The final-digest local
+  host was installed, but the repeat live microphone Send has not yet received
+  a user result at this checkpoint. Its device/provider retest is unverified.
+- **OctoSense:** `cargo test --locked --offline -p octosense-llm-service
+  --test media --quiet` passed 28 cases; `cargo test --locked --offline
+  -p octosense-shell --features app-hub --lib audio_service --quiet` passed 8;
+  `cargo check --locked --offline -p octosense` and
+  `python tools/setup.py --check --cargo` passed. The shell test without
+  `app-hub` selected zero cases and is not counted. Windows speaker playback,
+  hosted CI and sealed Store publication were not tested.
+
+
 ## Issue #3 M3 本地提案与业务确认集成 — 2026-10-13
 
 在 `feat/issue-3-global-agent-voice` 上接入七个文字 Agent 工具值：`none`、库存
