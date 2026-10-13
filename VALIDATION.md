@@ -1,5 +1,32 @@
 # Migration validation
 
+## Issue #3 PR review repair — 2026-10-13
+
+The Agent menu tools now return a bounded, editable `goal` intent. After the
+person confirms it, the existing Issue #5 `online_plan_ready()` path generates
+the full three-meal candidate from the current profile, stage and inventory.
+The Menu page still requires a separate `accept()`; confirming the Agent
+intent writes no menu or stock. A durable preference candidate is carried
+only to that final acceptance. The production Script VM covers this sequence,
+including zero business writes at intent confirmation and no stock deduction
+at menu acceptance.
+
+The restamped 0.8.0 bundle digest is
+`c9b53e985367ece6f37f6e2cd66331bbb9e7142b0ee570e14624fc03b5099c0a`.
+The pinned Hub `stamp` and `check --allow-unsigned` passed. The full Python
+suite passed 36/36; its Agent VM test ran all 38 production-function cases
+without a skip. On the exact digest, the full modified Windows desktop host
+verified local signatures, digest and admission, then the isolated native
+`--m6-offline` smoke passed 19 checks. The installed app opened the Agent
+panel and showed editable input, microphone and Send. After host quit and
+relaunch, the native restart smoke passed 2 checks. This is full-host
+admission and offline UI evidence, with task-owned synthetic data.
+
+A live provider/menu-intent replay, a microphone replay, and an unmodified
+official-host install were **not run on this digest**. Earlier provider and
+device evidence below belongs to earlier digests. The code-side text fallback
+remains available when speech methods or the provider are unavailable.
+
 ## Issue #3 PR baseline sync — 2026-10-13
 
 The Issue #3 branch merged `origin/main` at `900c0c3`, retaining the current

@@ -97,6 +97,7 @@ let agent_error = ""
 let agent_clear_pending = false
 let agent_history_end = 0
 let agent_memory_pending = nil
+let agent_menu_intent_memory = nil
 let agent_proposal = nil
 let agent_review = nil
 let agent_answer_input = nil
@@ -1976,7 +1977,7 @@ fn agent_proposal_from(output, snapshot){
     let args = output.tool_args
     let rows = []
     let food = nil
-    let menu = nil
+    let intent = ""
     let memory_candidate = output.memory_candidate
     if name == "propose_inventory_add" {
         if !agent_exact_keys(args, ["rows"]) || !args.rows.is_array() ||
@@ -2025,8 +2026,11 @@ fn agent_proposal_from(output, snapshot){
         if name == "propose_menu_adjust" && agent_today_menu().menu_id == 0 {
             ai_validation_error = "当前没有已接受菜单可调整。" return nil
         }
-        menu = agent_menu_from_output(args, snapshot.message_text)
-        if menu == nil { return nil }
+        if !agent_exact_keys(args, ["goal"]) || !args.goal.is_string() ||
+            args.goal.trim() == "" || args.goal.to_chars().len() > 500 {
+            ai_validation_error = "菜单要求需要一段不超过 500 字的待核对文字。" return nil
+        }
+        intent = args.goal.trim()
         if memory_candidate != "" && !agent_allowed_preference(memory_candidate, snapshot.message_text) {
             memory_candidate = ""
         }
@@ -2043,12 +2047,12 @@ fn agent_proposal_from(output, snapshot){
             }
         }
     }
-    {tool_name: name args: args rows: rows food: food menu: menu
+    {tool_name: name args: args rows: rows food: food intent: intent
         marker: agent_marker(snapshot) user_text: snapshot.message_text
         memory_candidate: memory_candidate origin: -1}
 }
 fn agent_task(){
-    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存、阶段、菜单和对话。当前 input 的已确认业务状态高于旧对话和摘要：旧助手说待核对，不代表用户后来没有确认；若当前库存已有对应批次，不得仍称该批次未写入。当前明确指令优先于软记忆；过敏与忌口是硬限制。库存批次按 food_id 区分，多个同名批次或缺少数量时选 none 并在 reply 追问。不修改档案；过敏、忌口、体重、目标修改指引档案页。只能输出一个 reply、tool_name、tool_args、memory_candidate 对象。reply 只用用户可读中文，不提 input 字段名、JSON 状态码或内部编号。提到库存到期时用 expiry_date 和 expiry_status，不输出 expires_on_day 日序号；提到库存数量时用 quantity_label，piece 对用户说“个”；解释营养不足时用日常中文，不提 menu_candidates、nutrition_kcal、uses 等字段名。reply 不得声称本轮待核对提案已修改、加入、删除、确认或记录。无需操作选 none、空对象和空 memory_candidate。库存添加用 propose_inventory_add，参数为 rows 数组，每行完整字符串字段 name、quantity_text、unit、package_size_text、package_size_unit、average_item_grams_text、remaining_days_text、printed_expires_on、kcal_text、protein_text、fiber_text、vitamin_c_text；所有行字段都是字符串，未知字段填空字符串，最多10行。库存编辑用 propose_inventory_edit，参数 food_id 与完整 row；请从 inventory_batches 的同一批次原字段构造完整替换行，数量写 quantity_text，单位写 unit，未提供的营养四项均填空串，名称与单位族保持不变。移除用 propose_inventory_remove，参数 food_id 与 reason。菜单生成或调整只使用 menu_candidates 中真实食材，参数为完整 feasible、reason、meals：恰好三餐，每餐 title、minutes、uses、steps；title 必须从 menu_title_options 选，steps 是 2–8 项 action、food_ids、minutes，action 从 menu_action_options 选。候选有 grams 时 uses 为 food_id 与 grams；候选只有 quantity 时 uses 为 food_id 与 quantity。三餐合计不能超库存。菜单已锁或阶段为空时选 none；确认任意一餐后今日菜单不能解锁或调整，reply 只能解释锁定并可建议明日，不得建议解锁。实际摄入用 handoff_consumption，参数 text 和 food_hints 字符串数组，不把吃掉误当移除。工具仅提出待核对建议，不直接写入。用户在菜单提案中明确请求确认后记住普通饮食偏好时，把原话中的偏好短句填入 memory_candidate；其他情况为空。只有该字段通过本地校验且菜单最终确认后才可能保存，reply 不得承诺一定记住。"
+    "你是冰箱管家的中文文字助手。只使用 input 中已确认的档案、库存、阶段、菜单和对话。当前 input 的已确认业务状态高于旧对话和摘要：旧助手说待核对，不代表用户后来没有确认；若当前库存已有对应批次，不得仍称该批次未写入。当前明确指令优先于软记忆；过敏与忌口是硬限制。库存批次按 food_id 区分，多个同名批次或缺少数量时选 none 并在 reply 追问。不修改档案；过敏、忌口、体重、目标修改指引档案页。只能输出一个 reply、tool_name、tool_args、memory_candidate 对象。reply 只用用户可读中文，不提 input 字段名、JSON 状态码或内部编号。提到库存到期时用 expiry_date 和 expiry_status，不输出 expires_on_day 日序号；提到库存数量时用 quantity_label，piece 对用户说“个”；解释营养不足时用日常中文，不提 menu_candidates、nutrition_kcal、uses 等字段名。reply 不得声称本轮待核对提案已修改、加入、删除、确认或记录。无需操作选 none、空对象和空 memory_candidate。库存添加用 propose_inventory_add，参数为 rows 数组，每行完整字符串字段 name、quantity_text、unit、package_size_text、package_size_unit、average_item_grams_text、remaining_days_text、printed_expires_on、kcal_text、protein_text、fiber_text、vitamin_c_text；所有行字段都是字符串，未知字段填空字符串，最多10行。库存编辑用 propose_inventory_edit，参数 food_id 与完整 row；请从 inventory_batches 的同一批次原字段构造完整替换行，数量写 quantity_text，单位写 unit，未提供的营养四项均填空串，名称与单位族保持不变。移除用 propose_inventory_remove，参数 food_id 与 reason。菜单生成或调整只输出待核对意图，tool_args 仅有 goal 字符串，不生成三餐明细；goal 用用户可读中文概括当前要求，最多 500 字，保留本轮调整和明确限制。用户确认意图后由菜单模块根据当前档案、阶段和库存重新生成，菜单页还要再次核对接受。菜单已锁或阶段为空时选 none；确认任意一餐后今日菜单不能解锁或调整，reply 只能解释锁定并可建议明日，不得建议解锁。实际摄入用 handoff_consumption，参数 text 和 food_hints 字符串数组，不把吃掉误当移除。工具仅提出待核对建议，不直接写入。用户在菜单提案中明确请求确认后记住普通饮食偏好时，把原话中的偏好短句填入 memory_candidate；其他情况为空。只有该字段通过本地校验且菜单最终确认后才可能保存，reply 不得承诺一定记住。"
 }
 fn agent_schema(){
     {type: "object" properties: {
@@ -2317,7 +2321,7 @@ fn agent_proposal_detail(proposal){
     if proposal.tool_name == "propose_inventory_edit" { return "具体批次：" + proposal.food.name + " · " + proposal.food.quantity + proposal.food.unit }
     if proposal.tool_name == "propose_inventory_remove" { return "请核对具体批次和移除原因。" }
     if proposal.tool_name == "propose_menu_generate" || proposal.tool_name == "propose_menu_adjust" {
-        return "早、中、晚三餐；约 " + meal_kcal(proposal.menu) + " kcal。点击后核对完整菜单。"
+        return "菜单要求：" + agent_public_reply(proposal.intent) + "。点击后核对要求，再交给菜单模块生成。"
     }
     "你的描述：" + agent_public_reply(proposal.user_text) + " 点击后核对实际食用。"
 }
@@ -2365,7 +2369,8 @@ fn agent_open_review(){
     }
     if name == "propose_menu_generate" || name == "propose_menu_adjust" {
         tab = 3
-        message = "请核对早、中、晚三餐；确认前不会保存新菜单或扣减库存。"
+        goal = agent_review.intent
+        message = "请核对或修改菜单要求；确认后由菜单模块生成候选，接受前不会扣库存。"
     }
     if name == "handoff_consumption" {
         tab = 3
@@ -2410,19 +2415,22 @@ fn agent_confirm_menu_review(){
     if !agent_marker_matches(agent_review.marker) || agent_today_menu().locked {
         agent_finish_review("状态已变化，菜单建议失效；正式菜单未修改。") return
     }
-    let draft = agent_review.menu
-    if !validate(draft) || menu_issue(draft) != "" {
-        agent_finish_review("库存、阶段或营养条件已变化；菜单建议失效。") return
+    if goal.trim() == "" || goal.to_chars().len() > 500 {
+        message = "菜单要求不能为空且不得超过 500 字。" redraw() return
     }
-    let p = save_day_menu(draft.meals, draft.reason, "问管家", true)
-    if p == nil { agent_finish_review("菜单保存失败，请核对当前状态后重试。") return }
-    if agent_review.memory_candidate != "" {
-        agent_memory_pending = {menu_id: p.id day: today_day() menu_meals: p.meals.to_json()
-            user_text: agent_review.user_text candidate: agent_review.memory_candidate}
+    if state.paused || pending || plan_removal != nil || storage_blocked {
+        message = "请先恢复管家并完成当前核对，再生成菜单。" redraw() return
     }
-    accept()
-    if p.accepted { agent_finish_review("已确认今日三餐菜单；库存没有提前扣减。") }
-    else { agent_finish_review("菜单未能接受，请在菜单页核对原因。") }
+    if !online_ready() { redraw() return }
+    let confirmed = goal.trim()
+    agent_menu_intent_memory = {goal: confirmed day: today_day()
+        profile_revision: state.profile_revision inventory_revision: state.revision
+        candidate: agent_review.memory_candidate user_text: agent_review.user_text}
+    agent_finish_review("已确认菜单要求；请在菜单页核对生成结果，接受前不会扣库存。")
+    tab = 3 goal = confirmed
+    online_plan_ready("用户请求")
+    if !ai_busy { agent_menu_intent_memory = nil }
+    redraw()
 }
 fn agent_watchdog(){
     if agent_reply != nil {
@@ -4335,6 +4343,7 @@ fn toggle_voice(){
 fn stop_ai(){
     ai_sequence = ai_sequence + 1
     ai_busy = false
+    agent_menu_intent_memory = nil
 }
 fn cancel_ai(){ stop_ai() message = "已停止等待，库存未变化。后台请求可能仍会计费，请稍候再生成。" redraw() }
 fn automatic_reason(reason){
@@ -4371,6 +4380,7 @@ fn toggle_model(){
 }
 fn ai_failure(text){
     ai_busy = false ai_error = text message = text
+    agent_menu_intent_memory = nil
     if text.search("no_provider") >= 0 {
         ai_phase = 2
         message = "宿主未配置可用模型，请到 OctoSense 的 AI 提供方设置配置后重新生成。"
@@ -4479,16 +4489,9 @@ fn build_ai_menu(output, requested_goal, recipe_only){
         nil
     }
 }
-fn agent_menu_from_output(output, requested_goal){
-    let recipe_only = true
-    for food in state.foods { if auto_plan_eligible(food) { recipe_only = false } }
-    let p = build_ai_menu(output, requested_goal, recipe_only)
-    if p == nil { return nil }
-    if menu_issue(p) != "" { ai_validation_error = menu_issue(p) return nil }
-    p
-}
 fn save_ai_result(output, reason, requested_goal){
     if output.feasible != true {
+        agent_menu_intent_memory = nil
         ai_error = "这次要求无法满足：" + recipe_display_text(output.reason)
         message = ai_error
         return true
@@ -4500,9 +4503,23 @@ fn save_ai_result(output, reason, requested_goal){
         state.plans.push(p) state.next_id = state.next_id + 1
         prune_menus()
         record(reason + " → 在线 AI → JSON 与库存用量校验 → 生成日菜单 #" + p.id)
-        if !commit(before) { return true }
+        if !commit(before) { agent_menu_intent_memory = nil return true }
         agent_ensure_today()
-        agent_stage_menu_memory(p, requested_goal, reason)
+        let handoff = agent_menu_intent_memory
+        agent_menu_intent_memory = nil
+        let from_agent = handoff != nil && handoff.goal == requested_goal && handoff.day == today_day() &&
+            handoff.profile_revision == state.profile_revision &&
+            handoff.inventory_revision == state.revision
+        agent_memory_pending = nil
+        if from_agent {
+            if handoff.candidate != "" && requested_goal.search(handoff.candidate) >= 0 &&
+                agent_allowed_preference(handoff.candidate, handoff.user_text) {
+                agent_memory_pending = {menu_id: p.id day: today_day() menu_meals: p.meals.to_json()
+                    user_text: handoff.user_text candidate: handoff.candidate}
+            }
+        } else {
+            agent_stage_menu_memory(p, requested_goal, reason)
+        }
         selected = state.plans.len() - 1
         ai_error = ""
         message = "AI 已生成今日早、中、晚三餐菜单。"
@@ -4534,6 +4551,7 @@ fn apply_model_reply(envelope){
         ai_busy = false ai_sequence = ai_sequence + 1
         let current = current_stage()
         if (!state.auto_generate && automatic_reason(ai_snapshot.reason)) || plan_removal != nil || current == nil || current.id != ai_snapshot.program_id || current.consumed_kcal != ai_snapshot.consumed_kcal || state.profile_revision != ai_snapshot.profile_revision || state.revision != ai_snapshot.revision || state.offset != ai_snapshot.offset || goal != ai_snapshot.goal || state.paused || !use_ai || pending {
+            agent_menu_intent_memory = nil
             ai_error = "等待期间库存、目标或运行状态变化，已丢弃旧结果。请重新生成。"
             message = ai_error redraw() return
         }
@@ -6706,18 +6724,10 @@ View{width: Fill height: Fill flow: Overlay
                                 if tab == 3 && !is_experience() && !pending {
                                     if agent_menu_review_active() {
                                         Frost{padding: 22 spacing: 12
-                                            Heading{text: "核对 Agent 的今日三餐建议"}
-                                            Hint{text: "这是内存草稿；最终确认前不会保存正式菜单或扣减库存。"}
-                                            Copy{text: recipe_display_text(agent_review.menu.reason)}
-                                            for meal in agent_review.menu.meals {
-                                                Tint{draw_bg.color: #f4f0e9
-                                                    Copy{text: meal.slot + " · " + meal.title}
-                                                    for item in meal.uses { Hint{text: item.name + " · " + use_amount_text(item)} }
-                                                    Copy{text: recipe_display_text(meal.steps)}
-                                                }
-                                            }
-                                            Hint{text: "三餐营养约 " + meal_kcal(agent_review.menu) + " kcal；库存分配与忌口由本地再次校验。"}
-                                            Action{text: "确认今日三餐菜单" on_click: || agent_confirm_menu_review()}
+                                            Heading{text: "核对菜单要求"}
+                                            Hint{text: "确认后才交给菜单模块重新生成候选；生成结果仍需在此页核对并接受。"}
+                                            agent_menu_goal := Field{text: goal empty_text: "请写出本次菜单要求" on_change: |text| { goal = text }}
+                                            Action{text: "确认要求并生成候选" enabled: !ai_busy on_click: || agent_confirm_menu_review()}
                                             Soft{text: "取消建议" on_click: || agent_finish_review("已取消菜单建议；正式菜单和库存没有变化。")}
                                         }
                                     }

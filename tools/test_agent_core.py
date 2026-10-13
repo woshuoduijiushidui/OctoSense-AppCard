@@ -42,7 +42,7 @@ CASES = (
     "proposal_specific_batch_and_handoff",
     "proposal_menu_lock_and_revision",
     "proposal_menu_one_correction",
-    "proposal_menu_confirm_memory",
+    "proposal_menu_confirmed_intent_handoff",
     "voice_fallback_and_transcript_draft",
     "voice_rate_retries_before_permission",
     "voice_late_status_cannot_hide_stop",

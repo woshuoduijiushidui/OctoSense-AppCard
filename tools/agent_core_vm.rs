@@ -50,6 +50,7 @@ fn main() {
         let agent_clear_pending = false
         let agent_history_end = 0
         let agent_memory_pending = nil
+        let agent_menu_intent_memory = nil
         let agent_proposal = nil
         let agent_review = nil
         let agent_answer_input = nil
@@ -74,13 +75,16 @@ fn main() {
             take_key_focus: || { ui_state.focused = true }
         }}
         let ai_validation_error = ""
+        let ai_error = ""
+        let ai_snapshot = nil
         let goal = ""
+        let handoff_calls = []
         let selected = 0
         let message = ""
         let state = {profile: {done: true scene: "日常健康" sex: "女" age: "30" height: "165"
             weight: "60" activity: "轻活动" allergies: "" avoidances: "" preferences: "" special: ""}
             foods: [] plans: [] stages: [] execution_records: [] active: 0
-            next_id: 1 revision: 1 profile_revision: 1}
+            next_id: 1 revision: 1 profile_revision: 1 paused: false}
         let disk = {session: "" memory: "" voice: false fail: false}
         let fs = {
             exists: |path| { if path == "agent-session.json" { disk.session != "" }
@@ -143,6 +147,12 @@ fn main() {
         fn record(text){ }
         fn commit(before){ true }
         fn redraw(){ }
+        fn online_ready(){ true }
+        fn online_plan_ready(reason){
+            handoff_calls.push({reason: reason goal: goal})
+            ai_snapshot = {recipe_only: false}
+            ai_busy = true
+        }
     "#;
     let cases: &[(&str, &str)] = &[
         ("session_restart_and_local", r#"
@@ -885,31 +895,23 @@ fn main() {
             state.foods = [{id: 7 name: "豆腐" canonical_quantity: 300 canonical_unit: "g" eligible: true}]
             let snap = {day: 100 profile_revision: 1 inventory_revision: 1
                 authority: agent_authority_marker() message_text: "安排三餐"}
-            let step1 = {action: "清洗" food_ids: [7] minutes: 1}
-            let step2 = {action: "充分煮熟" food_ids: [7] minutes: 10}
-            let menu = {feasible: true reason: "家常" meals: [
-                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 50}] steps: [step1 step2]}
-                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 60}] steps: [step1 step2]}
-                {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 70}] steps: [step1 step2]}]}
             let output = {reply: "请核对" tool_name: "propose_menu_generate"
-                tool_args: menu memory_candidate: ""}
+                tool_args: {goal: "安排清淡三餐"} memory_candidate: ""}
             let before = state.to_json()
             let proposal = agent_proposal_from(output, snap)
-            assert(proposal != nil && proposal.menu.meals.len() == 3)
-            assert(proposal.menu.meals[0].slot == "早餐" && state.to_json() == before)
+            assert(proposal != nil && proposal.intent == "安排清淡三餐")
+            assert(state.to_json() == before)
             assert(agent_marker_matches(proposal.marker))
             state.revision = 2
             assert(!agent_marker_matches(proposal.marker))
             state.revision = 1
-            output.tool_args = {feasible: true reason: "家常" meals: [menu.meals[0]]}
+            output.tool_args = {goal: ""}
             assert(agent_proposal_from(output, snap) == nil)
-            output.tool_args = menu.to_json().parse_json()
-            output.tool_args.meals[0].uses[0].grams = 301
+            output.tool_args = {goal: "要求" extra: true}
             assert(agent_proposal_from(output, snap) == nil)
-            output.tool_args = menu
-            output.tool_args = {feasible: true reason: "家常" meals: "wrong"}
+            output.tool_args = {goal: 7}
             assert(agent_proposal_from(output, snap) == nil)
-            output.tool_args = menu
+            output.tool_args = {goal: "安排清淡三餐"}
             state.execution_records.push({day: 100})
             assert(agent_proposal_from(output, snap) == nil)
             state.execution_records = []
@@ -937,7 +939,7 @@ fn main() {
             agent_send()
             assert(calls == 1 && agent_phase == "answering")
             let invalid = {reply: "请核对" tool_name: "propose_menu_generate"
-                tool_args: {feasible: true reason: "家常" meals: []} memory_candidate: ""}
+                tool_args: {goal: ""} memory_candidate: ""}
             callback({is_ok: true data: {output: invalid}})
             agent_watchdog()
             assert(calls == 2 && agent_correction == 1 && agent_phase == "answering")
@@ -947,34 +949,44 @@ fn main() {
             assert(agent_session.messages.len() == 1 && state.plans.len() == 0)
             true
         "#),
-        ("proposal_menu_confirm_memory", r#"
+        ("proposal_menu_confirmed_intent_handoff", r#"
             state.stages = [{id: 4 daily_kcal: 1800}]
             state.foods = [{id: 7 name: "豆腐" canonical_quantity: 300 canonical_unit: "g" eligible: true}]
             agent_load_session()
             agent_memory = agent_empty_memory()
+            let marker = {day: 100 profile_revision: 1 inventory_revision: 1
+                authority: agent_authority_marker()}
+            assert(agent_marker_matches(marker))
+            agent_review = {tool_name: "propose_menu_generate" marker: marker intent: "平时少油安排三餐"
+                user_text: "平时少油安排三餐" memory_candidate: "少油" origin: 2}
+            goal = "平时少油安排三餐"
+            pending = true
+            agent_confirm_menu_review()
+            assert(handoff_calls.len() == 0 && agent_review != nil && state.plans.len() == 0)
+            pending = false
+            let foods_before = state.foods.to_json()
+            agent_confirm_menu_review()
+            assert(handoff_calls.len() == 1)
+            assert(handoff_calls[0].reason == "用户请求")
+            assert(handoff_calls[0].goal == "平时少油安排三餐")
+            assert(state.plans.len() == 0)
+            assert(state.foods.to_json() == foods_before)
+            assert(agent_memory.items.len() == 0)
+            assert(tab == 3 && agent_review == nil)
             let step1 = {action: "清洗" food_ids: [7] minutes: 1}
             let step2 = {action: "充分煮熟" food_ids: [7] minutes: 10}
             let output = {feasible: true reason: "少油家常" meals: [
                 {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 50}] steps: [step1 step2]}
                 {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 60}] steps: [step1 step2]}
                 {title: "水煮" minutes: 20 uses: [{food_id: 7 grams: 70}] steps: [step1 step2]}]}
-            let draft = agent_menu_from_output(output, "平时少油安排三餐")
-            assert(draft != nil)
-            let marker = {day: 100 profile_revision: 1 inventory_revision: 1
-                authority: agent_authority_marker()}
-            assert(agent_marker_matches(marker))
-            assert(menu_issue(draft) == "" && validate(draft))
-            agent_review = {tool_name: "propose_menu_generate" marker: marker menu: draft
-                user_text: "平时少油安排三餐" memory_candidate: "少油" origin: 2}
-            let foods_before = state.foods.to_json()
-            agent_confirm_menu_review()
-            assert(state.plans.len() == 1)
-            assert(state.plans[0].accepted)
-            assert(state.active == state.plans[0].id)
-            assert(state.foods.to_json() == foods_before)
-            assert(agent_memory.items.len() == 1)
-            assert(agent_memory.items[0].text == "少油")
-            assert(tab == 2 && agent_review == nil)
+            assert(build_ai_menu(output, goal, false) != nil)
+            assert(save_ai_result(output, "用户请求", goal))
+            assert(state.plans.len() == 1 && !state.plans[0].accepted)
+            assert(agent_memory_pending != nil && agent_memory_pending.candidate == "少油")
+            ai_busy = false
+            accept()
+            assert(state.plans[0].accepted && state.foods.to_json() == foods_before)
+            assert(agent_memory.items.len() == 1 && agent_memory.items[0].text == "少油")
             true
         "#),
         ("voice_fallback_and_transcript_draft", r#"

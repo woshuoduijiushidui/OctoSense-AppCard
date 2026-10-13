@@ -1,15 +1,19 @@
 # Working on Pantry Steward
 
-This is a non-system script app, migrated to the unmodified official OctoSense.
-Keep the id pantry-steward; do not pack it as an os.* system app or patch the
-shell to provide this app with additional privileges.
+This is a non-system script app. Keep the id pantry-steward and do not pack it
+as an os.* system app. The unmodified official OctoSense remains the text-only
+fallback; the companion OctoSense Issue #3 branch adds general Windows
+microphone and model-transcription APIs for installed apps with normal grants.
+Changes to that host belong in its separate repository and PR.
 
 - Application behaviour lives in bundle/main.splash. Only bundle/ is submitted.
 - No secrets, login or secret-input fields in the bundle. AI credentials are
   entered only on the host-owned AI providers panel. Never copy ai.env.
 - The official model.budget reports usage, not provider readiness.
-- Speech recognition is unavailable in this tested host. Do not silently
-  restore custom microphone calls or claim the icon records audio.
+- Speech recognition is optional and must be discovered on the running host.
+  The companion Windows host has a bounded, foreground-only microphone and
+  transcription path. On a host without those methods or a configured ASR
+  provider, keep editable text input and state that recording is unavailable.
 - Use tools/launch.py --check and tools/test_launch.py. Native UI regression:
   tools/smoke.py in a task-owned hidden official shell with separate --app-data.
   Never reuse a person's normal inventory for testing.

@@ -30,6 +30,8 @@ Generation is manual by default. Optional automatic generation must be enabled i
 
 [Three-meal day menu and 缺菜清单](bundle/screenshots/02-plan.png) · [缺菜清单 with an editable gap](bundle/screenshots/03-confirm.png) · [Inventory](bundle/screenshots/04-updated.png)
 
+[Issue #3 Agent panel with an editable voice draft](docs/qa/issue-3-agent-panel.png)
+
 The four captures are current 0.8.0 captures from a hidden Windows card-host with synthetic inventory (1200x800): 首页; the three-meal day menu (早/中/晚) with its derived 缺菜清单; the 缺菜清单 showing 还差 952 克 with an editable quantity and the 一键补齐 entry; and the inventory batch list. The recording is the historical 0.7.0 manual-flow video. More synthetic-data captures: [home](docs/qa/issue-2-home-after.png), [profile editing](docs/qa/issue-2-profile-edit-after.png), [inventory](docs/qa/issue-2-inventory-after.png), [local-host image chooser](docs/qa/issue-2-image-chooser-after.png), [official-host fallback](docs/qa/issue-2-official-fallback-after.png), [recipe](docs/qa/issue-2-recipe-after.png), [consumption review](docs/qa/issue-2-consumption-after.png), the [模拟买菜 region](docs/qa/issue-25-market.png), its [待核对购物车 with 无匹配/可售不足 flags and a simulated total](docs/qa/issue-26-cart.png), the [same-category 替换 list](docs/qa/issue-26-replace.png), and the [submitted 模拟订单 showing 待收货](docs/qa/issue-27-order.png), and the [确认收货 quantity/保质期 check](docs/qa/issue-28-receive.png). The captures illustrate the UI only; they do not prove live image recognition, Store publication, or a live provider response. Recording a new video is outside this PR.
 
 ## Windows source launch
